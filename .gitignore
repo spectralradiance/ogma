@@ -1,0 +1,13 @@
+
+
+
+.venv
+/data/input
+/data/intermediary
+/data/output
+/junk
+
+__pycache__
+
+code/train_ai/unsloth_compiled_cache/
+
