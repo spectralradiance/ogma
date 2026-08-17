@@ -11,3 +11,11 @@ sentence-transformers>=3.0.0
 # Data
 pandas>=2.0.0
 tqdm>=4.66.0
+
+# API
+fastapi>=0.141.0
+uvicorn[standard]>=0.52.0
+
+# Testing
+httpx>=0.28.0
+pytest>=9.0.0

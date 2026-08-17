@@ -40,6 +40,26 @@ The pipeline bridges these two artefacts. It embeds the notes into a searchable 
 
 ## Usage
 
+### Web application
+
+Start the persistent Python API:
+
+```
+python -m uvicorn api.main:app --reload --port 8000
+```
+
+In a second terminal, start the React interface:
+
+```
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The web console exposes index status and reindexing, book and outline-cache selection, timestamped manuscript runs, live SSE job logs, cancellation, run history, and generated outline/manuscript viewing. GPU jobs are serialized by the backend so model processes do not compete for VRAM.
+
+Backend checks run with `python -m pytest`; frontend checks run with `npm run lint` and `npm run build` from `frontend`.
+
 ### Interactive CLI
 
 ```
