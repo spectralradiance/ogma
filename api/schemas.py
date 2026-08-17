@@ -1,10 +1,18 @@
+"""Pydantic contracts shared by Sift's REST and SSE endpoints.
+
+These models are mirrored by strict interfaces in ``frontend/src/types.ts``.
+Keep both sides synchronized when fields or allowed state values change.
+"""
+
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
-JobKind = Literal["index", "outline", "manuscript"]
+# Literal state values keep the generated OpenAPI schema and TypeScript client
+# honest about the finite set of operations the job queue understands.
+JobKind = Literal["index", "outline", "manuscript", "analysis"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -60,6 +68,22 @@ class ManuscriptRequest(BaseModel):
     run_id: str | None = None
     cache_path: str | None = None
     regenerate_outline: bool = False
+
+
+class AnalysisRequest(BaseModel):
+    source: str | None = None
+    max_documents: int = Field(default=1000, ge=5, le=10000)
+    max_chars: int = Field(default=12000, ge=500, le=100000)
+    min_topic_size: int = Field(default=5, ge=2, le=100)
+
+
+class AnalysisSummary(BaseModel):
+    run_id: str
+    created_at: str
+    source: str
+    document_count: int
+    keyword_count: int
+    topic_count: int
 
 
 class JobResponse(BaseModel):

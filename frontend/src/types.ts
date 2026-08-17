@@ -32,7 +32,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 
 export interface Job {
   id: string
-  kind: 'index' | 'outline' | 'manuscript'
+  kind: 'index' | 'outline' | 'manuscript' | 'analysis'
   status: JobStatus
   created_at: string
   started_at: string | null
@@ -43,6 +43,26 @@ export interface Job {
   return_code: number | null
   logs: string[]
   error: string | null
+}
+
+export interface AnalysisSummary {
+  run_id: string
+  created_at: string
+  source: string
+  document_count: number
+  keyword_count: number
+  topic_count: number
+}
+
+export interface AnalysisResult extends AnalysisSummary {
+  keywords: { term: string; score: number }[]
+  topics: { Topic: number; Count: number; Name: string; Representation?: string[] }[]
+  topics_by_directory: Record<string, unknown>[]
+  documents: { path: string; directory: string; depth: number; topic: number; topic_name: string }[]
+  graph: {
+    nodes: { id: string; label: string; kind: 'topic' | 'keyword' | 'document'; score?: number }[]
+    edges: { source: string; target: string; kind: string }[]
+  }
 }
 
 export interface Artifact {

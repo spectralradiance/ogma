@@ -1,180 +1,337 @@
-# Metaphysics Manuscript Generator
+# Sift
 
-This project writes a full-length philosophical manuscript from a structured outline, using a local large language model grounded entirely in the author's own research notes. No cloud APIs or training are involved. The notes are indexed as retrieval input, and every generated paragraph is anchored to material the author has already written.
+Sift is a local-first corpus analysis and manuscript-generation workspace for directory trees of Markdown and text notes. It combines semantic retrieval, hierarchical topic modeling, keyword extraction, concept graphs, and GPU-backed long-form writing behind a FastAPI service and React interface.
 
-## Purpose
+The supplied snake mark is used as the application icon and favicon.
 
-The author has accumulated thousands of raw notes on metaphysics, mysticism, and related philosophy. Separately, `data/input/chapter_structure.csv` defines the exact structure of Universal Metaphysics, Tree of Life, and Invocation. Its `Generate Text` column explicitly determines which rows receive an outline and generated prose; rows marked `No` still provide structural headings and context.
+## Capabilities
 
-The pipeline bridges these two artefacts. It embeds the notes into a searchable vector store, then for each section of the book it retrieves the most relevant note excerpts and feeds them — alongside the section's metadata — to a local language model, instructing it to synthesize the material into authoritative philosophical prose. The model acts as a compositor, not an inventor: it forms the author's ideas into coherent paragraphs without introducing outside content.
+- Recursively index `.md`, `.txt`, `.markdown`, `.text`, and extensionless text files.
+- Retrieve relevant note excerpts from a persistent ChromaDB vector index.
+- Generate reusable, note-grounded writing plans and human-readable outlines.
+- Generate and resume manuscripts for Universal Metaphysics, Tree of Life, and Invocation.
+- Extract distinct keywords with KeyBERT.
+- Model topics with BERTopic and `KeyBERTInspired` representations.
+- Compare topic frequencies across source directories.
+- Build document-topic-keyword relationship graphs with NetworkX.
+- Monitor long jobs through Server-Sent Events and cancel running workers.
+- Keep generated artifacts isolated in collision-safe timestamped run directories.
 
-## How It Works
+All language-model inference remains local. Sift does not fine-tune the model or send the note corpus to a cloud API.
 
-### Stage 1 — Indexing (`index_notes.py`)
+## Architecture
 
-1. Walk each source directory recursively and collect every `.md`, `.txt`, and extension-less text file. Binary files (images, ZIPs, etc.) are detected by header bytes and skipped automatically.
-2. Chunk each file into overlapping text segments (1 400-character chunks, 250-character overlap) so that no idea is split across a retrieval boundary.
-3. Embed each chunk using `all-MiniLM-L6-v2` (a fast, local sentence-embedding model that runs entirely on CPU).
-4. Upsert the embeddings, raw text, and file metadata (filename, relative path, chunk index) into a persistent ChromaDB collection stored in `data/intermediary/chroma_db`. Chunk IDs are deterministic, so re-running the script only adds new or changed content.
-
-### Stage 2 — Generation (`write_book.py`)
-
-1. Load one selected book from the chapter breakdown CSV and select every row whose `Generate Text` value is `Yes`.
-2. Search ChromaDB for notes relevant to every section and create a book-level Markdown writing outline under `intermediary`. Each plan records scope, transitions, concepts, note terminology, and material reserved for neighboring sections.
-3. Reuse the Markdown outline when it already contains every section. Prose generation does not begin until the full outline is complete.
-4. Load `write_book_progress.json` to skip sections already written for that book and pipeline version.
-5. For each pending section, retrieve its supporting notes again and generate prose from both those excerpts and its saved plan.
-
-## Technologies
-
-| Technology | Role |
-|---|---|
-| `Qwen/Qwen2.5-7B-Instruct` | Generation model; 7 B parameter instruction-tuned LLM |
-| `transformers` | Model and tokenizer loading, chat-template application, `generate()` |
-| `bitsandbytes` | 4-bit NF4 quantization, reducing VRAM from ~14 GB to ~6 GB |
-| `accelerate` | Automatic device mapping across GPU layers |
-| `chromadb` | Local persistent vector store for note chunks |
-| `sentence-transformers` | `all-MiniLM-L6-v2` embedding model (CPU-side, no GPU required) |
-| `torch` | Tensor operations and CUDA inference |
-| `tqdm` | Progress bars during the indexing pass |
-
-## Usage
-
-### Web application
-
-Start the persistent Python API:
-
-```
-python -m uvicorn api.main:app --reload --port 8000
+```text
+React + TypeScript
+        |
+        | REST + Server-Sent Events
+        v
+FastAPI application
+        |
+        | serialized background subprocess queue
+        v
+Python analysis and generation scripts
+        |
+        +-- ChromaDB / sentence-transformers
+        +-- PyTorch / Transformers / bitsandbytes / Qwen
+        +-- KeyBERT / BERTopic / NetworkX
 ```
 
-In a second terminal, start the React interface:
+### Why Python owns AI workloads
 
-```
-cd frontend
-npm install
-npm run dev
-```
+The existing CUDA, quantization, embedding, retrieval, and modeling stack is implemented in Python. FastAPI remains alive between browser requests and delegates long operations to one serialized job queue. Serial execution prevents multiple model processes from competing for GPU memory.
 
-Open `http://localhost:5173`. The web console exposes index status and reindexing, book and outline-cache selection, timestamped manuscript runs, live SSE job logs, cancellation, run history, and generated outline/manuscript viewing. GPU jobs are serialized by the backend so model processes do not compete for VRAM.
+The React application contains no model runtime. It manages controls, server state, live progress, artifacts, charts, and graph interaction.
 
-Backend checks run with `python -m pytest`; frontend checks run with `npm run lint` and `npm run build` from `frontend`.
+## Repository Layout
 
-### Interactive CLI
-
-```
-python app.py
-```
-
-The CLI is the primary entry point. It provides these actions:
-
-- **Index notes** shows the last completed index date, then optionally runs `index_notes.py`.
-- **Generate or reuse an outline** selects a book and either reuses a compatible dated cache or regenerates the outline from the indexed notes.
-- **Generate manuscript text** selects Universal Metaphysics, Tree of Life, or Invocation and starts or resumes a dated run.
-- **Open chat** starts a run-scoped RAG chat session.
-
-Each new run uses a collision-safe name such as `generated202608161531`. Its artifacts are isolated by book:
-
-```
-data/output/generated202608161531/tree_of_life/
-	outline.md
-	manuscript.md
-data/intermediary/generated202608161531/tree_of_life/
-	writing_plan.md
-	progress.json
+```text
+api/
+    main.py              FastAPI routes, run discovery, SSE streams
+    jobs.py              serialized subprocess queue and cancellation
+    schemas.py           Pydantic API contracts
+code/
+    index_notes.py       recursive text indexing into ChromaDB
+    write_book.py        writing-plan, outline, and manuscript generation
+    analyze_corpus.py    KeyBERT, BERTopic, and graph analysis
+    generate_concepts.py concept glossary generation
+    chat.py              terminal RAG chat
+frontend/
+    src/                 React UI, API client, charts, graph, SSE hook
+    public/favicon.svg   snake application mark
+    package.json         frontend dependencies and scripts
+data/
+    input/               source notes and chapter_structure.csv
+    intermediary/        vector index, writing plans, progress, caches
+    output/              human outlines, manuscripts, analyses, exports
+tests/
+    test_api.py          API behavior and validation checks
+app.py                   legacy interactive terminal workflow
+requirements.txt         Python runtime and test dependencies
 ```
 
-`writing_plan.md` contains detailed instructions consumed by the prose generator. `outline.md` is a clean, human-readable content outline with each section's central claim, major points, evidence, transitions, terminology, and boundaries.
+## Prerequisites
 
-The chapter CSV was developed from only a subset of the notes. Outline generation therefore treats its headings and descriptions as provisional. Bracketed headings are explicitly resolved against retrieved material from the complete `input/writing-desktop` and `input/notion/Writing` collections, and note evidence may refine an inaccurate CSV description.
+- Windows with PowerShell, or an equivalent shell with command adjustments.
+- Python 3.11 or newer. The current workspace uses Python 3.13.
+- Node.js 20 or newer. The current workspace uses Node.js 22.
+- NVIDIA CUDA-capable GPU for Qwen manuscript generation.
+- Enough disk space for Hugging Face model caches and the local vector index.
 
-### 1. Install dependencies
+Indexing and BERTopic can use substantial CPU and memory. Qwen generation requires CUDA by default; CPU fallback must be explicitly enabled in the underlying scripts.
 
-```
+## Installation
+
+Create and activate a virtual environment, then install Python dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Index the notes
+Install frontend dependencies:
 
+```powershell
+cd frontend
+npm install
+cd ..
 ```
+
+The first model-backed operation may download sentence-transformer or Qwen weights from Hugging Face. Setting `HF_TOKEN` is optional but raises download rate limits.
+
+## Running the Web Application
+
+Start the API from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
+```
+
+Start the frontend in a second terminal:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open:
+
+- Sift: http://127.0.0.1:5173
+- API documentation: http://127.0.0.1:8000/docs
+- OpenAPI schema: http://127.0.0.1:8000/openapi.json
+
+Set `VITE_API_URL` before starting Vite when the API is not on `http://localhost:8000`.
+
+## Web Workspaces
+
+### Manuscript Operations
+
+The main workspace displays index health, available texts, generated runs, compatible writing-plan caches, and recent background activity.
+
+A new manuscript run performs these stages:
+
+1. Read `data/input/chapter_structure.csv`.
+2. Select rows whose `Generate Text` value is `Yes`.
+3. Retrieve relevant indexed excerpts for every selected section.
+4. Generate or reuse the complete machine writing plan.
+5. Render a separate human-readable content outline.
+6. Generate prose from the plan, CSV hierarchy, and retrieved evidence.
+7. Persist progress after every section so interrupted runs can resume.
+
+CSV headings and descriptions are provisional because the chapter structure was derived from only part of the corpus. The planning prompt instructs Qwen to resolve bracketed headings and questionable descriptions against the complete writing-desktop and Notion index.
+
+### Corpus Intelligence
+
+The Analysis workspace runs a bounded semantic-analysis job over a selected maximum number of documents.
+
+The worker:
+
+1. Traverses the selected source directory and reads bounded text samples.
+2. Embeds documents with `all-MiniLM-L6-v2`.
+3. Extracts diverse phrases with KeyBERT and maximal marginal relevance.
+4. Fits BERTopic using precomputed embeddings and `KeyBERTInspired` labels.
+5. Maps topic frequencies to relative source directories with `topics_per_class`.
+6. Builds a NetworkX graph linking documents, topics, and mentioned keywords.
+7. Writes one JSON-safe analysis payload using pandas `orient="records"` conversion.
+
+Completed results provide keyword rankings, topic-frequency charts, and an interactive force graph with pan, zoom, and node inspection.
+
+### Run Library
+
+Each manuscript row reports outline and prose completion independently. Existing human outlines and manuscripts can be opened in a side drawer. Continuing a run reuses its run-scoped `progress.json` and writing plan.
+
+### Job Console
+
+Indexing, outline generation, manuscript generation, and corpus analysis are background jobs. The API launches one worker subprocess at a time. The UI receives complete job snapshots through SSE, including accumulated logs and final status.
+
+Cancelling a Windows worker sends `CTRL_BREAK_EVENT`, allowing Python code to flush resumable files before exit.
+
+## Data and Artifact Ownership
+
+Source files remain under `data/input`:
+
+```text
+data/input/chapter_structure.csv
+data/input/writing-desktop/
+data/input/notion/Writing/
+```
+
+The shared vector store is:
+
+```text
+data/intermediary/chroma_db/
+```
+
+A manuscript run uses matching intermediary and output paths:
+
+```text
+data/intermediary/generated202608161531/tree_of_life/
+    writing_plan.md
+    progress.json
+
+data/output/generated202608161531/tree_of_life/
+    outline.md
+    manuscript.md
+```
+
+An analysis run writes:
+
+```text
+data/output/generated202608161531/analysis/analysis.json
+```
+
+Minute collisions receive `-2`, `-3`, and subsequent suffixes. New runs therefore never overwrite earlier output.
+
+## Direct Script Usage
+
+The web interface is recommended, but each worker remains independently usable.
+
+### Index notes
+
+```powershell
 python code/index_notes.py
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--notes-dirs PATH [PATH ...]` | `data/input/writing-desktop` `data/input/notion/Writing` | One or more root directories to index |
-| `--db-dir PATH` | `data/intermediary/chroma_db` | Where to write the ChromaDB store |
+Important options:
 
-Safe to re-run — already-indexed chunks are skipped.
+- `--notes-dirs PATH [PATH ...]`
+- `--db-dir PATH`
+- `--metadata-file PATH`
 
-### 3. Generate the manuscript
+Chunk IDs are deterministic. Existing IDs are skipped during subsequent indexing runs.
 
-```
-python code/write_book.py --system "Universal Metaphysics"
-```
+### Inspect generation status
 
-| Flag | Default | Description |
-|---|---|---|
-| `--db-dir PATH` | `data/intermediary/chroma_db` | ChromaDB store to query |
-| `--notes-top-k N` | `5` | Note chunks to retrieve per section |
-| `--system NAME` | required | Book to generate from the CSV, such as `Universal Metaphysics` or `Tree of Life` |
-| `--outline-only` | off | Create or complete the Markdown outline, then stop before prose generation |
-| `--status-only` | off | Show the selected book's current outline and manuscript progress without loading Qwen |
-| `--allow-cpu` | off | Explicitly permit slow, memory-intensive CPU generation |
-
-Generation requires CUDA by default and stops if CUDA loading fails or any model parameters are offloaded to the CPU. The CLI writes run-scoped outlines under `data/intermediary/generated*/<book>/` and prose under `data/output/generated*/<book>/`. Chapter introduction rows are generated as numbered sections such as `3.0 Introduction`. Both stages can be interrupted and resumed.
-
-### 4. Generate the concept glossary
-
-```
-python code/generate_concepts.py
+```powershell
+python code/write_book.py --system "Universal Metaphysics" --status-only
 ```
 
-This searches the same indexed notes using all CSV rows marked `Generate Text = Yes`, generates resumable candidate batches on the GPU, semantically removes near-duplicates, and writes approximately 200 concepts with 2-3 sentence descriptions to `data/output/concepts.md`.
+### Generate only an outline
 
-| Flag | Default | Description |
-|---|---|---|
-| `--target-count N` | `200` | Maximum number of concepts to write |
-| `--system NAME` | all systems | Limit source coverage; repeat the flag for multiple books |
-| `--notes-top-k N` | `5` | Note chunks retrieved for each chapter section |
-| `--similarity-threshold N` | `0.86` | Semantic similarity at which a candidate is treated as a duplicate |
-| `--output PATH` | `data/output/concepts.md` | Markdown output path |
-| `--allow-cpu` | off | Explicitly permit slow CPU generation |
-
-### 5. Interactive chat
-
-Open a conversation with the model, optionally grounded in the indexed notes:
-
+```powershell
+python code/write_book.py --system "Universal Metaphysics" --outline-only
 ```
+
+### Generate or resume a manuscript
+
+```powershell
+python code/write_book.py --system "Tree of Life" --run-id generated202608161531
+```
+
+Generation is CUDA-only unless `--allow-cpu` is deliberately supplied.
+
+### Analyze a corpus
+
+```powershell
+python code/analyze_corpus.py --source data/input --max-documents 500
+```
+
+Useful controls:
+
+- `--max-documents` bounds embedding/model size.
+- `--max-chars` bounds each document sample.
+- `--min-topic-size` controls BERTopic cluster granularity.
+- `--run-id` selects the output directory name.
+
+### Generate a concept glossary
+
+```powershell
+python code/generate_concepts.py --target-count 200
+```
+
+Candidate batches are cached and resumable. Exact and semantic duplicates are removed before writing `data/output/concepts.md`.
+
+### Terminal chat
+
+```powershell
 python code/chat.py
 ```
 
-| Flag | Default | Description |
+Commands: `/history`, `/clear`, `/save [file]`, and `/quit`.
+
+## API Overview
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `--db-dir PATH` | `data/intermediary/chroma_db` | ChromaDB store to query |
-| `--top-k N` | `4` | Note chunks to retrieve per message |
-| `--no-rag` | off | Disable retrieval entirely |
+| `GET` | `/api/health` | Process health |
+| `GET` | `/api/index/status` | Vector-index status and metadata |
+| `POST` | `/api/index` | Queue indexing |
+| `GET` | `/api/systems` | Available manuscript systems and section counts |
+| `GET` | `/api/outlines/{system}/caches` | Compatible writing-plan caches |
+| `POST` | `/api/outlines` | Queue outline generation or cache reuse |
+| `POST` | `/api/manuscripts` | Queue new/resumed manuscript generation |
+| `GET` | `/api/runs` | Lightweight generated-run summaries |
+| `GET` | `/api/runs/{run}/{system}/artifacts/{kind}` | Read outline, manuscript, or writing plan |
+| `POST` | `/api/analyses` | Queue KeyBERT/BERTopic/NetworkX analysis |
+| `GET` | `/api/analyses` | Completed analysis summaries |
+| `GET` | `/api/analyses/{run}` | Full analysis payload |
+| `GET` | `/api/jobs` | Current API-session job history |
+| `GET` | `/api/jobs/{id}/events` | Live SSE job snapshots |
+| `DELETE` | `/api/jobs/{id}` | Cancel queued/running work |
 
-Conversation history is saved automatically to `chat_history.json` and reloaded on the next run. In-session commands:
+Every request and response body has an explicit Pydantic schema where applicable. The frontend mirrors those contracts in `frontend/src/types.ts`.
 
-| Command | Action |
-|---|---|
-| `/clear` | Erase history and start fresh |
-| `/history` | Print the conversation so far |
-| `/save [file]` | Export conversation to a markdown file |
-| `/quit` | Exit |
+## Validation
 
-## Files
+Run backend tests:
 
-| File | Description |
-|---|---|
-| `app.py` | Interactive workflow CLI |
-| `code/index_notes.py` | Chunks, embeds, and indexes notes into ChromaDB |
-| `code/write_book.py` | Retrieves context and generates prose for each CSV section |
-| `code/chat.py` | Interactive RAG-augmented chat with persistent history |
-| `requirements.txt` | Python dependencies |
-| `data/input/` | Chapter structure and source notes |
-| `data/intermediary/chroma_db/` | Persistent vector store created from the source notes |
-| `data/intermediary/generated*/` | Run-scoped writing plans, progress, and chat history |
-| `data/output/generated*/` | Run-scoped outlines, manuscripts, and chat exports |
-| `code/train_ai/` | Archived fine-tuning code; not used by the active workflow |
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Run frontend lint and production build:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+The production build lazy-loads the analysis bundle so Recharts and `react-force-graph-2d` do not delay the manuscript workspace.
+
+## Troubleshooting
+
+### Index appears unavailable
+
+Confirm `data/intermediary/chroma_db/chroma.sqlite3` exists, then rerun `python code/index_notes.py`. The UI may briefly show its loading fallback before TanStack Query receives index status.
+
+### CUDA model loading fails
+
+Verify `torch.cuda.is_available()` and the selected GPU environment. Sift stops rather than silently offloading model parameters to CPU. This avoids locking the computer with a full 7B CPU model.
+
+### GPU out-of-memory
+
+Only one API job runs at a time, but other applications can still consume VRAM. Stop other model processes and retry. Concept generation uses bounded prompt/output budgets and clears temporary CUDA allocations between batches.
+
+### A generated run is missing
+
+The Run Library discovers manuscript runs under `data/intermediary/generated*/<book>` and matching output folders. Analysis runs appear separately under Corpus Intelligence.
+
+### Frontend cannot reach the API
+
+Confirm FastAPI is listening on port 8000 and that `VITE_API_URL` matches it. Development CORS permits `localhost:5173` and `127.0.0.1:5173`.
+
+### Hugging Face warning about unauthenticated requests
+
+Local inference still works. Set an `HF_TOKEN` environment variable to improve model download rate limits.

@@ -21,12 +21,14 @@ TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text", ""}
 
 
 def text_files(root: Path):
+    """Yield supported text files recursively without following directory entries."""
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
             yield path
 
 
 def read_text(path: Path, max_chars: int) -> str:
+    """Read a bounded UTF-8 sample and tolerate malformed exported text."""
     try:
         return path.read_text(encoding="utf-8", errors="ignore")[:max_chars].strip()
     except OSError:
@@ -34,10 +36,17 @@ def read_text(path: Path, max_chars: int) -> str:
 
 
 def safe_records(frame: pd.DataFrame) -> list[dict]:
+    """Convert pandas/numpy scalar values into ordinary JSON-compatible records."""
     return json.loads(frame.to_json(orient="records"))
 
 
 def build_graph(records: list[dict], keywords: list[tuple[str, float]]) -> dict:
+    """Build a document-topic-keyword graph from modeled and lexical links.
+
+    Topic-to-document edges come from BERTopic assignments. Keyword mentions
+    are grounded by case-insensitive occurrence in the bounded source sample;
+    topic-to-keyword edges summarize concepts shared by documents in a topic.
+    """
     graph = nx.Graph()
     for keyword, score in keywords:
         graph.add_node(f"keyword:{keyword}", label=keyword, kind="keyword", score=float(score))
@@ -59,6 +68,7 @@ def build_graph(records: list[dict], keywords: list[tuple[str, float]]) -> dict:
 
 
 def main() -> None:
+    """Analyze a directory tree and persist one self-contained JSON payload."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--run-id")
@@ -74,6 +84,8 @@ def main() -> None:
     output_dir = DEFAULT_OUTPUT_ROOT / run_id / "analysis"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Bounding both document count and characters per document prevents large
+    # note trees from expanding embeddings and UMAP/HDBSCAN inputs without limit.
     records = []
     for path in text_files(source):
         text = read_text(path, args.max_chars)
@@ -108,6 +120,8 @@ def main() -> None:
     )
     print(f"Extracted {len(keywords)} distinct keywords", flush=True)
 
+    # KeyBERTInspired creates cleaner human-readable topic labels than raw c-TF-IDF
+    # terms while the precomputed embeddings avoid encoding every document twice.
     topic_model = BERTopic(
         embedding_model=model,
         representation_model=KeyBERTInspired(),
@@ -122,6 +136,8 @@ def main() -> None:
         record["topic_name"] = ", ".join(word for word, _ in words[:4]) if topic >= 0 else "Outlier"
 
     topic_info = safe_records(topic_model.get_topic_info())
+    # Directory paths act as classes, preserving the source hierarchy in a form
+    # suitable for frequency-over-directory charts in the React client.
     hierarchy = safe_records(topic_model.topics_per_class(documents, classes=[record["directory"] for record in records]))
     graph = build_graph(records, keywords)
     payload = {

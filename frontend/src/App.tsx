@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpenText, BrainCircuit, Database, FileText, Library, LoaderCircle, Play, RefreshCw, Search, Square, Terminal } from 'lucide-react'
+import { Activity, BookOpenText, Database, FileText, Library, LoaderCircle, Network, Play, RefreshCw, Search, Square, Terminal } from 'lucide-react'
 import { api } from './api'
 import type { Artifact, Job, RunSummary } from './types'
 import { useJobEvents } from './useJobEvents'
 import './App.css'
 
-type View = 'workspace' | 'runs' | 'jobs'
+type View = 'workspace' | 'analysis' | 'runs' | 'jobs'
+// Topic charts and canvas graph dependencies are large, so keep them out of the
+// initial manuscript-workspace bundle until the Analysis navigation is selected.
+const AnalysisView = lazy(() => import('./AnalysisView').then((module) => ({ default: module.AnalysisView })))
 
 const formatDate = (value?: string | null) => value
   ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
@@ -14,6 +17,8 @@ const formatDate = (value?: string | null) => value
 
 function App() {
   const queryClient = useQueryClient()
+  // Local state is limited to navigation and selections. Durable workflow state
+  // lives in FastAPI/data directories and server state is owned by TanStack Query.
   const [view, setView] = useState<View>('workspace')
   const [system, setSystem] = useState('Universal Metaphysics')
   const [cachePath, setCachePath] = useState('')
@@ -22,6 +27,8 @@ function App() {
   const [search, setSearch] = useState('')
   const activeJob = useJobEvents(activeJobId)
 
+  // Runs and jobs poll at a low frequency for changes made by other browser tabs
+  // or CLI invocations. The selected live job uses SSE below for immediate logs.
   const index = useQuery({ queryKey: ['index'], queryFn: api.indexStatus })
   const systems = useQuery({ queryKey: ['systems'], queryFn: api.systems })
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 5000 })
@@ -29,12 +36,16 @@ function App() {
   const caches = useQuery({ queryKey: ['caches', system], queryFn: () => api.caches(system) })
 
   const track = (job: Job) => {
+    // Opening the drawer immediately gives queued work visible feedback while
+    // the SSE connection takes over subsequent status and log updates.
     setActiveJobId(job.id)
     void queryClient.invalidateQueries({ queryKey: ['jobs'] })
   }
   const indexMutation = useMutation({ mutationFn: api.startIndex, onSuccess: track })
   const outlineMutation = useMutation({ mutationFn: () => api.startOutline(system, cachePath || undefined), onSuccess: track })
   const manuscriptMutation = useMutation({
+    // Supplying a run resumes its progress.json; omitting it creates a fresh,
+    // timestamped run using either the selected plan cache or regenerated plans.
     mutationFn: (run?: RunSummary) => api.startManuscript(system, run?.run_id, run ? undefined : cachePath || undefined),
     onSuccess: track,
   })
@@ -48,9 +59,10 @@ function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><BrainCircuit size={22} /><span>Corpus Atlas</span></div>
+      <div className="brand"><img className="brand-icon" src="/favicon.svg" alt="" /><span>Sift</span></div>
       <nav>
         <button className={view === 'workspace' ? 'active' : ''} onClick={() => setView('workspace')}><Activity /> Workspace</button>
+        <button className={view === 'analysis' ? 'active' : ''} onClick={() => setView('analysis')}><Network /> Analysis</button>
         <button className={view === 'runs' ? 'active' : ''} onClick={() => setView('runs')}><Library /> Run library</button>
         <button className={view === 'jobs' ? 'active' : ''} onClick={() => setView('jobs')}><Terminal /> Job console</button>
       </nav>
@@ -59,7 +71,7 @@ function App() {
 
     <main>
       <header className="topbar">
-        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'workspace' ? 'Manuscript operations' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
+        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'workspace' ? 'Manuscript operations' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
         <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>
       </header>
 
@@ -81,6 +93,7 @@ function App() {
           <div className="panel recent-panel"><div className="panel-title"><div><p className="eyebrow">Recent</p><h2>Generation runs</h2></div><button className="text-button" onClick={() => setView('runs')}>View all</button></div><RunTable runs={filteredRuns.slice(0, 5)} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></div>
         </section>
       </>}
+      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView onTrack={track} /></Suspense>}
       {view === 'runs' && <section className="panel full-panel"><RunTable runs={filteredRuns} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></section>}
       {view === 'jobs' && <section className="panel full-panel"><JobTable jobs={jobs.data ?? []} onSelect={(job) => setActiveJobId(job.id)} /></section>}
     </main>
@@ -90,10 +103,12 @@ function App() {
   </div>
 }
 
+/** Compact artifact/progress table shared by dashboard and library views. */
 function RunTable({ runs, onArtifact, onContinue }: { runs: RunSummary[]; onArtifact: (run: RunSummary, kind: Artifact['kind']) => void; onContinue: (run: RunSummary) => void }) {
   return <div className="table-wrap"><table><thead><tr><th>Run</th><th>Text</th><th>Outline</th><th>Manuscript</th><th>Updated</th><th /></tr></thead><tbody>{runs.length === 0 ? <tr><td colSpan={6} className="empty">No generated runs yet</td></tr> : runs.map((run) => <tr key={`${run.run_id}-${run.system}`}><td><code>{run.run_id.replace('generated', '')}</code></td><td><strong>{run.system}</strong></td><td>{run.outline_sections}/{run.total_sections}</td><td>{run.completed_sections}/{run.total_sections}</td><td>{formatDate(run.modified_at)}</td><td><div className="row-actions">{run.has_human_outline && <button title="Open outline" onClick={() => void onArtifact(run, 'outline')}><FileText /></button>}{run.has_manuscript && <button title="Open manuscript" onClick={() => void onArtifact(run, 'manuscript')}><BookOpenText /></button>}<button title="Continue generation" onClick={() => onContinue(run)}><Play /></button></div></td></tr>)}</tbody></table></div>
 }
 
+/** Session-scoped job history; selecting a row reconnects its SSE drawer. */
 function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect: (job: Job) => void }) {
   return <div className="table-wrap"><table><thead><tr><th>Status</th><th>Job</th><th>Text</th><th>Started</th><th>Output</th></tr></thead><tbody>{jobs.length === 0 ? <tr><td colSpan={5} className="empty">No jobs in this server session</td></tr> : jobs.map((job) => <tr key={job.id} onClick={() => onSelect(job)} className="clickable"><td><span className={`pill ${job.status}`}>{job.status}</span></td><td>{job.kind}</td><td>{job.system ?? 'All notes'}</td><td>{formatDate(job.started_at ?? job.created_at)}</td><td>{job.logs.at(-1) ?? 'Waiting'}</td></tr>)}</tbody></table></div>
 }

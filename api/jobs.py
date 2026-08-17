@@ -1,3 +1,11 @@
+"""In-process queue for long-running Python workers.
+
+The API deliberately uses one consumer. Indexing and local model processes are
+memory intensive, and concurrent GPU jobs can exhaust VRAM or make the desktop
+unresponsive. Jobs survive for the lifetime of the API process and expose their
+captured output to both polling endpoints and Server-Sent Events.
+"""
+
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,6 +21,11 @@ from api.schemas import JobKind, JobResponse, JobStatus
 
 @dataclass
 class Job:
+    """Mutable runtime state for one queued subprocess.
+
+    ``process`` and ``changed`` are internal synchronization details and are
+    omitted from the Pydantic response returned to clients.
+    """
     id: str
     kind: JobKind
     command: list[str]
@@ -29,6 +42,7 @@ class Job:
     changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     def response(self) -> JobResponse:
+        """Create an immutable API snapshot of the current job state."""
         return JobResponse(
             id=self.id,
             kind=self.kind,
@@ -46,6 +60,8 @@ class Job:
 
 
 class JobManager:
+    """Serialize worker subprocesses and retain their logs for the API session."""
+
     def __init__(self, root: Path) -> None:
         self.root = root
         self.jobs: dict[str, Job] = {}
@@ -53,11 +69,17 @@ class JobManager:
         self.worker: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
+        """Start a fresh queue consumer for the current asyncio event loop.
+
+        Recreating the queue matters in tests and development reloads because
+        asyncio primitives are bound to the loop on which they are first used.
+        """
         if self.worker is None:
             self.queue = asyncio.Queue()
             self.worker = asyncio.create_task(self._worker())
 
     async def stop(self) -> None:
+        """Stop the queue consumer during FastAPI lifespan shutdown."""
         if self.worker is not None:
             self.worker.cancel()
             try:
@@ -73,6 +95,7 @@ class JobManager:
         run_id: str | None = None,
         system: str | None = None,
     ) -> JobResponse:
+        """Register a subprocess invocation and enqueue it without blocking HTTP."""
         command = [sys.executable, *arguments]
         job = Job(
             id=uuid4().hex,
@@ -96,6 +119,11 @@ class JobManager:
         ]
 
     async def cancel(self, job_id: str) -> JobResponse | None:
+        """Cancel queued work or signal a running process group.
+
+        Windows needs ``CTRL_BREAK_EVENT`` so Python workers can unwind and
+        flush resumable progress rather than being terminated without cleanup.
+        """
         job = self.jobs.get(job_id)
         if job is None:
             return None
@@ -114,6 +142,7 @@ class JobManager:
         return job.response()
 
     async def _worker(self) -> None:
+        """Consume one job at a time; this is the GPU serialization boundary."""
         while True:
             job = await self.queue.get()
             try:
@@ -124,6 +153,12 @@ class JobManager:
                 self.queue.task_done()
 
     async def _run(self, job: Job) -> None:
+        """Execute a child process and mirror merged stdout/stderr into the job.
+
+        ``changed`` is an edge-triggered wakeup for SSE listeners. The complete
+        snapshot remains in ``logs``, so clients can reconnect without losing
+        output even when several lines arrive before they render.
+        """
         job.status = "running"
         job.started_at = datetime.now().astimezone()
         job.changed.set()

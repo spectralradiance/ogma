@@ -1,7 +1,8 @@
-import type { Artifact, IndexStatus, Job, OutlineCache, RunSummary, SystemSummary } from './types'
+import type { AnalysisResult, AnalysisSummary, Artifact, IndexStatus, Job, OutlineCache, RunSummary, SystemSummary } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+/** Central fetch boundary. Error details from FastAPI are promoted to Error. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -14,6 +15,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+/** Typed calls matching the Pydantic contracts in api/schemas.py. */
 export const api = {
   indexStatus: () => request<IndexStatus>('/api/index/status'),
   systems: () => request<SystemSummary[]>('/api/systems'),
@@ -37,5 +39,11 @@ export const api = {
     }),
   }),
   cancelJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`, { method: 'DELETE' }),
+  analyses: () => request<AnalysisSummary[]>('/api/analyses'),
+  analysis: (runId: string) => request<AnalysisResult>(`/api/analyses/${runId}`),
+  startAnalysis: (maxDocuments: number) => request<Job>('/api/analyses', {
+    method: 'POST',
+    body: JSON.stringify({ max_documents: maxDocuments }),
+  }),
   eventsUrl: (jobId: string) => `${API}/api/jobs/${jobId}/events`,
 }

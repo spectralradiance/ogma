@@ -30,3 +30,15 @@ def test_unknown_system_is_rejected() -> None:
     with TestClient(app) as client:
         response = client.get("/api/outlines/Unknown/caches")
         assert response.status_code == 422
+
+
+def test_analysis_endpoints_validate_without_running_models() -> None:
+    with TestClient(app) as client:
+        analyses = client.get("/api/analyses")
+        assert analyses.status_code == 200
+        assert isinstance(analyses.json(), list)
+        invalid = client.post(
+            "/api/analyses",
+            json={"source": "Z:/path/that/does/not/exist", "max_documents": 50},
+        )
+        assert invalid.status_code == 422

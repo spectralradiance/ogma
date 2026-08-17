@@ -1,3 +1,10 @@
+"""FastAPI boundary for Sift's local corpus and manuscript workflows.
+
+Read-only endpoints inspect artifacts directly. Mutating or compute-heavy
+operations are delegated to the serialized ``JobManager`` and existing Python
+scripts, preserving one implementation of indexing and generation behavior.
+"""
+
 import asyncio
 import csv
 from contextlib import asynccontextmanager
@@ -5,6 +12,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +20,8 @@ from fastapi.responses import StreamingResponse
 
 from api.jobs import JobManager
 from api.schemas import (
+    AnalysisRequest,
+    AnalysisSummary,
     ArtifactResponse,
     IndexRequest,
     IndexStatus,
@@ -24,6 +34,9 @@ from api.schemas import (
 )
 
 
+# Resolve all storage from the repository root instead of the process working
+# directory. This keeps CLI, API, tests, and VS Code launch configurations from
+# accidentally writing to different intermediary/output trees.
 ROOT = Path(__file__).resolve().parent.parent
 CODE_DIR = ROOT / "code"
 DATA_DIR = ROOT / "data"
@@ -45,6 +58,7 @@ manager = JobManager(ROOT)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Create storage roots and bind the job queue to the server event loop."""
     INTERMEDIARY_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     await manager.start()
@@ -52,7 +66,7 @@ async def lifespan(_: FastAPI):
     await manager.stop()
 
 
-app = FastAPI(title="Text Corpus Analysis API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Sift API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -63,11 +77,13 @@ app.add_middleware(
 
 
 def load_rows() -> list[dict[str, str]]:
+    """Read chapter metadata on demand so CSV edits appear without API restart."""
     with CSV_FILE.open(newline="", encoding="utf-8") as csv_file:
         return list(csv.DictReader(csv_file))
 
 
 def selected_rows(system: str) -> list[dict[str, str]]:
+    """Return only rows explicitly marked for generated prose."""
     return [
         row for row in load_rows()
         if row["System"] == system and row.get("Generate Text", "").strip().lower() == "yes"
@@ -75,12 +91,14 @@ def selected_rows(system: str) -> list[dict[str, str]]:
 
 
 def ensure_system(system: str) -> str:
+    """Validate a public book name and return its filesystem-safe slug."""
     if system not in SYSTEM_SLUGS:
         raise HTTPException(status_code=422, detail=f"Unknown system: {system}")
     return SYSTEM_SLUGS[system]
 
 
 def new_run_id() -> str:
+    """Create a minute-based ID and add a suffix when runs share a minute."""
     base = f"generated{datetime.now():%Y%m%d%H%M}"
     candidate = base
     suffix = 2
@@ -91,6 +109,7 @@ def new_run_id() -> str:
 
 
 def parse_plan_count(path: Path) -> int:
+    """Count machine-plan sections compatible with the current pipeline version."""
     if not path.is_file():
         return 0
     content = path.read_text(encoding="utf-8", errors="ignore")
@@ -98,6 +117,11 @@ def parse_plan_count(path: Path) -> int:
 
 
 def validate_cache(path_text: str) -> Path:
+    """Allow reuse only from the managed intermediary tree.
+
+    Besides preventing arbitrary file reads, this guarantees selected caches
+    use the same artifact ownership model as generated runs.
+    """
     path = Path(path_text).resolve()
     try:
         path.relative_to(INTERMEDIARY_DIR.resolve())
@@ -109,6 +133,7 @@ def validate_cache(path_text: str) -> Path:
 
 
 def outline_caches(system: str) -> list[OutlineCache]:
+    """Discover legacy and run-scoped plans that contain current-version keys."""
     slug = ensure_system(system)
     candidates = set(INTERMEDIARY_DIR.glob(f"{slug}_outline*.md"))
     candidates.update(INTERMEDIARY_DIR.glob(f"generated*/{slug}/writing_plan.md"))
@@ -127,6 +152,7 @@ def outline_caches(system: str) -> list[OutlineCache]:
 
 
 def run_summary(run_dir: Path, system: str) -> RunSummary:
+    """Aggregate lightweight run status without loading manuscript contents."""
     slug = ensure_system(system)
     intermediary_book = INTERMEDIARY_DIR / run_dir.name / slug
     output_book = OUTPUT_DIR / run_dir.name / slug
@@ -238,6 +264,56 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
     return await manager.submit("manuscript", arguments, run_id=run_id, system=request.system)
 
 
+@app.post("/api/analyses", response_model=JobResponse, status_code=202)
+async def start_analysis(request: AnalysisRequest) -> JobResponse:
+    run_id = new_run_id()
+    arguments = [
+        str(CODE_DIR / "analyze_corpus.py"),
+        "--run-id", run_id,
+        "--max-documents", str(request.max_documents),
+        "--max-chars", str(request.max_chars),
+        "--min-topic-size", str(request.min_topic_size),
+    ]
+    if request.source:
+        source = Path(request.source).resolve()
+        if not source.is_dir():
+            raise HTTPException(status_code=422, detail="Analysis source directory not found")
+        arguments.extend(["--source", str(source)])
+    return await manager.submit("analysis", arguments, run_id=run_id)
+
+
+def analysis_payloads():
+    """Yield readable analysis payloads while ignoring partial/corrupt files."""
+    for path in OUTPUT_DIR.glob("generated*/analysis/analysis.json"):
+        try:
+            yield path, json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+
+@app.get("/api/analyses", response_model=list[AnalysisSummary])
+async def analyses() -> list[AnalysisSummary]:
+    result = []
+    for _, payload in analysis_payloads():
+        result.append(AnalysisSummary(
+            run_id=payload["run_id"],
+            created_at=payload["created_at"],
+            source=payload["source"],
+            document_count=payload["document_count"],
+            keyword_count=len(payload.get("keywords", [])),
+            topic_count=len([topic for topic in payload.get("topics", []) if topic.get("Topic", -1) >= 0]),
+        ))
+    return sorted(result, key=lambda item: item.created_at, reverse=True)
+
+
+@app.get("/api/analyses/{run_id}")
+async def analysis(run_id: str) -> dict:
+    path = OUTPUT_DIR / run_id / "analysis" / "analysis.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 @app.get("/api/runs", response_model=list[RunSummary])
 async def runs(system: str | None = None) -> list[RunSummary]:
     requested = [system] if system else list(SYSTEM_SLUGS)
@@ -256,15 +332,17 @@ async def runs(system: str | None = None) -> list[RunSummary]:
 
 
 @app.get("/api/runs/{run_id}/{system}/artifacts/{kind}", response_model=ArtifactResponse)
-async def artifact(run_id: str, system: str, kind: str) -> ArtifactResponse:
+async def artifact(
+    run_id: str,
+    system: str,
+    kind: Literal["outline", "manuscript", "writing_plan"],
+) -> ArtifactResponse:
     slug = ensure_system(system)
     files = {
         "outline": OUTPUT_DIR / run_id / slug / "outline.md",
         "manuscript": OUTPUT_DIR / run_id / slug / "manuscript.md",
         "writing_plan": INTERMEDIARY_DIR / run_id / slug / "writing_plan.md",
     }
-    if kind not in files:
-        raise HTTPException(status_code=422, detail="Unknown artifact kind")
     path = files[kind]
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
