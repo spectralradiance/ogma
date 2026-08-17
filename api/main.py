@@ -270,7 +270,6 @@ async def start_analysis(request: AnalysisRequest) -> JobResponse:
     arguments = [
         str(CODE_DIR / "analyze_corpus.py"),
         "--run-id", run_id,
-        "--max-documents", str(request.max_documents),
         "--max-chars", str(request.max_chars),
         "--min-topic-size", str(request.min_topic_size),
     ]

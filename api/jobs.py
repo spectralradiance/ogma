@@ -38,7 +38,7 @@ class Job:
     return_code: int | None = None
     logs: list[str] = field(default_factory=list)
     error: str | None = None
-    process: asyncio.subprocess.Process | None = field(default=None, repr=False)
+    process: subprocess.Popen[str] | None = field(default=None, repr=False)
     changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     def response(self) -> JobResponse:
@@ -96,7 +96,9 @@ class JobManager:
         system: str | None = None,
     ) -> JobResponse:
         """Register a subprocess invocation and enqueue it without blocking HTTP."""
-        command = [sys.executable, *arguments]
+        # ``-u`` disables Python's stdio buffering so phase/progress messages
+        # become visible to SSE clients immediately rather than at process exit.
+        command = [sys.executable, "-u", *arguments]
         job = Job(
             id=uuid4().hex,
             kind=kind,
@@ -165,27 +167,36 @@ class JobManager:
         job.changed.clear()
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
-            job.process = await asyncio.create_subprocess_exec(
-                *job.command,
+            # Uvicorn's Windows reload loop can use SelectorEventLoop, which does
+            # not implement asyncio subprocess transports. Popen plus to_thread
+            # works under both Windows loop policies while keeping HTTP non-blocking.
+            job.process = subprocess.Popen(
+                job.command,
                 cwd=self.root,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 creationflags=creationflags,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
             )
             assert job.process.stdout is not None
-            while line := await job.process.stdout.readline():
-                job.logs.append(line.decode(errors="replace").rstrip())
+            while line := await asyncio.to_thread(job.process.stdout.readline):
+                job.logs.append(line.rstrip())
                 job.changed.set()
                 job.changed.clear()
-            job.return_code = await job.process.wait()
+            job.return_code = await asyncio.to_thread(job.process.wait)
             if job.status != "cancelled":
                 job.status = "completed" if job.return_code == 0 else "failed"
                 if job.status == "failed":
                     job.error = f"Process exited with code {job.return_code}"
         except Exception as exc:
             job.status = "failed"
-            job.error = str(exc)
-            job.logs.append(f"ERROR: {exc}")
+            # repr preserves exception types such as NotImplementedError whose
+            # string representation is empty, making UI failures actionable.
+            job.error = repr(exc)
+            job.logs.append(f"ERROR: {exc!r}")
         finally:
             job.finished_at = datetime.now().astimezone()
             job.process = None

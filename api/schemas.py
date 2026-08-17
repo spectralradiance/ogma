@@ -72,7 +72,6 @@ class ManuscriptRequest(BaseModel):
 
 class AnalysisRequest(BaseModel):
     source: str | None = None
-    max_documents: int = Field(default=1000, ge=5, le=10000)
     max_chars: int = Field(default=12000, ge=500, le=100000)
     min_topic_size: int = Field(default=5, ge=2, le=100)
 

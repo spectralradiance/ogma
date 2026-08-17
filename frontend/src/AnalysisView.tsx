@@ -7,7 +7,6 @@ import { api } from './api'
 import type { AnalysisResult, Job } from './types'
 
 export function AnalysisView({ onTrack }: { onTrack: (job: Job) => void }) {
-  const [maxDocuments, setMaxDocuments] = useState(500)
   const [selectedRun, setSelectedRun] = useState<string | null>(null)
   // Defer loading a potentially large graph payload so selecting a history row
   // remains responsive while React transitions to the new visualization.
@@ -18,13 +17,12 @@ export function AnalysisView({ onTrack }: { onTrack: (job: Job) => void }) {
     queryFn: () => api.analysis(deferredRun!),
     enabled: Boolean(deferredRun),
   })
-  const start = useMutation({ mutationFn: () => api.startAnalysis(maxDocuments), onSuccess: onTrack })
+  const start = useMutation({ mutationFn: api.startAnalysis, onSuccess: onTrack })
 
   return <>
     <section className="analysis-toolbar panel">
-      <div><p className="eyebrow">BERTopic + KeyBERT</p><h2>Corpus analysis</h2><span>Model directory-aware topics, distinct keywords, and concept relationships.</span></div>
-      <label>Document limit<input type="number" min={5} max={10000} value={maxDocuments} onChange={(event) => setMaxDocuments(Number(event.target.value))} /></label>
-      <button className="primary-command" onClick={() => start.mutate()} disabled={start.isPending}><Play /> Run analysis</button>
+      <div><p className="eyebrow">BERTopic + KeyBERT</p><h2>Corpus analysis</h2><span>Analyze every eligible note across the complete directory tree.</span>{start.error && <strong className="request-error">{start.error.message}</strong>}</div>
+      <button className="primary-command" onClick={() => start.mutate()} disabled={start.isPending}><Play /> {start.isPending ? 'Queueing...' : 'Run analysis'}</button>
     </section>
 
     <section className="analysis-layout">

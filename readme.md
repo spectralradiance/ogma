@@ -143,11 +143,11 @@ CSV headings and descriptions are provisional because the chapter structure was 
 
 ### Corpus Intelligence
 
-The Analysis workspace runs a bounded semantic-analysis job over a selected maximum number of documents.
+The Analysis workspace processes every eligible document under the selected source tree. Individual document reads are bounded by `--max-chars` to prevent one unusually large export from dominating memory, but documents are not omitted by count.
 
 The worker:
 
-1. Traverses the selected source directory and reads bounded text samples.
+1. Traverses the complete selected source directory and reads bounded text samples.
 2. Embeds documents with `all-MiniLM-L6-v2`.
 3. Extracts diverse phrases with KeyBERT and maximal marginal relevance.
 4. Fits BERTopic using precomputed embeddings and `KeyBERTInspired` labels.
@@ -155,7 +155,7 @@ The worker:
 6. Builds a NetworkX graph linking documents, topics, and mentioned keywords.
 7. Writes one JSON-safe analysis payload using pandas `orient="records"` conversion.
 
-Completed results provide keyword rankings, topic-frequency charts, and an interactive force graph with pan, zoom, and node inspection.
+Completed results provide keyword rankings, topic-frequency charts, and an interactive force graph with pan, zoom, and node inspection. The worker emits scan, embedding, keyword, topic, hierarchy, and graph phase updates. During silent third-party operations it emits a heartbeat every 15 seconds; these messages stream to the live job drawer over SSE.
 
 ### Run Library
 
@@ -244,12 +244,11 @@ Generation is CUDA-only unless `--allow-cpu` is deliberately supplied.
 ### Analyze a corpus
 
 ```powershell
-python code/analyze_corpus.py --source data/input --max-documents 500
+python code/analyze_corpus.py --source data/input
 ```
 
 Useful controls:
 
-- `--max-documents` bounds embedding/model size.
 - `--max-chars` bounds each document sample.
 - `--min-topic-size` controls BERTopic cluster granularity.
 - `--run-id` selects the output directory name.

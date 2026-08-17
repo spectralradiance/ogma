@@ -41,9 +41,9 @@ export const api = {
   cancelJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`, { method: 'DELETE' }),
   analyses: () => request<AnalysisSummary[]>('/api/analyses'),
   analysis: (runId: string) => request<AnalysisResult>(`/api/analyses/${runId}`),
-  startAnalysis: (maxDocuments: number) => request<Job>('/api/analyses', {
+  startAnalysis: () => request<Job>('/api/analyses', {
     method: 'POST',
-    body: JSON.stringify({ max_documents: maxDocuments }),
+    body: '{}',
   }),
   eventsUrl: (jobId: string) => `${API}/api/jobs/${jobId}/events`,
 }
