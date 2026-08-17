@@ -55,10 +55,25 @@ export interface AnalysisSummary {
 }
 
 export interface AnalysisResult extends AnalysisSummary {
+  analysis_version?: number
   keywords: { term: string; score: number }[]
-  topics: { Topic: number; Count: number; Name: string; Representation?: string[] }[]
+  topics: { Topic: number; Count: number; Name: string; DisplayName?: string; Representation?: string[] }[]
   topics_by_directory: Record<string, unknown>[]
-  documents: { path: string; directory: string; depth: number; topic: number; topic_name: string }[]
+  documents_by_level?: { level: number; level_range: string; document_count: number }[]
+  topics_by_level?: { level: number; level_range: string; topic: number; topic_name: string; document_count: number; prevalence: number }[]
+  keywords_by_level?: { level: number; level_range: string; term: string; document_count: number; prevalence: number }[]
+  documents: {
+    path: string
+    directory: string
+    depth: number
+    level?: number | null
+    level_range?: string | null
+    topic: number
+    topic_name: string
+    keywords?: string[]
+    character_count?: number
+    excerpt?: string
+  }[]
   graph: {
     nodes: { id: string; label: string; kind: 'topic' | 'keyword' | 'document'; score?: number }[]
     edges: { source: string; target: string; kind: string }[]

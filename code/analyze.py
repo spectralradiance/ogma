@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import subprocess
 import sys
 
@@ -190,7 +191,7 @@ if __name__ == "__main__":
         start_path = sys.argv[1]
     else:
         # Default path if no argument is given
-        start_path = 'C:\\Users\\snowb\\My Drive\\writing'
+        start_path = str(Path(__file__).resolve().parent.parent / 'data' / 'input' / 'writing-desktop')
 
     if not os.path.isdir(start_path):
         print(f"Error: The path '{start_path}' is not a valid directory.")

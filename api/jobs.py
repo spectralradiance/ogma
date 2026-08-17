@@ -120,6 +120,18 @@ class JobManager:
             for job in sorted(self.jobs.values(), key=lambda item: item.created_at, reverse=True)
         ]
 
+    def active(self, kind: JobKind) -> Job | None:
+        """Return running work first, otherwise the oldest queued job of a kind."""
+        matching = [
+            job for job in self.jobs.values()
+            if job.kind == kind and job.status in {"running", "queued"}
+        ]
+        return next((job for job in matching if job.status == "running"), None) or min(
+            matching,
+            key=lambda job: job.created_at,
+            default=None,
+        )
+
     async def cancel(self, job_id: str) -> JobResponse | None:
         """Cancel queued work or signal a running process group.
 

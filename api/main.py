@@ -266,13 +266,19 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
 
 @app.post("/api/analyses", response_model=JobResponse, status_code=202)
 async def start_analysis(request: AnalysisRequest) -> JobResponse:
+    # Full-corpus analysis is expensive. Treat repeated submissions as requests
+    # to reconnect to the existing work instead of stacking duplicate jobs.
+    active = manager.active("analysis")
+    if active is not None:
+        return active.response()
     run_id = new_run_id()
     arguments = [
         str(CODE_DIR / "analyze_corpus.py"),
         "--run-id", run_id,
         "--max-chars", str(request.max_chars),
-        "--min-topic-size", str(request.min_topic_size),
     ]
+    if request.min_topic_size is not None:
+        arguments.extend(["--min-topic-size", str(request.min_topic_size)])
     if request.source:
         source = Path(request.source).resolve()
         if not source.is_dir():

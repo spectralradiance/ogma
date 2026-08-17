@@ -93,7 +93,7 @@ function App() {
           <div className="panel recent-panel"><div className="panel-title"><div><p className="eyebrow">Recent</p><h2>Generation runs</h2></div><button className="text-button" onClick={() => setView('runs')}>View all</button></div><RunTable runs={filteredRuns.slice(0, 5)} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></div>
         </section>
       </>}
-      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView onTrack={track} /></Suspense>}
+      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} /></Suspense>}
       {view === 'runs' && <section className="panel full-panel"><RunTable runs={filteredRuns} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></section>}
       {view === 'jobs' && <section className="panel full-panel"><JobTable jobs={jobs.data ?? []} onSelect={(job) => setActiveJobId(job.id)} /></section>}
     </main>

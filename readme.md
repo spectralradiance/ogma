@@ -13,6 +13,9 @@ The supplied snake mark is used as the application icon and favicon.
 - Extract distinct keywords with KeyBERT.
 - Model topics with BERTopic and `KeyBERTInspired` representations.
 - Compare topic frequencies across source directories.
+- Browse the analyzed corpus as a searchable folder/file hierarchy.
+- Inspect each document's topic, numbered level, keywords, analyzed size, and cleaned excerpt.
+- Search dedicated topic and keyword catalogs.
 - Build document-topic-keyword relationship graphs with NetworkX.
 - Monitor long jobs through Server-Sent Events and cancel running workers.
 - Keep generated artifacts isolated in collision-safe timestamped run directories.
@@ -143,7 +146,7 @@ CSV headings and descriptions are provisional because the chapter structure was 
 
 ### Corpus Intelligence
 
-The Analysis workspace processes every eligible document under the selected source tree. Individual document reads are bounded by `--max-chars` to prevent one unusually large export from dominating memory, but documents are not omitted by count.
+The Analysis workspace processes every eligible document under `data/input/writing-desktop`. Individual document reads are bounded by `--max-chars` to prevent one unusually large export from dominating memory, but documents are not omitted by count.
 
 The worker:
 
@@ -155,7 +158,13 @@ The worker:
 6. Builds a NetworkX graph linking documents, topics, and mentioned keywords.
 7. Writes one JSON-safe analysis payload using pandas `orient="records"` conversion.
 
-Completed results provide keyword rankings, topic-frequency charts, and an interactive force graph with pan, zoom, and node inspection. The worker emits scan, embedding, keyword, topic, hierarchy, and graph phase updates. During silent third-party operations it emits a heartbeat every 15 seconds; these messages stream to the live job drawer over SSE.
+For paths shaped like `chaos/001-020/001/...`, Sift extracts both the range (`001-020`) and numeric level (`1`). It records document totals and normalized topic/keyword document prevalence for every numbered level. The Analysis workspace can switch between a topic and keyword to trace its percentage of documents from level to level; missing observations are plotted as zeroes rather than omitted.
+
+Completed results provide keyword rankings, topic-frequency charts, frequency-across-levels charts, and an interactive force graph with pan, zoom, and node inspection. A searchable corpus browser reconstructs the relative directory tree, expands folders on demand, and opens per-document metadata without leaving the analysis. Separate searchable catalogs expose all modeled topics and selected corpus keywords.
+
+New analysis payloads store each document's five KeyBERT phrases, analyzed character count, and a cleaned 600-character excerpt. Older results remain browsable and show their available topic/path metadata, but must be regenerated to add those newer fields and numbered-level series.
+
+The worker emits scan, embedding, keyword, topic, hierarchy, and graph phase updates. During silent third-party operations it emits a heartbeat every 15 seconds. The Analysis page discovers queued/running analysis jobs from the API after navigation or browser refresh, reconnects to SSE, and displays phase text, estimated completion percentage, logs, and cancellation controls inline. Repeated Run Analysis requests reconnect to existing active work rather than queuing duplicate full-corpus analyses.
 
 ### Run Library
 
@@ -169,7 +178,7 @@ Cancelling a Windows worker sends `CTRL_BREAK_EVENT`, allowing Python code to fl
 
 ## Data and Artifact Ownership
 
-Source files remain under `data/input`:
+Manuscript metadata and source files remain under `data/input`. Corpus Intelligence analyzes only `writing-desktop`:
 
 ```text
 data/input/chapter_structure.csv
@@ -244,7 +253,7 @@ Generation is CUDA-only unless `--allow-cpu` is deliberately supplied.
 ### Analyze a corpus
 
 ```powershell
-python code/analyze_corpus.py --source data/input
+python code/analyze_corpus.py --source data/input/writing-desktop
 ```
 
 Useful controls:
