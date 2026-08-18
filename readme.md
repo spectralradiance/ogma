@@ -1,6 +1,6 @@
-# Sift
+# Sylph
 
-Sift is a local-first corpus analysis and manuscript-generation workspace for directory trees of Markdown and text notes. It combines semantic retrieval, hierarchical topic modeling, keyword extraction, concept graphs, and GPU-backed long-form writing behind a FastAPI service and React interface.
+Sylph is a local-first corpus analysis and manuscript-generation workspace for directory trees of Markdown and text notes. It combines semantic retrieval, hierarchical topic modeling, keyword extraction, concept graphs, and GPU-backed long-form writing behind a FastAPI service and React interface.
 
 The supplied snake mark is used as the application icon and favicon.
 
@@ -20,7 +20,7 @@ The supplied snake mark is used as the application icon and favicon.
 - Monitor long jobs through Server-Sent Events and cancel running workers.
 - Keep generated artifacts isolated in collision-safe timestamped run directories.
 
-All language-model inference remains local. Sift does not fine-tune the model or send the note corpus to a cloud API.
+All language-model inference remains local. Sylph does not fine-tune the model or send the note corpus to a cloud API.
 
 ## Architecture
 
@@ -130,7 +130,7 @@ npm run dev
 
 Open:
 
-- Sift: http://127.0.0.1:5173
+- Sylph: http://127.0.0.1:5173
 - API documentation: http://127.0.0.1:8000/docs
 - OpenAPI schema: http://127.0.0.1:8000/openapi.json
 
@@ -172,7 +172,7 @@ The worker:
 6. Builds a NetworkX graph linking documents, topics, and mentioned keywords.
 7. Writes one JSON-safe analysis payload using pandas `orient="records"` conversion.
 
-For paths shaped like `chaos/001-020/001/...`, Sift extracts both the range (`001-020`) and numeric level (`1`). It records document totals and normalized topic/keyword document prevalence for every numbered level. The Analysis workspace can switch between a topic and keyword to trace its percentage of documents from level to level; missing observations are plotted as zeroes rather than omitted.
+For paths shaped like `chaos/001-020/001/...`, Sylph extracts both the range (`001-020`) and numeric level (`1`). It records document totals and normalized topic/keyword document prevalence for every numbered level. The Analysis workspace can switch between a topic and keyword to trace its percentage of documents from level to level; missing observations are plotted as zeroes rather than omitted.
 
 Completed results provide keyword rankings, topic-frequency charts, frequency-across-levels charts, and an interactive force graph with pan, zoom, and node inspection. A searchable corpus browser reconstructs the relative directory tree, expands folders on demand, and opens per-document metadata without leaving the analysis. Separate searchable catalogs expose all modeled topics and selected corpus keywords.
 
@@ -317,7 +317,7 @@ cd frontend
 npm run dict:api
 ```
 
-The service listens only on `127.0.0.1:3001`. The Sift **Editor** view combines a searchable tree
+The service listens only on `127.0.0.1:3001`. The Sylph **Editor** view combines a searchable tree
 of `data/input/writing-desktop` and `data/input/notion/Writing`, CodeMirror Markdown editing,
 `Ctrl+S` saves, live preview, hover definitions, and a full lexical inspector. FastAPI restricts
 file reads and writes to those two note roots and performs saves through atomic file replacement.
@@ -378,7 +378,7 @@ Confirm `data/intermediary/chroma_db/chroma.sqlite3` exists, then rerun `python 
 
 ### CUDA model loading fails
 
-Verify `torch.cuda.is_available()` and the selected GPU environment. Sift stops rather than silently offloading model parameters to CPU. This avoids locking the computer with a full 7B CPU model.
+Verify `torch.cuda.is_available()` and the selected GPU environment. Sylph stops rather than silently offloading model parameters to CPU. This avoids locking the computer with a full 7B CPU model.
 
 ### GPU out-of-memory
 

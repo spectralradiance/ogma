@@ -4,7 +4,7 @@ import sys
 
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "index_notes.py"
-SPEC = importlib.util.spec_from_file_location("sift_index_notes", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("sylph_index_notes", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 index_notes = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = index_notes

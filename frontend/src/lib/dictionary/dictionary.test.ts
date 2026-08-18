@@ -10,7 +10,7 @@ import { normalizeKaikkiEntry } from '../../scripts/setup-wiktionary.ts'
 
 
 test('dictionary service returns exact entries and FTS prefix results', () => {
-  const path = join(tmpdir(), `sift-dictionary-${process.pid}-${Date.now()}.db`)
+  const path = join(tmpdir(), `sylph-dictionary-${process.pid}-${Date.now()}.db`)
   const db = openDictionaryDb(path)
   initializeDictionarySchema(db)
   const data = JSON.stringify({

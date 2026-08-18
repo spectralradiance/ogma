@@ -1,4 +1,4 @@
-"""Pydantic contracts shared by Sift's REST and SSE endpoints.
+"""Pydantic contracts shared by Sylph's REST and SSE endpoints.
 
 These models are mirrored by strict interfaces in ``frontend/src/types.ts``.
 Keep both sides synchronized when fields or allowed state values change.
