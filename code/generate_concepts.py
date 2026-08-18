@@ -54,7 +54,6 @@ def batch_key(rows: list[dict]) -> str:
             "system": row["System"],
             "number": write_book.section_number(row),
             "name": row["Name"],
-            "description": row.get("Description", ""),
         }
         for row in rows
     ]
@@ -107,8 +106,8 @@ def build_concept_messages(
     source_blocks = []
     for row, context in zip(rows, contexts):
         source_blocks.append(
-            f"Section: {row['System']} {write_book.section_number(row)} {row['Name']}\n"
-            f"Description: {row.get('Description', '')}\n"
+            f"Section: {row['System']} {write_book.section_number(row)}\n"
+            f"{write_book.display_name_hint(row)}\n"
             f"Notes:\n{context}"
         )
 
@@ -296,7 +295,7 @@ def main() -> None:
             contexts = []
             for row in rows:
                 query = write_book.build_query(row, rows_by_system[row["System"]])
-                context = write_book.retrieve_context(collection, query, args.notes_top_k)
+                context = write_book.retrieve_context(collection, query, args.notes_top_k, write_book.lexical_hint(row))
                 contexts.append(context[:DEFAULT_CONTEXT_CHARS])
             messages = build_concept_messages(rows, contexts, args.candidates_per_batch)
             response = write_book.generate_text(

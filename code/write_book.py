@@ -12,6 +12,7 @@ Requires index_notes.py to have been run first.
 """
 
 import argparse
+from collections import Counter
 import csv
 import json
 import os
@@ -33,15 +34,17 @@ OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 PROGRESS_FILE = os.path.join(INTERMEDIARY_DIR, "write_book_progress.json")
 DEFAULT_DB_DIR = os.path.join(INTERMEDIARY_DIR, "chroma_db")
 COLLECTION_NAME = "notes"
-PIPELINE_VERSION = "outline-v3"
+PIPELINE_VERSION = "outline-v4"
 
 MAX_SEQ_LENGTH = 4096
 MAX_NEW_TOKENS = 900
 PARAGRAPHS_PER_SECTION = 3
 TOP_K = 5
 DEFAULT_SYSTEM = "Universal Metaphysics"
+DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"
 MAX_LANGUAGE_RETRIES = 3
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+NOTE_SOURCE_KEYS = ("writing-desktop", "notion/Writing")
 
 
 def load_guidance(path: str = GUIDANCE_FILE) -> dict:
@@ -76,7 +79,15 @@ def section_number(row: dict) -> str:
         return row["Sub-Sub-Chapter"]
     if is_chapter_introduction(row):
         return f"{row['Chapter']}.0"
-    return row["Sub-Chapter"]
+    return row["Sub-Chapter"] or row["Chapter"]
+
+
+def display_name_hint(row: dict) -> str:
+    """Describe a CSV name without treating AI-generated bracketed text as fact."""
+    name = row["Name"].strip()
+    if name.startswith("[") and name.endswith("]"):
+        return f"Optional AI-generated name suggestion: {name[1:-1].strip()}"
+    return f"Provisional structural name: {name}"
 
 
 def safe_name(system: str) -> str:
@@ -140,7 +151,10 @@ def chapter_title(row: dict) -> str:
 def find_chapter_row(row: dict, rows_by_key: dict) -> dict | None:
     system = row["System"]
     chapter = row["Chapter"]
-    title_row = rows_by_key.get((system, chapter, "", ""))
+    title_row = (
+        rows_by_key.get((system, chapter, chapter, ""))
+        or rows_by_key.get((system, chapter, "", ""))
+    )
     if title_row and not is_chapter_introduction(title_row):
         return title_row
     return next(
@@ -163,22 +177,123 @@ def build_query(row: dict, rows_by_key: dict) -> str:
         chapter_title(chapter_row) if chapter_row else "",
         sub_row["Name"] if sub_row else "",
         row["Name"],
-        row.get("Description", ""),
-        row.get("Alternative Names", ""),
     ]
     return " ".join(p for p in parts if p).strip()
 
 
-def retrieve_context(collection, query: str, k: int) -> str:
-    results = collection.query(query_texts=[query], n_results=k, include=["documents", "metadatas"])
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    if not docs:
+def lexical_hint(row: dict) -> str:
+    return row["Name"].strip().strip("[]").strip()
+
+
+def _retrieval_score(document: str, distance: float, term_constrained: bool) -> float:
+    heading_count = document.count("#")
+    sentence_count = len(re.findall(r"[.!?](?:\s|$)", document))
+    skeletal_penalty = 0.0
+    if len(document) < 240:
+        skeletal_penalty += 0.45
+    if sentence_count == 0:
+        skeletal_penalty += 0.55
+    if heading_count >= 8:
+        skeletal_penalty += min(1.2, heading_count * 0.02)
+    if heading_count >= 5 and sentence_count < 3:
+        skeletal_penalty += 0.4
+    if len(re.findall(r"(?:={10,}|-{10,})", document)) >= 2:
+        skeletal_penalty += 0.6
+    return distance + skeletal_penalty - (0.8 if term_constrained else 0.0)
+
+
+def query_expansion_terms(documents: list[str], term: str, query: str) -> list[str]:
+    stop_words = {
+        "about", "after", "again", "also", "because", "being", "between", "could",
+        "every", "from", "have", "into", "more", "only", "other", "should", "some",
+        "than", "that", "their", "there", "these", "they", "this", "through", "under",
+        "what", "when", "where", "which", "while", "with", "without", "would", "your",
+    }
+    query_words = set(re.findall(r"[a-z][a-z'-]{2,}", query.lower()))
+    seed_stems = {
+        token[:6]
+        for token in re.findall(r"[a-z][a-z'-]{2,}", term.lower())
+    }
+    counts = Counter()
+    for document in documents:
+        tokens = re.findall(r"[a-z][a-z'-]{2,}", document.lower())
+        for index, token in enumerate(tokens):
+            if not any(token.startswith(stem) for stem in seed_stems):
+                continue
+            for nearby in tokens[max(0, index - 10):index + 11]:
+                if (
+                    len(nearby) >= 4
+                    and nearby not in stop_words
+                    and nearby not in query_words
+                    and not any(nearby.startswith(stem) for stem in seed_stems)
+                ):
+                    counts[nearby] += 1
+    return [word for word, count in counts.most_common(8) if count >= 2]
+
+
+def retrieve_context(collection, query: str, k: int, term: str = "") -> str:
+    semantic_query = query
+    if len(term) >= 4:
+        lexical_matches = collection.get(
+            where_document={"$contains": term.lower()},
+            limit=300,
+            include=["documents"],
+        )
+        expansion = query_expansion_terms(lexical_matches["documents"], term, query)
+        if expansion:
+            semantic_query = f"{query} {' '.join(expansion)}"
+
+    candidate_count = max(k * 4, k)
+    searches = []
+    if len(term) >= 4:
+        for variant in dict.fromkeys((term, term.lower())):
+            searches.append((True, {"where_document": {"$contains": variant}}))
+            for source in NOTE_SOURCE_KEYS:
+                searches.append((
+                    True,
+                    {
+                        "where": {"source": source},
+                        "where_document": {"$contains": variant},
+                    },
+                ))
+    searches.append((False, {}))
+
+    candidates = {}
+    for term_constrained, options in searches:
+        results = collection.query(
+            query_texts=[semantic_query],
+            n_results=candidate_count,
+            include=["documents", "metadatas", "distances"],
+            **options,
+        )
+        for chunk_id, document, metadata, distance in zip(
+            results["ids"][0],
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            score = _retrieval_score(document, float(distance), term_constrained)
+            if chunk_id not in candidates or score < candidates[chunk_id][0]:
+                candidates[chunk_id] = (score, document, metadata)
+
+    if not candidates:
         return ""
+    ranked = sorted(candidates.values(), key=lambda item: item[0])
+    selected = []
+    for source in NOTE_SOURCE_KEYS:
+        source_candidate = next(
+            (item for item in ranked if item[2].get("source") == source),
+            None,
+        )
+        if source_candidate is not None:
+            selected.append(source_candidate)
+    selected.extend(item for item in ranked if item not in selected)
+
     excerpts = []
-    for doc, meta in zip(docs, metas):
-        source = meta.get("filename", "note")
-        excerpts.append(f"[{source}]\n{doc.strip()}")
+    for _, document, metadata in selected[:k]:
+        source_root = metadata.get("source", "notes")
+        relative_path = metadata.get("rel_path", metadata.get("filename", "note"))
+        excerpts.append(f"[{source_root}/{relative_path}]\n{document.strip()}")
     return "\n\n---\n\n".join(excerpts)
 
 
@@ -193,8 +308,7 @@ def chapter_structure(row: dict, section_rows: list[dict]) -> str:
         elif index > current_index:
             position = "RESERVED FOR LATER"
         lines.append(
-            f"- {position}: {section_number(candidate)} {candidate['Name']}: "
-            f"{candidate.get('Description', '')}"
+            f"- {position}: {section_number(candidate)}; {display_name_hint(candidate)}"
         )
     return "\n".join(lines)
 
@@ -208,13 +322,49 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
         {
             "role": "user",
             "content": (
-                f"Create a concise writing plan for {section_number(row)} {row['Name']}.\n"
-                f"Section description: {row.get('Description', '')}\n\n"
+                f"Create a note-grounded writing plan for section {section_number(row)}.\n"
+                f"{display_name_hint(row)}\n\n"
                 f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}\n\n"
                 f"Relevant excerpts from the author's notes:\n{context}\n\n"
                 f"{GUIDANCE['outline']['instructions']}"
             ),
         },
+    ]
+
+
+def build_structure_messages(row: dict, child_rows: list[dict], context: str) -> list[dict]:
+    children = "\n".join(
+        f"- {section_number(child)}; {display_name_hint(child)}"
+        for child in child_rows
+    )
+    return [
+        {"role": "system", "content": GUIDANCE["structure"]["system"]},
+        {
+            "role": "user",
+            "content": GUIDANCE["structure"]["instructions"].format(
+                number=section_number(row),
+                name_hint=display_name_hint(row),
+                children=children or "- No child rows",
+                context=context,
+            ),
+        },
+    ]
+
+
+def structure_children(row: dict, rows: list[dict]) -> list[dict]:
+    if row["Sub-Chapter"] and row["Sub-Chapter"] != row["Chapter"]:
+        return [
+            candidate for candidate in rows
+            if candidate["Chapter"] == row["Chapter"]
+            and candidate["Sub-Chapter"] == row["Sub-Chapter"]
+            and candidate["Sub-Sub-Chapter"]
+        ]
+    return [
+        candidate for candidate in rows
+        if candidate is not row
+        and candidate["Chapter"] == row["Chapter"]
+        and not candidate["Sub-Sub-Chapter"]
+        and candidate["Sub-Chapter"] != row["Sub-Chapter"]
     ]
 
 
@@ -227,7 +377,63 @@ def load_outline(path: str) -> dict[str, str]:
         r"<!-- section: (?P<key>[^\n]+) -->\n(?P<plan>.*?)\n<!-- /section -->",
         re.DOTALL,
     )
-    return {match["key"]: match["plan"].strip() for match in pattern.finditer(content)}
+    prefix = f"{PIPELINE_VERSION}|"
+    return {
+        match["key"]: match["plan"].strip()
+        for match in pattern.finditer(content)
+        if match["key"].startswith(prefix)
+    }
+
+
+def load_structure(path: str) -> dict[str, str]:
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as outline_file:
+        content = outline_file.read()
+    pattern = re.compile(
+        r"<!-- structure: (?P<key>[^\n]+) -->\n(?P<plan>.*?)\n<!-- /structure -->",
+        re.DOTALL,
+    )
+    prefix = f"{PIPELINE_VERSION}|"
+    return {
+        match["key"]: match["plan"].strip()
+        for match in pattern.finditer(content)
+        if match["key"].startswith(prefix)
+    }
+
+
+def grounded_title(content: str, fallback: str) -> str:
+    match = re.search(r"^- Note-grounded title:\s*(.+)$", content, re.MULTILINE)
+    return match.group(1).strip().strip('"') if match else fallback
+
+
+def hierarchy_row(row: dict, rows_by_key: dict, level: str) -> dict | None:
+    system = row["System"]
+    if level == "chapter":
+        return (
+            rows_by_key.get((system, row["Chapter"], row["Chapter"], ""))
+            or rows_by_key.get((system, row["Chapter"], "", ""))
+        )
+    return rows_by_key.get((system, row["Chapter"], row["Sub-Chapter"], ""))
+
+
+def resolved_title(row: dict | None, records: dict[str, str], fallback: str) -> str:
+    if not row:
+        return fallback
+    return grounded_title(records.get(section_key(row), ""), fallback)
+
+
+def append_structure(path: str, row: dict, plan: str) -> None:
+    new_file = not os.path.exists(path)
+    with open(path, "a", encoding="utf-8") as outline_file:
+        if new_file:
+            outline_file.write(f"# {row['System']} Writing Outline\n\n")
+        outline_file.write(
+            f"<!-- structure: {section_key(row)} -->\n"
+            f"## Structure {section_number(row)}\n\n"
+            f"{plan.strip()}\n"
+            "<!-- /structure -->\n\n"
+        )
 
 
 def append_outline(path: str, row: dict, plan: str) -> None:
@@ -249,19 +455,37 @@ def write_human_outline(
     section_rows: list[dict],
     plans: dict[str, str],
     rows_by_key: dict | None = None,
+    structures: dict[str, str] | None = None,
 ) -> None:
+    rows_by_key = rows_by_key or {}
+    structures = structures or {}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as outline_file:
         outline_file.write(f"# {system} Content Outline\n\n")
         current_chapter = None
+        current_sub = None
         for row in section_rows:
             if row["Chapter"] != current_chapter:
-                chapter_row = find_chapter_row(row, rows_by_key or {})
-                chapter_name = chapter_title(chapter_row) if chapter_row else row["Name"]
+                chapter_row = hierarchy_row(row, rows_by_key, "chapter")
+                fallback = chapter_title(chapter_row) if chapter_row else row["Name"]
+                chapter_name = resolved_title(chapter_row, structures, fallback)
                 outline_file.write(f"## {row['Chapter']} {chapter_name}\n\n")
+                if chapter_row and section_key(chapter_row) in structures:
+                    outline_file.write(structures[section_key(chapter_row)].strip() + "\n\n")
                 current_chapter = row["Chapter"]
-            outline_file.write(f"### {section_number(row)} {row['Name']}\n\n")
+                current_sub = None
+            if row["Sub-Sub-Chapter"] and row["Sub-Chapter"] != current_sub:
+                sub_row = hierarchy_row(row, rows_by_key, "subchapter")
+                fallback = sub_row["Name"] if sub_row else row["Sub-Chapter"]
+                sub_name = resolved_title(sub_row, structures, fallback)
+                outline_file.write(f"### {row['Sub-Chapter']} {sub_name}\n\n")
+                if sub_row and section_key(sub_row) in structures:
+                    outline_file.write(structures[section_key(sub_row)].strip() + "\n\n")
+                current_sub = row["Sub-Chapter"]
             plan = plans.get(section_key(row))
+            section_name = grounded_title(plan or "", row["Name"])
+            heading = "####" if row["Sub-Sub-Chapter"] else "###"
+            outline_file.write(f"{heading} {section_number(row)} {section_name}\n\n")
             if plan:
                 outline_file.write(plan.strip() + "\n\n")
             else:
@@ -297,7 +521,6 @@ def build_messages(
     sub_row = rows_by_key.get((system, row["Chapter"], row["Sub-Chapter"], ""))
     chapter_name = chapter_title(chapter_row) if chapter_row else system
     sub_name = sub_row["Name"] if sub_row else "Introduction"
-    alt_names = f" Also known as: {row['Alternative Names']}." if row.get("Alternative Names") else ""
 
     context_block = (
         f"\n\nRelevant source excerpts from the author's notes:\n\n{context}"
@@ -307,11 +530,11 @@ def build_messages(
     number = section_number(row)
     instruction = (
         f"Book: \"{system}\".\n"
-        f"Topic: \"{number}: {row['Name']}\". {row['Description']}{alt_names}\n"
+        f"Topic number: {number}. {display_name_hint(row)}\n"
         f"Context: section of \"{row['Sub-Chapter'] or number}: {sub_name}\" "
         f"in chapter \"{row['Chapter']}: {chapter_name}\". "
-        "The book, chapter, and section labels above are authoritative; do not substitute "
-        "similarly numbered material from another book."
+        "The numbering is authoritative. Names from the CSV are provisional retrieval hints; "
+        "the note-grounded writing plan determines the subject and title."
         f"{context_block}\n\n"
         f"Required section plan:\n\n{plan}\n\n"
         + GUIDANCE["manuscript"]["instructions"].format(
@@ -467,6 +690,11 @@ def main():
         help="Explicitly allow slow CPU generation when CUDA is unavailable or fails",
     )
     parser.add_argument(
+        "--model-name",
+        default=DEFAULT_MODEL_NAME,
+        help="Hugging Face causal language model used for outline and manuscript generation",
+    )
+    parser.add_argument(
         "--outline-only",
         action="store_true",
         help="Create or complete the note-grounded Markdown outline without writing prose",
@@ -535,6 +763,10 @@ def main():
         row for row in rows
         if should_generate_text(row)
     ]
+    structure_rows = [
+        row for row in rows
+        if not should_generate_text(row)
+    ]
 
     # --- Load progress ---
     all_done_keys: set[str] = set()
@@ -549,7 +781,9 @@ def main():
     pending = [row for row in section_rows if section_key(row) not in done_keys]
     book_outline_path = paths["outline"]
     plans = load_outline(book_outline_path)
+    structures = load_structure(book_outline_path)
     missing_plans = [row for row in section_rows if section_key(row) not in plans]
+    missing_structures = [row for row in structure_rows if section_key(row) not in structures]
 
     print("\nCurrent process")
     print(f"  Book: {args.system}")
@@ -557,6 +791,7 @@ def main():
         f"  Outline: {len(plans)} / {len(section_rows)} sections available at "
         f"{book_outline_path}"
     )
+    print(f"  Architecture: {len(structures)} / {len(structure_rows)} structural units available")
     legacy_outline_path = os.path.join(
         INTERMEDIARY_DIR,
         f"{safe_name(args.system)}_outline.md",
@@ -566,8 +801,11 @@ def main():
             f"  Older outline not reused: {legacy_outline_path} "
             "(created from a previous CSV/pipeline version)"
         )
-    if missing_plans:
-        print(f"  Step 1: generate {len(missing_plans)} missing outline sections")
+    if missing_structures or missing_plans:
+        print(
+            f"  Step 1: generate {len(missing_structures)} structural units and "
+            f"{len(missing_plans)} outline sections"
+        )
     else:
         print("  Step 1: reuse the complete outline")
     if args.outline_only:
@@ -583,17 +821,19 @@ def main():
     if args.status_only:
         return
 
-    if not pending and not missing_plans:
-        write_human_outline(paths["human_outline"], args.system, section_rows, plans, rows_by_key)
+    if not pending and not missing_plans and not missing_structures:
+        write_human_outline(
+            paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+        )
         print(f"All sections complete: {paths['manuscript']}")
         return
 
-    if args.outline_only and not missing_plans:
+    if args.outline_only and not missing_plans and not missing_structures:
         print(f"Reusing complete outline: {book_outline_path}")
         return
 
     # --- Load model ---
-    base_name = "Qwen/Qwen2.5-7B-Instruct"
+    base_name = args.model_name
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Loading {base_name} on {device}...")
 
@@ -604,22 +844,48 @@ def main():
     model.eval()
     print("Model ready.")
 
+    # Ground parent titles and chapter-level scope before planning individual prose sections.
+    if missing_structures:
+        print(f"Grounding {len(missing_structures)} structural units in {book_outline_path}")
+        for row in missing_structures:
+            query = build_query(row, rows_by_key)
+            context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
+            messages = build_structure_messages(row, structure_children(row, rows), context)
+            structure = generate_text(
+                model, tokenizer, messages, max_new_tokens=500, do_sample=False
+            )
+            append_structure(book_outline_path, row, structure)
+            structures[section_key(row)] = structure
+            write_human_outline(
+                paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+            )
+            print(
+                f"  Grounded {section_number(row)}: "
+                f"{grounded_title(structure, row['Name'])}"
+            )
+
     # --- Create or reuse the complete note-grounded outline ---
     if missing_plans:
         print(f"Planning {len(missing_plans)} sections in {book_outline_path}")
         for row in missing_plans:
             query = build_query(row, rows_by_key)
-            context = retrieve_context(collection, query, args.notes_top_k)
+            context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
             messages = build_outline_messages(row, section_rows, context)
             plan = generate_text(model, tokenizer, messages, max_new_tokens=500, do_sample=False)
             append_outline(book_outline_path, row, plan)
             plans[section_key(row)] = plan
-            write_human_outline(paths["human_outline"], args.system, section_rows, plans, rows_by_key)
-            print(f"  Planned {section_number(row)}: {row['Name']}")
+            write_human_outline(
+                paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+            )
+            print(
+                f"  Planned {section_number(row)}: {grounded_title(plan, row['Name'])}"
+            )
     else:
         print(f"Reusing complete outline: {book_outline_path}")
 
-    write_human_outline(paths["human_outline"], args.system, section_rows, plans, rows_by_key)
+    write_human_outline(
+        paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+    )
 
     if args.outline_only:
         print(f"Outline ready: {book_outline_path}")
@@ -637,11 +903,12 @@ def main():
 
         for row in pending:
             if row["Chapter"] != current_chapter:
-                chapter_row = find_chapter_row(row, rows_by_key)
+                chapter_row = hierarchy_row(row, rows_by_key, "chapter")
                 if row["Chapter"] == "0":
                     heading = "Introduction"
                 else:
-                    heading = chapter_title(chapter_row) if chapter_row else args.system
+                    fallback = chapter_title(chapter_row) if chapter_row else args.system
+                    heading = resolved_title(chapter_row, structures, fallback)
                 out.write(f"\n## {row['Chapter']} {heading}\n\n")
                 current_chapter = row["Chapter"]
                 current_sub = None
@@ -653,7 +920,8 @@ def main():
                 sub_row = rows_by_key.get(
                     (args.system, row["Chapter"], row["Sub-Chapter"], "")
                 )
-                heading = sub_row["Name"] if sub_row else row["Sub-Chapter"]
+                fallback = sub_row["Name"] if sub_row else row["Sub-Chapter"]
+                heading = resolved_title(sub_row, structures, fallback)
                 out.write(f"### {row['Sub-Chapter']} {heading}\n\n")
                 current_sub = row["Sub-Chapter"]
             elif not row["Sub-Sub-Chapter"]:
@@ -661,10 +929,11 @@ def main():
                 current_sub = row["Sub-Chapter"]
 
             if row["Sub-Sub-Chapter"]:
-                out.write(f"#### {row['Sub-Sub-Chapter']} {row['Name']}\n\n")
+                title = grounded_title(plans[section_key(row)], row["Name"])
+                out.write(f"#### {row['Sub-Sub-Chapter']} {title}\n\n")
 
             query = build_query(row, rows_by_key)
-            context = retrieve_context(collection, query, args.notes_top_k)
+            context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
             messages = build_messages(
                 row,
                 rows_by_key,

@@ -35,9 +35,6 @@ def build_outline(row: dict, rows_by_key: dict) -> str:
     if sub_row:
         lines.append(f"  - {row['Sub-Chapter']}: {sub_row['Name']}")
     lines.append(f"    - {row['Sub-Sub-Chapter']}: {row['Name']}")
-    lines.append(f"      - {row['Description']}")
-    if row.get("Alternative Names"):
-        lines.append(f"      - Also known as: {row['Alternative Names']}")
     return "\n".join(lines)
 
 
@@ -61,13 +58,10 @@ def create_dataset_from_csv(csv_path: str, output_file: str) -> None:
 
         instruction = GUIDANCE["training"]["dataset_instruction"].format(
             name=row["Name"],
-            description=row["Description"],
             chapter=row["Chapter"],
             chapter_name=chapter_name,
             system=row["System"],
         )
-        if row.get("Alternative Names"):
-            instruction += f" Also known as: {row['Alternative Names']}."
 
         entries.append({
             "instruction": instruction,

@@ -27,6 +27,7 @@ TEXT_EXTENSIONS = {".md", ".txt", ".markdown", ".text", ""}
 # Byte-order marks / null bytes indicate a binary file; skip them
 _BINARY_SIGNALS = (b"\x00", b"\xff\xfe", b"\xfe\xff", b"\x89PNG", b"PK\x03")
 COLLECTION_NAME = "notes"
+INDEX_VERSION = 2
 
 
 def _is_text_file(path: str) -> bool:
@@ -58,10 +59,16 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
+def source_key(source_dir: str, input_dir: str) -> str:
+    """Keep identical relative paths from separate note roots distinct."""
+    return os.path.relpath(source_dir, input_dir).replace(os.sep, "/")
+
+
 def main():
     parser = argparse.ArgumentParser()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(os.path.dirname(script_dir), "data")
+    input_dir = os.path.join(data_dir, "input")
     default_dirs = [
         os.path.join(data_dir, "input", "writing-desktop"),
         os.path.join(data_dir, "input", "notion", "Writing"),
@@ -95,6 +102,22 @@ def main():
         metadata={"hnsw:space": "cosine"},
     )
 
+    metadata_version = None
+    if os.path.isfile(args.metadata_file):
+        try:
+            with open(args.metadata_file, encoding="utf-8") as metadata_file:
+                metadata_version = json.load(metadata_file).get("index_version")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    if collection.count() and metadata_version != INDEX_VERSION:
+        print("Index format changed; rebuilding with source-qualified chunk IDs.")
+        client.delete_collection(COLLECTION_NAME)
+        collection = client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            embedding_function=ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+
     existing_ids: set[str] = set(collection.get(include=[])["ids"])
     print(f"Existing chunks in store: {len(existing_ids)}")
 
@@ -104,12 +127,14 @@ def main():
     print(f"Files found: {len(all_files)}")
 
     batch_docs, batch_ids, batch_meta = [], [], []
-    added = skipped = 0
+    added = updated = 0
+    current_ids: set[str] = set()
 
     for fpath in tqdm(all_files, desc="Indexing files", unit="file"):
-        # Use path relative to the closest matching source dir as the stable chunk ID prefix
+        # Include the source root so matching relative paths cannot overwrite one another.
         source_dir = next((d for d in notes_dirs if fpath.startswith(d)), notes_dirs[0])
         rel_path = os.path.relpath(fpath, source_dir)
+        source = source_key(source_dir, input_dir)
         try:
             with open(fpath, encoding="utf-8", errors="ignore") as f:
                 text = f.read().strip()
@@ -122,36 +147,43 @@ def main():
 
         chunks = chunk_text(text, CHUNK_SIZE, CHUNK_OVERLAP)
         for i, chunk in enumerate(chunks):
-            chunk_id = f"{rel_path}::{i}"
+            chunk_id = f"{source}/{rel_path.replace(os.sep, '/')}::{i}"
+            current_ids.add(chunk_id)
             if chunk_id in existing_ids:
-                skipped += 1
-                continue
+                updated += 1
+            else:
+                added += 1
 
             batch_docs.append(chunk)
             batch_ids.append(chunk_id)
             batch_meta.append({
                 "filename": os.path.basename(fpath),
+                "source": source,
                 "rel_path": rel_path,
                 "chunk_index": i,
             })
 
             if len(batch_docs) >= BATCH_SIZE:
                 collection.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_meta)
-                added += len(batch_docs)
                 batch_docs, batch_ids, batch_meta = [], [], []
 
     if batch_docs:
         collection.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_meta)
-        added += len(batch_docs)
 
-    print(f"\nDone. Added {added} new chunks, skipped {skipped} already-indexed.")
+    stale_ids = existing_ids - current_ids
+    for start in range(0, len(stale_ids), BATCH_SIZE):
+        collection.delete(ids=list(stale_ids)[start:start + BATCH_SIZE])
+
+    print(f"\nDone. Added {added}, refreshed {updated}, removed {len(stale_ids)} stale chunks.")
     print(f"Total chunks in store: {collection.count()}")
     metadata = {
+        "index_version": INDEX_VERSION,
         "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_dirs": notes_dirs,
         "files_found": len(all_files),
         "chunks_added": added,
-        "chunks_skipped": skipped,
+        "chunks_updated": updated,
+        "chunks_removed": len(stale_ids),
         "total_chunks": collection.count(),
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.metadata_file)), exist_ok=True)
