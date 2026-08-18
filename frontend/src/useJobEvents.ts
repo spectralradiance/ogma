@@ -13,7 +13,9 @@ export function useJobEvents(jobId: string | null) {
     // The backend sends complete snapshots, so no client-side log merging is needed.
     const source = new EventSource(api.eventsUrl(jobId))
     source.onmessage = (event) => setSnapshot({ id: jobId, job: JSON.parse(event.data) as Job })
-    source.onerror = () => source.close()
+    // Leave transient failures open so EventSource can reconnect automatically.
+    // Polled job snapshots remain available while the stream reconnects.
+    source.onerror = () => undefined
     return () => source.close()
   }, [jobId])
 

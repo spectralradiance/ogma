@@ -38,6 +38,49 @@ def test_unknown_system_is_rejected() -> None:
         assert response.status_code == 422
 
 
+def test_generation_requests_default_to_memory_safe_model() -> None:
+    from api.main import DEFAULT_GENERATION_MODEL
+
+    assert DEFAULT_GENERATION_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+
+
+def test_workspace_lists_reads_and_rejects_unsafe_paths(tmp_path: Path) -> None:
+    import api.main as api_main
+
+    root = tmp_path / "writing-desktop"
+    root.mkdir()
+    note = root / "note.md"
+    note.write_text("Original text", encoding="utf-8")
+    original_roots = api_main.WORKSPACE_ROOTS
+    api_main.WORKSPACE_ROOTS = {"writing-desktop": root}
+    try:
+        with TestClient(app) as client:
+            files = client.get("/api/workspace/files")
+            assert files.status_code == 200
+            assert files.json()[0]["path"] == "writing-desktop/note.md"
+
+            document = client.get(
+                "/api/workspace/file", params={"path": "writing-desktop/note.md"}
+            )
+            assert document.json()["content"] == "Original text"
+
+            saved = client.put(
+                "/api/workspace/file",
+                json={"path": "writing-desktop/note.md", "content": "Updated text"},
+            )
+            assert saved.status_code == 200
+            assert note.read_text(encoding="utf-8") == "Updated text"
+
+            assert client.get(
+                "/api/workspace/file", params={"path": "writing-desktop/../secret.md"}
+            ).status_code == 422
+            assert client.get(
+                "/api/workspace/file", params={"path": "writing-desktop/image.png"}
+            ).status_code == 422
+    finally:
+        api_main.WORKSPACE_ROOTS = original_roots
+
+
 def test_analysis_endpoints_validate_without_running_models() -> None:
     assert "max_documents" not in AnalysisRequest.model_fields
     with TestClient(app) as client:

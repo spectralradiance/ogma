@@ -5,6 +5,11 @@
 /data/input
 /data/intermediary
 /data/output
+/data/wiktionary.jsonl
+/data/wiktionary.jsonl.*
+/data/wiktionary.db
+/data/wiktionary.db-*
+/data/wiktionary.db.*
 /junk
 
 __pycache__

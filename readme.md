@@ -152,7 +152,11 @@ A new manuscript run performs these stages:
 6. Generate prose from the plan, CSV hierarchy, and retrieved evidence.
 7. Persist progress after every section so interrupted runs can resume.
 
-CSV headings and descriptions are provisional because the chapter structure was derived from only part of the corpus. The planning prompt instructs Qwen to resolve bracketed headings and questionable descriptions against the complete writing-desktop and Notion index.
+The chapter CSV supplies numbering and rough grouping only. Descriptions and alternative names are
+ignored. All names are reconsidered against the complete writing-desktop and Notion index, and names
+in square brackets are treated only as disposable AI suggestions. Planning first creates note-grounded
+chapter and subchapter titles, detailed descriptions, and ordered principles, then creates each prose
+section plan.
 
 ### Corpus Intelligence
 
@@ -238,7 +242,9 @@ Important options:
 - `--db-dir PATH`
 - `--metadata-file PATH`
 
-Chunk IDs are deterministic. Existing IDs are skipped during subsequent indexing runs.
+Chunk IDs include their source root, so matching relative paths in writing-desktop and Notion remain
+distinct. Subsequent indexing runs refresh existing chunks and remove stale chunks. Index format
+changes trigger a clean rebuild automatically.
 
 ### Inspect generation status
 
@@ -279,6 +285,42 @@ python code/generate_concepts.py --target-count 200
 ```
 
 Candidate batches are cached and resumable. Exact and semantic duplicates are removed before writing `data/output/concepts.md`.
+
+### Build the local Wiktionary index
+
+From `frontend/`, run:
+
+```powershell
+npm run setup:dict
+```
+
+The first run downloads the multi-gigabyte Kaikki English Wiktionary JSONL dataset and builds
+`data/wiktionary.db`. Downloads stream into a `.part` file and resume with an HTTP range request.
+If the uncompressed source is unavailable, the setup tool downloads the `.jsonl.gz` alternative and
+streams it through gzip decompression. Ingestion reads one JSON object per line and commits batches of
+5,000 entries without loading the dataset into memory.
+
+Additional CLI controls:
+
+- `--download` downloads missing raw data and builds a missing database.
+- `--force-download` replaces the raw dataset and database.
+- `--rebuild` rebuilds the database from the existing `data/wiktionary.jsonl` file.
+
+The server-side API in `frontend/src/lib/dictionary/service.ts` exports `lookupWord` /
+`getDefinition` for exact definitions and `searchWords` / `searchPrefix` for FTS-backed search.
+Run its fixture tests with `npm run test:dict`.
+
+Start the local dictionary HTTP service in a separate terminal:
+
+```powershell
+cd frontend
+npm run dict:api
+```
+
+The service listens only on `127.0.0.1:3001`. The Sift **Editor** view combines a searchable tree
+of `data/input/writing-desktop` and `data/input/notion/Writing`, CodeMirror Markdown editing,
+`Ctrl+S` saves, live preview, hover definitions, and a full lexical inspector. FastAPI restricts
+file reads and writes to those two note roots and performs saves through atomic file replacement.
 
 ### Terminal chat
 

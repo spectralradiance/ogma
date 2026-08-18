@@ -31,6 +31,9 @@ from api.schemas import (
     OutlineRequest,
     RunSummary,
     SystemSummary,
+    WorkspaceFileResponse,
+    WorkspaceFileSummary,
+    WorkspaceFileUpdate,
 )
 
 
@@ -46,12 +49,18 @@ OUTPUT_DIR = DATA_DIR / "output"
 CSV_FILE = INPUT_DIR / "chapter_structure.csv"
 INDEX_METADATA = INTERMEDIARY_DIR / "index_metadata.json"
 DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
-PIPELINE_VERSION = "outline-v3"
+PIPELINE_VERSION = "outline-v4"
+DEFAULT_GENERATION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 SYSTEM_SLUGS = {
     "Universal Metaphysics": "universal_metaphysics",
     "Tree of Life": "tree_of_life",
     "Invocation": "invocation",
 }
+WORKSPACE_ROOTS = {
+    "writing-desktop": INPUT_DIR / "writing-desktop",
+    "notion/Writing": INPUT_DIR / "notion" / "Writing",
+}
+WORKSPACE_EXTENSIONS = {"", ".md", ".markdown", ".txt", ".text"}
 
 manager = JobManager(ROOT)
 
@@ -132,6 +141,30 @@ def validate_cache(path_text: str) -> Path:
     return path
 
 
+def workspace_path(path_text: str) -> Path:
+    """Resolve a public workspace path inside one of the editable note roots."""
+    normalized = path_text.replace("\\", "/").strip("/")
+    if not normalized or ".." in normalized.split("/"):
+        raise HTTPException(status_code=422, detail="Invalid workspace path")
+    for prefix, root in WORKSPACE_ROOTS.items():
+        if normalized == prefix or normalized.startswith(f"{prefix}/"):
+            relative = normalized.removeprefix(prefix).lstrip("/")
+            candidate = (root / relative).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="Workspace path escapes its root") from exc
+            if candidate.suffix.lower() not in WORKSPACE_EXTENSIONS:
+                raise HTTPException(status_code=422, detail="Unsupported workspace file type")
+            return candidate
+    raise HTTPException(status_code=422, detail="Workspace path is outside editable roots")
+
+
+def public_workspace_path(path: Path, prefix: str, root: Path) -> str:
+    relative = path.relative_to(root).as_posix()
+    return f"{prefix}/{relative}" if relative else prefix
+
+
 def outline_caches(system: str) -> list[OutlineCache]:
     """Discover legacy and run-scoped plans that contain current-version keys."""
     slug = ensure_system(system)
@@ -209,6 +242,58 @@ async def index_status() -> IndexStatus:
     )
 
 
+@app.get("/api/workspace/files", response_model=list[WorkspaceFileSummary])
+async def workspace_files() -> list[WorkspaceFileSummary]:
+    files = []
+    for prefix, root in WORKSPACE_ROOTS.items():
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in WORKSPACE_EXTENSIONS:
+                continue
+            stat = path.stat()
+            files.append(WorkspaceFileSummary(
+                path=public_workspace_path(path, prefix, root),
+                size=stat.st_size,
+                modified_at=datetime.fromtimestamp(stat.st_mtime).astimezone(),
+            ))
+    return sorted(files, key=lambda item: item.path.casefold())
+
+
+@app.get("/api/workspace/file", response_model=WorkspaceFileResponse)
+async def workspace_file(path: str) -> WorkspaceFileResponse:
+    file_path = workspace_path(path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Workspace file not found")
+    stat = file_path.stat()
+    return WorkspaceFileResponse(
+        path=path.replace("\\", "/").strip("/"),
+        size=stat.st_size,
+        modified_at=datetime.fromtimestamp(stat.st_mtime).astimezone(),
+        content=file_path.read_text(encoding="utf-8", errors="replace"),
+    )
+
+
+@app.put("/api/workspace/file", response_model=WorkspaceFileResponse)
+async def update_workspace_file(request: WorkspaceFileUpdate) -> WorkspaceFileResponse:
+    file_path = workspace_path(request.path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Workspace file not found")
+    temporary = file_path.with_name(f".{file_path.name}.sift-tmp")
+    try:
+        temporary.write_text(request.content, encoding="utf-8")
+        temporary.replace(file_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    stat = file_path.stat()
+    return WorkspaceFileResponse(
+        path=request.path.replace("\\", "/").strip("/"),
+        size=stat.st_size,
+        modified_at=datetime.fromtimestamp(stat.st_mtime).astimezone(),
+        content=request.content,
+    )
+
+
 @app.post("/api/index", response_model=JobResponse, status_code=202)
 async def start_index(request: IndexRequest) -> JobResponse:
     arguments = [str(CODE_DIR / "index_notes.py")]
@@ -238,6 +323,7 @@ async def start_outline(request: OutlineRequest) -> JobResponse:
         "--system", request.system,
         "--run-id", run_id,
         "--outline-only",
+        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])
@@ -256,6 +342,7 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
+        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])

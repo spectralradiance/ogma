@@ -1,15 +1,17 @@
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpenText, Database, FileText, Library, LoaderCircle, Network, Play, RefreshCw, Search, Square, Terminal } from 'lucide-react'
+import { Activity, BookOpenText, Clock3, Database, FileText, Library, LoaderCircle, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal } from 'lucide-react'
 import { api } from './api'
+import { generationProgress } from './jobProgress'
 import type { Artifact, Job, RunSummary } from './types'
 import { useJobEvents } from './useJobEvents'
 import './App.css'
 
-type View = 'workspace' | 'analysis' | 'runs' | 'jobs'
+type View = 'workspace' | 'editor' | 'analysis' | 'runs' | 'jobs'
 // Topic charts and canvas graph dependencies are large, so keep them out of the
 // initial manuscript-workspace bundle until the Analysis navigation is selected.
 const AnalysisView = lazy(() => import('./AnalysisView').then((module) => ({ default: module.AnalysisView })))
+const WorkspaceEditor = lazy(() => import('./editor/WorkspaceEditor').then((module) => ({ default: module.WorkspaceEditor })))
 
 const formatDate = (value?: string | null) => value
   ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
@@ -23,9 +25,10 @@ function App() {
   const [system, setSystem] = useState('Universal Metaphysics')
   const [cachePath, setCachePath] = useState('')
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [submittedJob, setSubmittedJob] = useState<Job | null>(null)
   const [artifact, setArtifact] = useState<Artifact | null>(null)
   const [search, setSearch] = useState('')
-  const activeJob = useJobEvents(activeJobId)
+  const liveJob = useJobEvents(activeJobId)
 
   // Runs and jobs poll at a low frequency for changes made by other browser tabs
   // or CLI invocations. The selected live job uses SSE below for immediate logs.
@@ -39,6 +42,7 @@ function App() {
     // Opening the drawer immediately gives queued work visible feedback while
     // the SSE connection takes over subsequent status and log updates.
     setActiveJobId(job.id)
+    setSubmittedJob(job)
     void queryClient.invalidateQueries({ queryKey: ['jobs'] })
   }
   const indexMutation = useMutation({ mutationFn: api.startIndex, onSuccess: track })
@@ -50,6 +54,19 @@ function App() {
     onSuccess: track,
   })
   const cancelMutation = useMutation({ mutationFn: api.cancelJob })
+  const trackedFromPoll = (jobs.data ?? []).find((job) => job.id === activeJobId) ?? null
+  const activeJob = liveJob ?? trackedFromPoll ?? (submittedJob?.id === activeJobId ? submittedJob : null)
+  const activeGenerationJobs = (jobs.data ?? [])
+    .filter((job) => (job.kind === 'outline' || job.kind === 'manuscript') && (job.status === 'queued' || job.status === 'running'))
+    .sort((left, right) => left.created_at.localeCompare(right.created_at))
+  const polledGenerationJob = activeGenerationJobs.find((job) => job.status === 'running') ?? activeGenerationJobs[0] ?? null
+  const trackedGenerationJob = activeJob && (activeJob.kind === 'outline' || activeJob.kind === 'manuscript') && (activeJob.status === 'queued' || activeJob.status === 'running')
+    ? activeJob
+    : null
+  const generationJob = polledGenerationJob?.status === 'running'
+    ? polledGenerationJob
+    : trackedGenerationJob ?? polledGenerationJob
+  const generation = generationJob ? generationProgress(generationJob) : null
 
   const filteredRuns = (runs.data ?? []).filter((run) => {
     const needle = search.toLowerCase()
@@ -62,6 +79,7 @@ function App() {
       <div className="brand"><img className="brand-icon" src="/favicon.svg" alt="" /><span>Sift</span></div>
       <nav>
         <button className={view === 'workspace' ? 'active' : ''} onClick={() => setView('workspace')}><Activity /> Workspace</button>
+        <button className={view === 'editor' ? 'active' : ''} onClick={() => setView('editor')}><PencilLine /> Editor</button>
         <button className={view === 'analysis' ? 'active' : ''} onClick={() => setView('analysis')}><Network /> Analysis</button>
         <button className={view === 'runs' ? 'active' : ''} onClick={() => setView('runs')}><Library /> Run library</button>
         <button className={view === 'jobs' ? 'active' : ''} onClick={() => setView('jobs')}><Terminal /> Job console</button>
@@ -69,10 +87,10 @@ function App() {
       <div className="sidebar-foot"><span className={`status-dot ${index.data?.available ? 'online' : ''}`} />{index.data?.available ? 'Index online' : 'Index unavailable'}</div>
     </aside>
 
-    <main>
+    <main className={view === 'editor' ? 'editor-main' : ''}>
       <header className="topbar">
-        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'workspace' ? 'Manuscript operations' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
-        <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>
+        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
+        {view !== 'editor' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
       </header>
 
       {view === 'workspace' && <>
@@ -81,6 +99,11 @@ function App() {
           <div><BookOpenText /><span>Available texts</span><strong>{systems.data?.length ?? 3}</strong><small>{systems.data?.reduce((sum, item) => sum + item.sections, 0) ?? 147} sections</small></div>
           <div><FileText /><span>Generated runs</span><strong>{runs.data?.length ?? 0}</strong><small>{jobs.data?.filter((job) => job.status === 'running').length ?? 0} active jobs</small></div>
         </section>
+        {generationJob && generation && <section className={`panel analysis-progress generation-progress ${generationJob.status}`}>
+          <div className="progress-icon">{generationJob.status === 'running' ? <LoaderCircle className="spin" /> : <Clock3 />}</div>
+          <div className="progress-copy"><div><strong>{generation.label}</strong><span>{generation.percent}%</span></div><div className="progress-track"><i style={{ width: `${generation.percent}%` }} /></div><p>{generation.detail}</p>{generationJob.run_id && <code>{generationJob.run_id} · {generationJob.system}</code>}</div>
+          <div className="progress-actions"><button onClick={() => setActiveJobId(generationJob.id)}><Terminal /> Logs</button><button className="stop" onClick={() => cancelMutation.mutate(generationJob.id)}><Square /> Stop</button></div>
+        </section>}
         <section className="workspace-grid">
           <div className="panel controls-panel">
             <div className="panel-title"><div><p className="eyebrow">Pipeline</p><h2>Build a text</h2></div><button className="icon-button" title="Refresh" onClick={() => void queryClient.invalidateQueries()}><RefreshCw /></button></div>
@@ -93,6 +116,7 @@ function App() {
           <div className="panel recent-panel"><div className="panel-title"><div><p className="eyebrow">Recent</p><h2>Generation runs</h2></div><button className="text-button" onClick={() => setView('runs')}>View all</button></div><RunTable runs={filteredRuns.slice(0, 5)} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></div>
         </section>
       </>}
+      {view === 'editor' && <Suspense fallback={<section className="panel analysis-empty">Loading editor...</section>}><WorkspaceEditor /></Suspense>}
       {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} /></Suspense>}
       {view === 'runs' && <section className="panel full-panel"><RunTable runs={filteredRuns} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></section>}
       {view === 'jobs' && <section className="panel full-panel"><JobTable jobs={jobs.data ?? []} onSelect={(job) => setActiveJobId(job.id)} /></section>}

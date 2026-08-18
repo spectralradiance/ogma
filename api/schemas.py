@@ -53,6 +53,21 @@ class ArtifactResponse(BaseModel):
     content: str
 
 
+class WorkspaceFileSummary(BaseModel):
+    path: str
+    size: int
+    modified_at: datetime
+
+
+class WorkspaceFileResponse(WorkspaceFileSummary):
+    content: str
+
+
+class WorkspaceFileUpdate(BaseModel):
+    path: str
+    content: str
+
+
 class IndexRequest(BaseModel):
     notes_dirs: list[str] | None = None
 
@@ -61,6 +76,7 @@ class OutlineRequest(BaseModel):
     system: str
     cache_path: str | None = None
     regenerate: bool = False
+    model_name: str | None = None
 
 
 class ManuscriptRequest(BaseModel):
@@ -68,6 +84,7 @@ class ManuscriptRequest(BaseModel):
     run_id: str | None = None
     cache_path: str | None = None
     regenerate_outline: bool = False
+    model_name: str | None = None
 
 
 class AnalysisRequest(BaseModel):

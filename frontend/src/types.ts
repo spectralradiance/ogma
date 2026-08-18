@@ -86,3 +86,45 @@ export interface Artifact {
   kind: 'outline' | 'manuscript' | 'writing_plan'
   content: string
 }
+
+export interface WorkspaceFileSummary {
+  path: string
+  size: number
+  modified_at: string
+}
+
+export interface WorkspaceFile extends WorkspaceFileSummary {
+  content: string
+}
+
+export interface DictionaryExample {
+  text: string
+  translation?: string
+}
+
+export interface DictionarySense {
+  glosses: string[]
+  examples: DictionaryExample[]
+}
+
+export interface DictionaryEntry {
+  id: number
+  word: string
+  pos: string | null
+  etymology: string | null
+  data: {
+    senses: DictionarySense[]
+    ipa: string[]
+    synonyms: string[]
+    antonyms: string[]
+    derived: string[]
+    related: string[]
+  }
+}
+
+export interface DictionarySearchResult {
+  id: number
+  word: string
+  pos: string | null
+  gloss: string
+}
