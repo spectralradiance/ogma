@@ -8,11 +8,16 @@ import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance.json")
 DATASET_FILE = os.path.join(os.path.dirname(__file__), "qwen_dataset.jsonl")
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "qwen_dataset_filled.jsonl")
 MAX_SEQ_LENGTH = 2048
 MAX_NEW_TOKENS = 512
 BATCH_SIZE = 4
+
+with open(GUIDANCE_FILE, encoding="utf-8") as guidance_file:
+    GUIDANCE = json.load(guidance_file)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Loading model on {device}...")
@@ -27,10 +32,7 @@ if device == "cpu":
     model = model.to("cpu")
 model.eval()
 
-SYSTEM_PROMPT = (
-    "You are a skilled prose writer. Expand the given indented outline into "
-    "clear, fluent, full-sentence paragraphs while preserving the logical hierarchy."
-)
+SYSTEM_PROMPT = GUIDANCE["training"]["generation_system"]
 
 
 def build_prompt(instruction: str, outline: str) -> str:

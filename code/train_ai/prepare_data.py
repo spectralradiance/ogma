@@ -1,13 +1,20 @@
+"""Convert chapter metadata into instruction and outline pairs for model training."""
+
 import csv
 import json
 import os
 
 
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance.json")
 CSV_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "Chapter Structure - metaphysics_detailed_breakdown.csv",
 )
 OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qwen_dataset.jsonl")
+
+with open(GUIDANCE_FILE, encoding="utf-8") as guidance_file:
+    GUIDANCE = json.load(guidance_file)
 
 
 def load_csv(path: str) -> list[dict]:
@@ -52,11 +59,12 @@ def create_dataset_from_csv(csv_path: str, output_file: str) -> None:
         )
         chapter_name = chapter_row["Name"] if chapter_row else row["System"]
 
-        instruction = (
-            f"Write 3 substantive, well-developed paragraphs about "
-            f"\"{row['Name']}\" ({row['Description']}) "
-            f"from chapter {row['Chapter']}, {chapter_name}, "
-            f"in the book {row['System']}."
+        instruction = GUIDANCE["training"]["dataset_instruction"].format(
+            name=row["Name"],
+            description=row["Description"],
+            chapter=row["Chapter"],
+            chapter_name=chapter_name,
+            system=row["System"],
         )
         if row.get("Alternative Names"):
             instruction += f" Also known as: {row['Alternative Names']}."

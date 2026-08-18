@@ -103,6 +103,7 @@ def build_concept_messages(
     contexts: list[str],
     candidate_count: int,
 ) -> list[dict]:
+    # Metadata and retrieved evidence remain dynamic; editorial policy lives in guidance.json.
     source_blocks = []
     for row, context in zip(rows, contexts):
         source_blocks.append(
@@ -114,24 +115,13 @@ def build_concept_messages(
     return [
         {
             "role": "system",
-            "content": (
-                "You are an academic editor extracting concepts from an author's research notes. "
-                "The supplied notes are the sole factual and conceptual foundation. Return valid "
-                "JSON only and do not use outside knowledge."
-            ),
+            "content": write_book.GUIDANCE["concepts"]["system"],
         },
         {
             "role": "user",
-            "content": (
-                f"Identify {candidate_count} distinct, substantial concepts represented in the "
-                "source material below. Prefer concepts useful across a scholarly metaphysical "
-                "glossary. Avoid chapter titles, near-synonyms, and concepts unsupported by the notes.\n\n"
-                + "\n\n---\n\n".join(source_blocks)
-                + "\n\nReturn a JSON array. Every item must have exactly three string fields: "
-                '"name", "definition", and "significance". "definition" must be exactly one '
-                'complete sentence defining the concept. "significance" must be exactly one '
-                "complete sentence explaining its significance in the author's framework. Do not "
-                "combine these into one sentence."
+            "content": write_book.GUIDANCE["concepts"]["instructions"].format(
+                candidate_count=candidate_count,
+                source_material="\n\n---\n\n".join(source_blocks),
             ),
         },
     ]

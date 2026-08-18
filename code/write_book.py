@@ -27,6 +27,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 CSV_FILE = os.path.join(DATA_DIR, "input", "chapter_structure.csv")
+GUIDANCE_FILE = os.path.join(DATA_DIR, "input", "guidance.json")
 INTERMEDIARY_DIR = os.path.join(DATA_DIR, "intermediary")
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 PROGRESS_FILE = os.path.join(INTERMEDIARY_DIR, "write_book_progress.json")
@@ -39,6 +40,17 @@ MAX_NEW_TOKENS = 900
 PARAGRAPHS_PER_SECTION = 3
 TOP_K = 5
 DEFAULT_SYSTEM = "Universal Metaphysics"
+MAX_LANGUAGE_RETRIES = 3
+CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def load_guidance(path: str = GUIDANCE_FILE) -> dict:
+    """Load editable domain and style instructions used by model prompts."""
+    with open(path, encoding="utf-8") as guidance_file:
+        return json.load(guidance_file)
+
+
+GUIDANCE = load_guidance()
 
 
 def load_csv(path: str) -> list[dict]:
@@ -191,13 +203,7 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
     return [
         {
             "role": "system",
-            "content": (
-                "You are planning a scholarly metaphysical manuscript. Use the author's notes as "
-                "the factual and conceptual foundation. Keep each section within its assigned scope "
-                "and preserve the chapter's logical or chronological sequence. The chapter CSV was "
-                "derived from only a subset of the notes, so treat its headings and descriptions as "
-                "provisional rather than authoritative."
-            ),
+            "content": GUIDANCE["outline"]["system"],
         },
         {
             "role": "user",
@@ -206,20 +212,7 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
                 f"Section description: {row.get('Description', '')}\n\n"
                 f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}\n\n"
                 f"Relevant excerpts from the author's notes:\n{context}\n\n"
-                "Resolve the section's actual meaning from the complete note evidence, especially "
-                "when its heading contains square brackets. Correct, refine, or qualify the CSV "
-                "description when the notes support a more accurate interpretation. The source index "
-                "includes both writing-desktop and Notion notes and should govern the plan.\n\n"
-                "Return Markdown bullets only, using exactly these labels:\n"
-                "- Scope and chronological position:\n"
-                "- Transition from previous section:\n"
-                "- Central claim:\n"
-                "- Major points:\n"
-                "- Essential concepts and evidence:\n"
-                "- Important terms and phrases from the notes:\n"
-                "- Material reserved for other sections:\n"
-                "Make the transition specific. Exclude subjects already covered or reserved for "
-                "later sections. Do not write finished prose."
+                f"{GUIDANCE['outline']['instructions']}"
             ),
         },
     ]
@@ -281,23 +274,15 @@ def style_instruction(row: dict, rows_by_key: dict) -> str:
         if candidate["System"] == row["System"]
         and should_generate_text(candidate)
     ]
+    # The book moves through three user-editable style phases from start to finish.
     position = section_rows.index(row) / max(len(section_rows) - 1, 1)
+    style_tiers = GUIDANCE["manuscript"]["style_tiers"]
 
     if position < 1 / 3:
-        return (
-            "Favor scientific, factual, and logical exposition. Define concepts precisely, "
-            "make the reasoning explicit, and use poetic language sparingly."
-        )
+        return style_tiers[0]
     if position < 2 / 3:
-        return (
-            "Balance logical analysis with philosophical synthesis. Introduce measured poetic "
-            "imagery where it clarifies the ideas, while keeping the argument concrete and precise."
-        )
-    return (
-        "Allow the prose to become more poetic, contemplative, and mystical as the argument "
-        "develops. Keep every image conceptually meaningful, avoid vague abstraction, and preserve "
-        "clear scholarly reasoning."
-    )
+        return style_tiers[1]
+    return style_tiers[2]
 
 
 def build_messages(
@@ -318,6 +303,7 @@ def build_messages(
         f"\n\nRelevant source excerpts from the author's notes:\n\n{context}"
     ) if context else ""
 
+    # Runtime evidence frames the section; guidance.json supplies authorial policy and voice.
     number = section_number(row)
     instruction = (
         f"Book: \"{system}\".\n"
@@ -328,36 +314,16 @@ def build_messages(
         "similarly numbered material from another book."
         f"{context_block}\n\n"
         f"Required section plan:\n\n{plan}\n\n"
-        f"Write exactly {n_paragraphs} paragraphs of flowing philosophical prose about this topic. "
-        "Treat the author's notes and source excerpts as the foundation of the content. "
-        "Treat the CSV heading and description as provisional because they were derived from only "
-        "a subset of the notes. Follow the writing plan's note-grounded interpretation, particularly "
-        "for headings enclosed in square brackets. "
-        "Follow the section plan in order, including its scope, transition, central claim, and "
-        "material boundaries. Do not restart the chronology or repeat subjects already covered. "
-        "Develop and synthesize their ideas without introducing claims unsupported by them. "
-        "Maintain a scholarly, academic tone with precise terminology, coherent reasoning, and "
-        "clear claims throughout the book. "
-        f"{style_instruction(row, rows_by_key)} "
-        "Each paragraph must be composed of complete, well-formed sentences. "
-        "Do not produce bullet points, lists, headings, or outline structure. "
-        "Do not use em dashes. Use commas, semicolons, colons, or separate sentences instead. "
-        "Do not use contrast constructions of the form 'not X but Y', including variants such as "
-        "'not merely X but Y' or 'not only X but also Y'. State each idea directly. "
-        "Do not begin with a meta-introduction such as \"In this section\" or \"This topic concerns\". "
-        "Do not restate the topic title. Begin writing the first paragraph immediately."
+        + GUIDANCE["manuscript"]["instructions"].format(
+            n_paragraphs=n_paragraphs,
+            style_instruction=style_instruction(row, rows_by_key),
+        )
     )
 
     return [
         {
             "role": "system",
-            "content": (
-                "You are a scholarly philosophical author writing a serious metaphysical text. "
-                "The author's notes are the foundation and authority for the ideas you develop. "
-                "Maintain academic rigor, clarity, and philosophical precision at every stage. "
-                "Respond only with flowing paragraphs in complete sentences. Never use em dashes, "
-                "not-X-but-Y contrast constructions, bullet points, outlines, or conversational filler."
-            ),
+            "content": GUIDANCE["manuscript"]["system"],
         },
         {"role": "user", "content": instruction},
     ]
@@ -397,6 +363,31 @@ def generate_text(
 
     input_len = inputs["input_ids"].shape[1]
     return tokenizer.decode(output[0][input_len:], skip_special_tokens=True).strip()
+
+
+def generate_english_text(
+    model,
+    tokenizer,
+    messages: list[dict],
+    max_new_tokens: int,
+) -> str:
+    for attempt in range(1, MAX_LANGUAGE_RETRIES + 1):
+        prose = generate_text(
+            model,
+            tokenizer,
+            messages,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+        )
+        if not CJK_PATTERN.search(prose):
+            return prose
+        print(
+            f"  Rejected non-English generation; retrying "
+            f"({attempt}/{MAX_LANGUAGE_RETRIES})"
+        )
+    raise RuntimeError(
+        f"Generation contained CJK text after {MAX_LANGUAGE_RETRIES} attempts."
+    )
 
 
 def ensure_generation_device(model, allow_cpu: bool) -> None:
@@ -681,12 +672,11 @@ def main():
                 plans[section_key(row)],
                 PARAGRAPHS_PER_SECTION,
             )
-            prose = generate_text(
+            prose = generate_english_text(
                 model,
                 tokenizer,
                 messages,
                 max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=True,
             )
 
             out.write(prose + "\n\n")

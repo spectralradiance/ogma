@@ -36,12 +36,7 @@ MAX_SEQ_LENGTH = 4096
 MAX_NEW_TOKENS = 768
 TOP_K = 4
 
-SYSTEM_PROMPT = (
-    "You are a knowledgeable philosophical assistant specialising in metaphysics, "
-    "mysticism, and esoteric thought. Answer with precision and depth, drawing on "
-    "the retrieved source material when it is provided. When no sources are given, "
-    "reason from first principles. Always write in complete sentences."
-)
+SYSTEM_PROMPT = write_book.GUIDANCE["chat"]["system"]
 
 
 # ---------------------------------------------------------------------------

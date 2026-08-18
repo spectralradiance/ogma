@@ -64,7 +64,7 @@ frontend/
     public/favicon.svg   snake application mark
     package.json         frontend dependencies and scripts
 data/
-    input/               source notes and chapter_structure.csv
+    input/               source notes, chapter structure, and editable AI guidance
     intermediary/        vector index, writing plans, progress, caches
     output/              human outlines, manuscripts, analyses, exports
 tests/
@@ -72,6 +72,16 @@ tests/
 app.py                   legacy interactive terminal workflow
 requirements.txt         Python runtime and test dependencies
 ```
+
+## Editing AI Guidance
+
+Model-facing editorial instructions live in `data/input/guidance.json`. This file controls the
+outline and manuscript prompts, manuscript style progression, concept extraction, chat behavior,
+and legacy training prompts. Runtime values such as section metadata, retrieved note excerpts,
+paragraph counts, and output schemas are still assembled by the Python code.
+
+Restart a running API or command after changing the guidance file so it is loaded again. Keep the
+template fields in braces unchanged because the generation code fills them at runtime.
 
 ## Prerequisites
 

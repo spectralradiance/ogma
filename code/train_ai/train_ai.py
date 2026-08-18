@@ -1,3 +1,5 @@
+"""Fine-tune a Qwen adapter from the filled outline-to-prose training dataset."""
+
 import os
 import torch
 from unsloth import FastLanguageModel

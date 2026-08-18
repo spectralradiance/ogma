@@ -1,3 +1,5 @@
+"""Inspect, combine, and normalize exported note files before indexing them."""
+
 import os
 from pathlib import Path
 import subprocess
