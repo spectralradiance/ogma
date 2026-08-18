@@ -38,6 +38,7 @@ PIPELINE_VERSION = "outline-v4"
 
 MAX_SEQ_LENGTH = 4096
 MAX_NEW_TOKENS = 900
+MAX_PLAN_TOKENS = 900
 PARAGRAPHS_PER_SECTION = 3
 TOP_K = 5
 DEFAULT_SYSTEM = "Universal Metaphysics"
@@ -602,14 +603,97 @@ def generate_english_text(
             max_new_tokens=max_new_tokens,
             do_sample=True,
         )
-        if not CJK_PATTERN.search(prose):
+        error = manuscript_validation_error(prose)
+        if not error:
             return prose
         print(
-            f"  Rejected non-English generation; retrying "
+            f"  Rejected manuscript generation ({error}); retrying "
             f"({attempt}/{MAX_LANGUAGE_RETRIES})"
         )
     raise RuntimeError(
-        f"Generation contained CJK text after {MAX_LANGUAGE_RETRIES} attempts."
+        f"Generation remained invalid after {MAX_LANGUAGE_RETRIES} attempts: {error}"
+    )
+
+
+def manuscript_validation_error(prose: str) -> str | None:
+    if CJK_PATTERN.search(prose):
+        return "response contains CJK text"
+    if not prose.strip():
+        return "response is empty"
+    if re.search(r"^\s*#{1,6}\s+", prose, re.MULTILINE):
+        return "response contains Markdown headings"
+    if re.search(r"^\s*(?:[-+*]|\d+[.)])\s+", prose, re.MULTILINE):
+        return "response contains a list"
+    if "```" in prose:
+        return "response contains a fenced block"
+    if re.search(
+        r"^\s*(?:scope and chronological position|transition from previous section|"
+        r"central claim|ordered principles|material boundaries|essential concepts)",
+        prose,
+        re.IGNORECASE | re.MULTILINE,
+    ):
+        return "response repeats writing-plan labels"
+    if prose.rstrip()[-1] not in '.!?\"\'”’':
+        return "response appears truncated"
+    return None
+
+
+def plan_validation_error(plan: str) -> str | None:
+    required_labels = (
+        "note-grounded title",
+        "scope and chronological position",
+        "transition from previous section",
+        "central claim",
+        "ordered principles to cover",
+        "essential concepts and evidence",
+        "important terms and phrases from the notes",
+        "material reserved for other sections",
+    )
+    normalized = re.sub(r"[*#]", "", plan).lower()
+    if "```" in plan:
+        return "response contains a fenced block"
+    for label in required_labels:
+        if normalized.count(f"{label}:") != 1:
+            return f"response must contain exactly one {label!r} label"
+    title = re.search(r"(?im)^\s*[- ]*note-grounded title:\s*(.+)$", normalized)
+    if not title or not title.group(1).strip():
+        return "note-grounded title is empty"
+    if plan.rstrip()[-1] not in '.!?\"\'”’':
+        return "response appears truncated"
+    return None
+
+
+def generate_plan_text(model, tokenizer, messages: list[dict]) -> str:
+    attempts = list(messages)
+    last_error = "unknown validation error"
+    for attempt in range(1, MAX_LANGUAGE_RETRIES + 1):
+        plan = generate_text(
+            model,
+            tokenizer,
+            attempts,
+            max_new_tokens=MAX_PLAN_TOKENS,
+            do_sample=attempt > 1,
+        )
+        last_error = plan_validation_error(plan) or ""
+        if not last_error:
+            return plan
+        print(
+            f"  Rejected writing plan ({last_error}); retrying "
+            f"({attempt}/{MAX_LANGUAGE_RETRIES})"
+        )
+        attempts = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    f"Your previous response was invalid because {last_error}. "
+                    "Return one complete plan using every required label exactly once, "
+                    "without code fences or duplicated sections."
+                ),
+            },
+        ]
+    raise RuntimeError(
+        f"Writing plan remained invalid after {MAX_LANGUAGE_RETRIES} attempts: {last_error}"
     )
 
 
@@ -871,7 +955,7 @@ def main():
             query = build_query(row, rows_by_key)
             context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
             messages = build_outline_messages(row, section_rows, context)
-            plan = generate_text(model, tokenizer, messages, max_new_tokens=500, do_sample=False)
+            plan = generate_plan_text(model, tokenizer, messages)
             append_outline(book_outline_path, row, plan)
             plans[section_key(row)] = plan
             write_human_outline(

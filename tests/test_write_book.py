@@ -4,7 +4,7 @@ import sys
 
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "write_book.py"
-SPEC = importlib.util.spec_from_file_location("sift_write_book", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("sylph_write_book", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 write_book = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = write_book
@@ -25,6 +25,30 @@ def test_generate_english_text_retries_cjk_output(monkeypatch) -> None:
 
     assert prose == "Existence is self-sustaining."
     assert len(attempts) == 2
+
+
+def test_manuscript_validation_rejects_outline_and_truncation() -> None:
+    assert write_book.manuscript_validation_error("## Central Claim\n\nProse.")
+    assert write_book.manuscript_validation_error("1. First item\n2. Second item")
+    assert write_book.manuscript_validation_error("A sentence cut off in the middle")
+    assert write_book.manuscript_validation_error(
+        "First complete paragraph.\n\nSecond complete paragraph.\n\nThird complete paragraph."
+    ) is None
+
+
+def test_plan_validation_rejects_duplicate_fenced_or_truncated_plans() -> None:
+    valid = """- Note-grounded title: Digital Transformation.
+- Scope and chronological position: After agriculture.
+- Transition from previous section: Technology scales civilization.
+- Central claim: Industrial and digital systems transform society.
+- Ordered principles to cover: Energy, machinery, computation.
+- Essential concepts and evidence: Factories and networks.
+- Important terms and phrases from the notes: Industrialization, digitalization.
+- Material reserved for other sections: Personal development."""
+    assert write_book.plan_validation_error(valid) is None
+    assert write_book.plan_validation_error(f"```markdown\n{valid}\n```")
+    assert write_book.plan_validation_error(f"{valid}\n- Central claim: Duplicate.")
+    assert write_book.plan_validation_error(valid.rstrip('.'))
 
 
 def test_guidance_is_loaded_from_input_file() -> None:
