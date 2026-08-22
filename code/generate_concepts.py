@@ -9,7 +9,6 @@ import re
 import numpy as np
 import torch
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from transformers import AutoTokenizer
 
 import write_book
 
@@ -223,6 +222,11 @@ def main() -> None:
     parser.add_argument("--system", action="append", help="Limit inputs to one or more book systems")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--allow-cpu", action="store_true")
+    parser.add_argument(
+        "--extract-model-name",
+        default=write_book.DEFAULT_EXTRACT_MODEL,
+        help="Hugging Face model used to extract concepts from notes",
+    )
     args = parser.parse_args()
 
     if args.target_count < 1 or args.sections_per_batch < 1 or args.candidates_per_batch < 1:
@@ -276,17 +280,11 @@ def main() -> None:
     model = tokenizer = None
     if missing_batches:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        tokenizer = AutoTokenizer.from_pretrained(
-            "Qwen/Qwen2.5-7B-Instruct",
-            trust_remote_code=True,
-        )
-        model = write_book._load_model(
-            "Qwen/Qwen2.5-7B-Instruct",
+        model, tokenizer = write_book.load_causal_lm(
+            args.extract_model_name,
             device,
-            allow_cpu=args.allow_cpu,
+            args.allow_cpu,
         )
-        write_book.ensure_generation_device(model, args.allow_cpu)
-        model.eval()
 
     all_candidates = []
     for batch_index, rows in enumerate(row_batches, start=1):

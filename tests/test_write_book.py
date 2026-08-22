@@ -11,6 +11,47 @@ sys.modules[SPEC.name] = write_book
 SPEC.loader.exec_module(write_book)
 
 
+def test_split_model_defaults() -> None:
+    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen3-14B"
+    assert write_book.DEFAULT_WRITE_MODEL == "nbeerbower/Vitus-Qwen3-14B"
+
+
+def test_strip_thinking_removes_qwen3_blocks() -> None:
+    raw = "<think>internal plan</think>\n\nExistence is self-sustaining."
+    assert write_book.strip_thinking(raw) == "Existence is self-sustaining."
+
+
+def test_format_chat_disables_thinking_when_template_supports_it() -> None:
+    class Tokenizer:
+        chat_template = "{% if enable_thinking %}think{% endif %}"
+        kwargs = None
+
+        def apply_chat_template(self, messages, **kwargs):
+            self.kwargs = kwargs
+            return "prompt"
+
+    tokenizer = Tokenizer()
+    prompt = write_book.format_chat(tokenizer, [{"role": "user", "content": "hi"}])
+
+    assert prompt == "prompt"
+    assert tokenizer.kwargs["enable_thinking"] is False
+
+
+def test_format_chat_omits_thinking_flag_for_plain_templates() -> None:
+    class Tokenizer:
+        chat_template = "{{ messages }}"
+        kwargs = None
+
+        def apply_chat_template(self, messages, **kwargs):
+            self.kwargs = kwargs
+            return "prompt"
+
+    tokenizer = Tokenizer()
+    write_book.format_chat(tokenizer, [{"role": "user", "content": "hi"}])
+
+    assert "enable_thinking" not in tokenizer.kwargs
+
+
 def test_generate_english_text_retries_cjk_output(monkeypatch) -> None:
     responses = iter(["存在是自我维持的。", "Existence is self-sustaining."])
     attempts = []

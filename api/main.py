@@ -50,7 +50,9 @@ CSV_FILE = INPUT_DIR / "chapter_structure.csv"
 INDEX_METADATA = INTERMEDIARY_DIR / "index_metadata.json"
 DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
 PIPELINE_VERSION = "outline-v4"
-DEFAULT_GENERATION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen3-14B"
+DEFAULT_WRITE_MODEL = "nbeerbower/Vitus-Qwen3-14B"
+DEFAULT_GENERATION_MODEL = DEFAULT_WRITE_MODEL
 SYSTEM_SLUGS = {
     "Universal Metaphysics": "universal_metaphysics",
     "Tree of Life": "tree_of_life",
@@ -323,7 +325,7 @@ async def start_outline(request: OutlineRequest) -> JobResponse:
         "--system", request.system,
         "--run-id", run_id,
         "--outline-only",
-        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
+        "--extract-model-name", request.extract_model_name or request.model_name or DEFAULT_EXTRACT_MODEL,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])
@@ -342,7 +344,8 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
-        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
+        "--extract-model-name", request.extract_model_name or request.model_name or DEFAULT_EXTRACT_MODEL,
+        "--write-model-name", request.write_model_name or request.model_name or DEFAULT_WRITE_MODEL,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])

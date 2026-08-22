@@ -2,8 +2,8 @@
 RAG-driven manuscript generator.
 
 Loads the metaphysics CSV, queries a local ChromaDB vector store for
-relevant notes, and prompts Qwen 2.5 7B Instruct to write authoritative
-philosophical prose for each section.
+relevant notes, extracts a writing plan with Qwen3 14B, and prompts
+Vitus 14B to write authoritative philosophical prose for each section.
 
 Usage:
     python write_book.py [--db-dir PATH] [--notes-top-k N]
@@ -14,6 +14,7 @@ Requires index_notes.py to have been run first.
 import argparse
 from collections import Counter
 import csv
+import gc
 import json
 import os
 import re
@@ -42,9 +43,12 @@ MAX_PLAN_TOKENS = 900
 PARAGRAPHS_PER_SECTION = 3
 TOP_K = 5
 DEFAULT_SYSTEM = "Universal Metaphysics"
-DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen3-14B"
+DEFAULT_WRITE_MODEL = "nbeerbower/Vitus-Qwen3-14B"
+DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
 MAX_LANGUAGE_RETRIES = 3
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 NOTE_SOURCE_KEYS = ("writing-desktop", "notion/Writing")
 
 
@@ -553,6 +557,23 @@ def build_messages(
     ]
 
 
+def format_chat(tokenizer, messages: list[dict]) -> str:
+    """Render a chat prompt, disabling Qwen3 thinking when the template supports it."""
+    template_kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+    }
+    template = getattr(tokenizer, "chat_template", None) or ""
+    if "enable_thinking" in template:
+        template_kwargs["enable_thinking"] = False
+    return tokenizer.apply_chat_template(messages, **template_kwargs)
+
+
+def strip_thinking(text: str) -> str:
+    """Drop leaked Qwen3 think blocks so plans and prose stay artifact-clean."""
+    return THINK_BLOCK_PATTERN.sub("", text).strip()
+
+
 def generate_text(
     model,
     tokenizer,
@@ -560,11 +581,7 @@ def generate_text(
     max_new_tokens: int,
     do_sample: bool,
 ) -> str:
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    text = format_chat(tokenizer, messages)
     device = next(model.parameters()).device
     inputs = tokenizer(
         text,
@@ -586,7 +603,9 @@ def generate_text(
         output = model.generate(**inputs, **generation_options)
 
     input_len = inputs["input_ids"].shape[1]
-    return tokenizer.decode(output[0][input_len:], skip_special_tokens=True).strip()
+    return strip_thinking(
+        tokenizer.decode(output[0][input_len:], skip_special_tokens=True)
+    )
 
 
 def generate_english_text(
@@ -759,6 +778,23 @@ def _load_model(model_name: str, device: str, allow_cpu: bool = False):
     return model.to("cpu")
 
 
+def load_causal_lm(model_name: str, device: str, allow_cpu: bool):
+    print(f"Loading {model_name} on {device}...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = _load_model(model_name, device, allow_cpu=allow_cpu)
+    ensure_generation_device(model, allow_cpu)
+    model.eval()
+    print("Model ready.")
+    return model, tokenizer
+
+
+def unload_causal_lm(model) -> None:
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--db-dir", default=DEFAULT_DB_DIR)
@@ -774,9 +810,19 @@ def main():
         help="Explicitly allow slow CPU generation when CUDA is unavailable or fails",
     )
     parser.add_argument(
+        "--extract-model-name",
+        default=DEFAULT_EXTRACT_MODEL,
+        help="Hugging Face model used to extract note-grounded structure and writing plans",
+    )
+    parser.add_argument(
+        "--write-model-name",
+        default=DEFAULT_WRITE_MODEL,
+        help="Hugging Face model used to write manuscript prose",
+    )
+    parser.add_argument(
         "--model-name",
-        default=DEFAULT_MODEL_NAME,
-        help="Hugging Face causal language model used for outline and manuscript generation",
+        default=None,
+        help="If set, use this Hugging Face model for both extraction and writing",
     )
     parser.add_argument(
         "--outline-only",
@@ -901,6 +947,10 @@ def main():
         )
 
     print(f"  Human outline: {paths['human_outline']}")
+    extract_name = args.model_name or args.extract_model_name
+    write_name = args.model_name or args.write_model_name
+    print(f"  Extract model: {extract_name}")
+    print(f"  Write model: {write_name}")
 
     if args.status_only:
         return
@@ -916,54 +966,54 @@ def main():
         print(f"Reusing complete outline: {book_outline_path}")
         return
 
-    # --- Load model ---
-    base_name = args.model_name
+    extract_model = extract_tokenizer = None
+    need_extract = bool(missing_structures or missing_plans)
+    need_write = bool(pending) and not args.outline_only
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Loading {base_name} on {device}...")
-
-    tokenizer = AutoTokenizer.from_pretrained(base_name, trust_remote_code=True)
-    model = _load_model(base_name, device, allow_cpu=args.allow_cpu)
-    ensure_generation_device(model, args.allow_cpu)
-
-    model.eval()
-    print("Model ready.")
 
     # Ground parent titles and chapter-level scope before planning individual prose sections.
-    if missing_structures:
-        print(f"Grounding {len(missing_structures)} structural units in {book_outline_path}")
-        for row in missing_structures:
-            query = build_query(row, rows_by_key)
-            context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
-            messages = build_structure_messages(row, structure_children(row, rows), context)
-            structure = generate_text(
-                model, tokenizer, messages, max_new_tokens=500, do_sample=False
-            )
-            append_structure(book_outline_path, row, structure)
-            structures[section_key(row)] = structure
-            write_human_outline(
-                paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
-            )
-            print(
-                f"  Grounded {section_number(row)}: "
-                f"{grounded_title(structure, row['Name'])}"
-            )
+    if need_extract:
+        extract_model, extract_tokenizer = load_causal_lm(
+            extract_name, device, args.allow_cpu
+        )
+        if missing_structures:
+            print(f"Grounding {len(missing_structures)} structural units in {book_outline_path}")
+            for row in missing_structures:
+                query = build_query(row, rows_by_key)
+                context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
+                messages = build_structure_messages(row, structure_children(row, rows), context)
+                structure = generate_text(
+                    extract_model, extract_tokenizer, messages, max_new_tokens=500, do_sample=False
+                )
+                append_structure(book_outline_path, row, structure)
+                structures[section_key(row)] = structure
+                write_human_outline(
+                    paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+                )
+                print(
+                    f"  Grounded {section_number(row)}: "
+                    f"{grounded_title(structure, row['Name'])}"
+                )
 
-    # --- Create or reuse the complete note-grounded outline ---
-    if missing_plans:
-        print(f"Planning {len(missing_plans)} sections in {book_outline_path}")
-        for row in missing_plans:
-            query = build_query(row, rows_by_key)
-            context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
-            messages = build_outline_messages(row, section_rows, context)
-            plan = generate_plan_text(model, tokenizer, messages)
-            append_outline(book_outline_path, row, plan)
-            plans[section_key(row)] = plan
-            write_human_outline(
-                paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
-            )
-            print(
-                f"  Planned {section_number(row)}: {grounded_title(plan, row['Name'])}"
-            )
+        if missing_plans:
+            print(f"Planning {len(missing_plans)} sections in {book_outline_path}")
+            for row in missing_plans:
+                query = build_query(row, rows_by_key)
+                context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
+                messages = build_outline_messages(row, section_rows, context)
+                plan = generate_plan_text(extract_model, extract_tokenizer, messages)
+                append_outline(book_outline_path, row, plan)
+                plans[section_key(row)] = plan
+                write_human_outline(
+                    paths["human_outline"], args.system, section_rows, plans, rows_by_key, structures
+                )
+                print(
+                    f"  Planned {section_number(row)}: {grounded_title(plan, row['Name'])}"
+                )
+        if need_write and write_name != extract_name:
+            print(f"Releasing {extract_name} before loading the write model.")
+            unload_causal_lm(extract_model)
+            extract_model = extract_tokenizer = None
     else:
         print(f"Reusing complete outline: {book_outline_path}")
 
@@ -972,8 +1022,15 @@ def main():
     )
 
     if args.outline_only:
+        if extract_model is not None:
+            unload_causal_lm(extract_model)
         print(f"Outline ready: {book_outline_path}")
         return
+
+    if write_name == extract_name and extract_model is not None:
+        model, tokenizer = extract_model, extract_tokenizer
+    else:
+        model, tokenizer = load_causal_lm(write_name, device, args.allow_cpu)
 
     # --- Generate ---
     output_file = paths["manuscript"]
