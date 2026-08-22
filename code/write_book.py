@@ -2,8 +2,8 @@
 RAG-driven manuscript generator.
 
 Loads the metaphysics CSV, queries a local ChromaDB vector store for
-relevant notes, extracts a writing plan with Qwen3 14B, and prompts
-Vitus 14B to write authoritative philosophical prose for each section.
+relevant notes, extracts a writing plan, and writes each section.
+Defaults use Qwen2.5 3B Instruct so the pipeline fits a 6 GB GPU.
 
 Usage:
     python write_book.py [--db-dir PATH] [--notes-top-k N]
@@ -40,11 +40,10 @@ PIPELINE_VERSION = "outline-v4"
 MAX_SEQ_LENGTH = 4096
 MAX_NEW_TOKENS = 900
 MAX_PLAN_TOKENS = 900
-PARAGRAPHS_PER_SECTION = 3
 TOP_K = 5
 DEFAULT_SYSTEM = "Universal Metaphysics"
-DEFAULT_EXTRACT_MODEL = "Qwen/Qwen3-14B"
-DEFAULT_WRITE_MODEL = "nbeerbower/Vitus-Qwen3-14B"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
 MAX_LANGUAGE_RETRIES = 3
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
@@ -59,6 +58,17 @@ def load_guidance(path: str = GUIDANCE_FILE) -> dict:
 
 
 GUIDANCE = load_guidance()
+
+
+def guidance_for(kind: str, system: str | None = None) -> dict:
+    """Return prompt guidance, overlaying optional per-book overrides."""
+    base = GUIDANCE[kind]
+    if not system:
+        return base
+    override = (GUIDANCE.get(f"{kind}_by_system") or {}).get(system)
+    if not override:
+        return base
+    return {**base, **override}
 
 
 def load_csv(path: str) -> list[dict]:
@@ -319,10 +329,11 @@ def chapter_structure(row: dict, section_rows: list[dict]) -> str:
 
 
 def build_outline_messages(row: dict, section_rows: list[dict], context: str) -> list[dict]:
+    outline = guidance_for("outline", row["System"])
     return [
         {
             "role": "system",
-            "content": GUIDANCE["outline"]["system"],
+            "content": outline["system"],
         },
         {
             "role": "user",
@@ -331,7 +342,7 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
                 f"{display_name_hint(row)}\n\n"
                 f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}\n\n"
                 f"Relevant excerpts from the author's notes:\n{context}\n\n"
-                f"{GUIDANCE['outline']['instructions']}"
+                f"{outline['instructions']}"
             ),
         },
     ]
@@ -342,11 +353,12 @@ def build_structure_messages(row: dict, child_rows: list[dict], context: str) ->
         f"- {section_number(child)}; {display_name_hint(child)}"
         for child in child_rows
     )
+    structure = guidance_for("structure", row["System"])
     return [
-        {"role": "system", "content": GUIDANCE["structure"]["system"]},
+        {"role": "system", "content": structure["system"]},
         {
             "role": "user",
-            "content": GUIDANCE["structure"]["instructions"].format(
+            "content": structure["instructions"].format(
                 number=section_number(row),
                 name_hint=display_name_hint(row),
                 children=children or "- No child rows",
@@ -505,7 +517,7 @@ def style_instruction(row: dict, rows_by_key: dict) -> str:
     ]
     # The book moves through three user-editable style phases from start to finish.
     position = section_rows.index(row) / max(len(section_rows) - 1, 1)
-    style_tiers = GUIDANCE["manuscript"]["style_tiers"]
+    style_tiers = guidance_for("manuscript", row["System"])["style_tiers"]
 
     if position < 1 / 3:
         return style_tiers[0]
@@ -519,7 +531,6 @@ def build_messages(
     rows_by_key: dict,
     context: str,
     plan: str,
-    n_paragraphs: int,
 ) -> list[dict]:
     system = row["System"]
     chapter_row = find_chapter_row(row, rows_by_key)
@@ -532,6 +543,7 @@ def build_messages(
     ) if context else ""
 
     # Runtime evidence frames the section; guidance.json supplies authorial policy and voice.
+    manuscript = guidance_for("manuscript", system)
     number = section_number(row)
     instruction = (
         f"Book: \"{system}\".\n"
@@ -542,8 +554,7 @@ def build_messages(
         "the note-grounded writing plan determines the subject and title."
         f"{context_block}\n\n"
         f"Required section plan:\n\n{plan}\n\n"
-        + GUIDANCE["manuscript"]["instructions"].format(
-            n_paragraphs=n_paragraphs,
+        + manuscript["instructions"].format(
             style_instruction=style_instruction(row, rows_by_key),
         )
     )
@@ -551,7 +562,7 @@ def build_messages(
     return [
         {
             "role": "system",
-            "content": GUIDANCE["manuscript"]["system"],
+            "content": manuscript["system"],
         },
         {"role": "user", "content": instruction},
     ]
@@ -613,6 +624,7 @@ def generate_english_text(
     tokenizer,
     messages: list[dict],
     max_new_tokens: int,
+    form: str = "prose",
 ) -> str:
     for attempt in range(1, MAX_LANGUAGE_RETRIES + 1):
         prose = generate_text(
@@ -622,7 +634,7 @@ def generate_english_text(
             max_new_tokens=max_new_tokens,
             do_sample=True,
         )
-        error = manuscript_validation_error(prose)
+        error = manuscript_validation_error(prose, form=form)
         if not error:
             return prose
         print(
@@ -634,15 +646,13 @@ def generate_english_text(
     )
 
 
-def manuscript_validation_error(prose: str) -> str | None:
+def manuscript_validation_error(prose: str, form: str = "prose") -> str | None:
     if CJK_PATTERN.search(prose):
         return "response contains CJK text"
     if not prose.strip():
         return "response is empty"
     if re.search(r"^\s*#{1,6}\s+", prose, re.MULTILINE):
         return "response contains Markdown headings"
-    if re.search(r"^\s*(?:[-+*]|\d+[.)])\s+", prose, re.MULTILINE):
-        return "response contains a list"
     if "```" in prose:
         return "response contains a fenced block"
     if re.search(
@@ -652,6 +662,12 @@ def manuscript_validation_error(prose: str) -> str | None:
         re.IGNORECASE | re.MULTILINE,
     ):
         return "response repeats writing-plan labels"
+    if form == "poetry":
+        if len(prose.strip()) < 80:
+            return "response appears truncated"
+        return None
+    if re.search(r"^\s*(?:[-+*]|\d+[.)])\s+", prose, re.MULTILINE):
+        return "response contains a list"
     if prose.rstrip()[-1] not in '.!?\"\'”’':
         return "response appears truncated"
     return None
@@ -1080,13 +1096,13 @@ def main():
                 rows_by_key,
                 context,
                 plans[section_key(row)],
-                PARAGRAPHS_PER_SECTION,
             )
             prose = generate_english_text(
                 model,
                 tokenizer,
                 messages,
                 max_new_tokens=MAX_NEW_TOKENS,
+                form=guidance_for("manuscript", row["System"]).get("form", "prose"),
             )
 
             out.write(prose + "\n\n")

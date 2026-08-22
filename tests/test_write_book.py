@@ -12,8 +12,8 @@ SPEC.loader.exec_module(write_book)
 
 
 def test_split_model_defaults() -> None:
-    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen3-14B"
-    assert write_book.DEFAULT_WRITE_MODEL == "nbeerbower/Vitus-Qwen3-14B"
+    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert write_book.DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
 
 
 def test_strip_thinking_removes_qwen3_blocks() -> None:
@@ -75,6 +75,12 @@ def test_manuscript_validation_rejects_outline_and_truncation() -> None:
     assert write_book.manuscript_validation_error(
         "First complete paragraph.\n\nSecond complete paragraph.\n\nThird complete paragraph."
     ) is None
+    verse = (
+        "The first fire remembers its name in the well.\n\n"
+        "A second mouth answers from the dark water."
+    )
+    assert write_book.manuscript_validation_error(verse, form="poetry") is None
+    assert write_book.manuscript_validation_error("Too short", form="poetry")
 
 
 def test_plan_validation_rejects_duplicate_fenced_or_truncated_plans() -> None:
@@ -96,7 +102,8 @@ def test_guidance_is_loaded_from_input_file() -> None:
     guidance = write_book.load_guidance()
 
     assert guidance["manuscript"]["style_tiers"] == write_book.GUIDANCE["manuscript"]["style_tiers"]
-    assert "{n_paragraphs}" in guidance["manuscript"]["instructions"]
+    assert "{style_instruction}" in guidance["manuscript"]["instructions"]
+    assert "{n_paragraphs}" not in guidance["manuscript"]["instructions"]
     assert "Write exclusively in English" in guidance["manuscript"]["system"]
 
 
@@ -104,7 +111,6 @@ def test_guidance_templates_accept_runtime_fields() -> None:
     guidance = write_book.GUIDANCE
 
     manuscript = guidance["manuscript"]["instructions"].format(
-        n_paragraphs=3,
         style_instruction=guidance["manuscript"]["style_tiers"][0],
     )
     concepts = guidance["concepts"]["instructions"].format(
@@ -118,9 +124,36 @@ def test_guidance_templates_accept_runtime_fields() -> None:
         system="Tree of Life",
     )
 
-    assert "3 paragraphs" in manuscript
+    assert "fixed paragraph count" in manuscript
     assert "10 distinct" in concepts
     assert '"Tautology"' in training
+
+
+def test_invocation_uses_poetry_manuscript_guidance() -> None:
+    invocation = write_book.guidance_for("manuscript", "Invocation")
+    evocation = write_book.guidance_for("manuscript", "Evocation")
+    outline = write_book.guidance_for("outline", "Invocation")
+
+    assert invocation["form"] == "poetry"
+    assert "finished poetry" in invocation["system"]
+    assert "as poetry, not philosophical prose" in invocation["instructions"]
+    assert evocation.get("form", "prose") == "prose"
+    assert "flowing paragraphs" in evocation["system"]
+    assert "sequence of poems" in outline["system"]
+    assert "Do not write finished verse." in outline["instructions"]
+
+    section = {
+        "System": "Invocation", "Chapter": "1", "Sub-Chapter": "1.1",
+        "Sub-Sub-Chapter": "", "Name": "Youth", "Generate Text": "Yes",
+        "Description": "", "Alternative Names": "",
+    }
+    rows_by_key = {write_book.row_key(section): section}
+    messages = write_book.build_messages(section, rows_by_key, "NOTE EVIDENCE", "- Note-grounded title: Youth.")
+    prompt = "\n".join(message["content"] for message in messages)
+
+    assert "composing Invocation as verse" in prompt
+    assert "flowing paragraphs" not in prompt
+    assert "NOTE EVIDENCE" in prompt
 
 
 def sample_rows() -> tuple[dict, dict, dict]:

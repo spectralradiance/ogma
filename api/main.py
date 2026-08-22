@@ -50,14 +50,9 @@ CSV_FILE = INPUT_DIR / "chapter_structure.csv"
 INDEX_METADATA = INTERMEDIARY_DIR / "index_metadata.json"
 DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
 PIPELINE_VERSION = "outline-v4"
-DEFAULT_EXTRACT_MODEL = "Qwen/Qwen3-14B"
-DEFAULT_WRITE_MODEL = "nbeerbower/Vitus-Qwen3-14B"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_GENERATION_MODEL = DEFAULT_WRITE_MODEL
-SYSTEM_SLUGS = {
-    "Universal Metaphysics": "universal_metaphysics",
-    "Tree of Life": "tree_of_life",
-    "Invocation": "invocation",
-}
 WORKSPACE_ROOTS = {
     "writing-desktop": INPUT_DIR / "writing-desktop",
     "notion/Writing": INPUT_DIR / "notion" / "Writing",
@@ -93,6 +88,19 @@ def load_rows() -> list[dict[str, str]]:
         return list(csv.DictReader(csv_file))
 
 
+def slugify_system(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def system_slugs() -> dict[str, str]:
+    """Map book names from chapter_structure.csv to filesystem-safe slugs."""
+    slugs: dict[str, str] = {}
+    for row in load_rows():
+        name = row["System"]
+        slugs.setdefault(name, slugify_system(name))
+    return slugs
+
+
 def selected_rows(system: str) -> list[dict[str, str]]:
     """Return only rows explicitly marked for generated prose."""
     return [
@@ -103,9 +111,10 @@ def selected_rows(system: str) -> list[dict[str, str]]:
 
 def ensure_system(system: str) -> str:
     """Validate a public book name and return its filesystem-safe slug."""
-    if system not in SYSTEM_SLUGS:
+    slugs = system_slugs()
+    if system not in slugs:
         raise HTTPException(status_code=422, detail=f"Unknown system: {system}")
-    return SYSTEM_SLUGS[system]
+    return slugs[system]
 
 
 def new_run_id() -> str:
@@ -306,7 +315,10 @@ async def start_index(request: IndexRequest) -> JobResponse:
 
 @app.get("/api/systems", response_model=list[SystemSummary])
 async def systems() -> list[SystemSummary]:
-    return [SystemSummary(name=system, sections=len(selected_rows(system))) for system in SYSTEM_SLUGS]
+    return [
+        SystemSummary(name=system, sections=len(selected_rows(system)))
+        for system in system_slugs()
+    ]
 
 
 @app.get("/api/outlines/{system}/caches", response_model=list[OutlineCache])
@@ -411,7 +423,8 @@ async def analysis(run_id: str) -> dict:
 
 @app.get("/api/runs", response_model=list[RunSummary])
 async def runs(system: str | None = None) -> list[RunSummary]:
-    requested = [system] if system else list(SYSTEM_SLUGS)
+    slugs = system_slugs()
+    requested = [system] if system else list(slugs)
     for item in requested:
         ensure_system(item)
     run_dirs = sorted(INTERMEDIARY_DIR.glob("generated*"), reverse=True)
@@ -420,7 +433,7 @@ async def runs(system: str | None = None) -> list[RunSummary]:
         if not run_dir.is_dir():
             continue
         for item in requested:
-            slug = SYSTEM_SLUGS[item]
+            slug = slugs[item]
             if (run_dir / slug).exists() or (OUTPUT_DIR / run_dir.name / slug).exists():
                 summaries.append(run_summary(run_dir, item))
     return sorted(summaries, key=lambda item: item.modified_at, reverse=True)

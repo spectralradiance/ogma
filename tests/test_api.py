@@ -19,6 +19,7 @@ def test_health_and_systems() -> None:
             "Universal Metaphysics": 100,
             "Tree of Life": 37,
             "Invocation": 10,
+            "Evocation": 5,
         }
 
 
@@ -41,8 +42,8 @@ def test_unknown_system_is_rejected() -> None:
 def test_generation_requests_default_to_split_extract_and_write_models() -> None:
     from api.main import DEFAULT_EXTRACT_MODEL, DEFAULT_WRITE_MODEL
 
-    assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen3-14B"
-    assert DEFAULT_WRITE_MODEL == "nbeerbower/Vitus-Qwen3-14B"
+    assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
 
 
 def test_workspace_lists_reads_and_rejects_unsafe_paths(tmp_path: Path) -> None:

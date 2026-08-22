@@ -1,6 +1,7 @@
 """Generate a note-grounded Markdown glossary from the manuscript source data."""
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ CACHE_FILE = os.path.join(
     f"concept_candidates_{CACHE_VERSION.removeprefix('concepts-')}.jsonl",
 )
 DEFAULT_OUTPUT = os.path.join(write_book.OUTPUT_DIR, "concepts.md")
+DEFAULT_CSV_OUTPUT = os.path.join(write_book.OUTPUT_DIR, "concepts.csv")
 FAILED_RESPONSE_DIR = os.path.join(write_book.INTERMEDIARY_DIR, "concept_failures")
 
 
@@ -204,12 +206,35 @@ def deduplicate_candidates(
     return selected
 
 
+def sorted_concepts(concepts: list[dict[str, str]]) -> list[dict[str, str]]:
+    return sorted(concepts, key=lambda concept: concept["name"].casefold())
+
+
 def write_markdown(path: str, concepts: list[dict[str, str]]) -> None:
-    concepts = sorted(concepts, key=lambda concept: concept["name"].casefold())
+    concepts = sorted_concepts(concepts)
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as output_file:
         output_file.write(f"# Concepts\n\n{len(concepts)} concepts grounded in the indexed notes.\n\n")
         for concept in concepts:
             output_file.write(f"## {concept['name']}\n\n{concept['description']}\n\n")
+
+
+def write_csv(path: str, concepts: list[dict[str, str]]) -> None:
+    concepts = sorted_concepts(concepts)
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=["term", "description"])
+        writer.writeheader()
+        for concept in concepts:
+            writer.writerow({
+                "term": concept["name"],
+                "description": concept["description"],
+            })
+
+
+def csv_path_for(markdown_path: str) -> str:
+    root, _ext = os.path.splitext(markdown_path)
+    return f"{root}.csv"
 
 
 def main() -> None:
@@ -221,6 +246,11 @@ def main() -> None:
     parser.add_argument("--similarity-threshold", type=float, default=DEFAULT_SIMILARITY_THRESHOLD)
     parser.add_argument("--system", action="append", help="Limit inputs to one or more book systems")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--csv-output",
+        default=None,
+        help="CSV glossary path; defaults to the Markdown output with a .csv suffix",
+    )
     parser.add_argument("--allow-cpu", action="store_true")
     parser.add_argument(
         "--extract-model-name",
@@ -234,8 +264,10 @@ def main() -> None:
     if not 0 < args.similarity_threshold <= 1:
         raise SystemExit("--similarity-threshold must be greater than 0 and at most 1.")
 
+    csv_output = args.csv_output or csv_path_for(args.output)
     os.makedirs(write_book.INTERMEDIARY_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(csv_output)) or ".", exist_ok=True)
 
     all_rows = write_book.load_csv(write_book.CSV_FILE)
     available_systems = sorted({row["System"] for row in all_rows})
@@ -331,8 +363,10 @@ def main() -> None:
         args.similarity_threshold,
     )
     write_markdown(args.output, concepts)
+    write_csv(csv_output, concepts)
     print(
-        f"Wrote {len(concepts)} concepts from {len(all_candidates)} candidates to {args.output}"
+        f"Wrote {len(concepts)} concepts from {len(all_candidates)} candidates to "
+        f"{args.output} and {csv_output}"
     )
     if len(concepts) < args.target_count:
         print(

@@ -78,7 +78,7 @@ requirements.txt         Python runtime and test dependencies
 Model-facing editorial instructions live in `data/input/guidance.json`. This file controls the
 outline and manuscript prompts, manuscript style progression, concept extraction, chat behavior,
 and legacy training prompts. Runtime values such as section metadata, retrieved note excerpts,
-paragraph counts, and output schemas are still assembled by the Python code.
+and output schemas are still assembled by the Python code.
 
 Restart a running API or command after changing the guidance file so it is loaded again. Keep the
 template fields in braces unchanged because the generation code fills them at runtime.
