@@ -57,6 +57,11 @@ POETRY_SYLLABLE_OUTLIER_FRACTION = 0.2
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 SENTENCE_END_CHARS = '.!?…\"\'”’)'
+AUTHOR_REFERENCE_PATTERN = re.compile(
+    r"\b(?:the|this)\s+author\b|\bthe\s+(?:writer|poet)\b",
+    re.IGNORECASE,
+)
+FIRST_PERSON_PATTERN = re.compile(r"\b(?:I|me|my|mine|myself)\b")
 NOTE_SOURCE_KEYS = ("writing-desktop", "notion/Writing")
 
 
@@ -311,6 +316,23 @@ def is_chapter_introduction(row: dict) -> bool:
     name = row["Name"].strip().lower()
     return not row["Sub-Sub-Chapter"].strip() and (
         name == "introduction" or name.endswith(" - introduction")
+    )
+
+
+def is_book_introduction(row: dict) -> bool:
+    return str(row.get("Chapter", "")).strip() == "0"
+
+
+def voice_instruction(row: dict) -> str:
+    if is_book_introduction(row):
+        return (
+            "This is the book introduction. Write in the first person as the writer. "
+            "Do not refer to yourself in the third person as \"the author\"."
+        )
+    return (
+        "This is not the book introduction. Do not write in the first person. "
+        "Do not refer to the writer as \"I\", \"me\", \"my\", or \"the author\". "
+        "State the ideas directly in an impersonal scholarly voice."
     )
 
 
@@ -745,6 +767,7 @@ def build_messages(
         + manuscript["instructions"].format(
             style_instruction=style_instruction(row, rows_by_key),
         )
+        + "\n\n" + voice_instruction(row)
     )
 
     return [
@@ -815,6 +838,7 @@ def generate_english_text(
     messages: list[dict],
     max_new_tokens: int,
     form: str = "prose",
+    book_introduction: bool = False,
 ) -> str:
     attempts = list(messages)
     last_error = "unknown validation error"
@@ -835,7 +859,9 @@ def generate_english_text(
             prose = strip_leading_markdown_headings(prose)
             if form != "poetry":
                 prose = close_truncated_prose(prose)
-            last_error = manuscript_validation_error(prose, form=form) or ""
+            last_error = manuscript_validation_error(
+                prose, form=form, book_introduction=book_introduction
+            ) or ""
             if not last_error:
                 return prose
         ending = (prose or "").rstrip().replace("\n", " ")[-80:]
@@ -857,6 +883,12 @@ def generate_english_text(
                 "Finish the last sentence and close the section with a complete "
                 "sentence. Do not restart at greater length. Do not use Markdown "
                 "headings, code fences, or lists."
+            )
+        elif "first person" in last_error or "the author" in last_error:
+            retry = (
+                f"Your previous response was invalid because {last_error}. "
+                "Rewrite the section without referring to the writer. "
+                "Do not use I, me, my, or the author. State the ideas directly."
             )
         attempts = [
             *messages,
@@ -948,7 +980,19 @@ def poetry_meter_error(prose: str) -> str | None:
     )
 
 
-def manuscript_validation_error(prose: str, form: str = "prose") -> str | None:
+def writer_voice_error(prose: str, book_introduction: bool) -> str | None:
+    if AUTHOR_REFERENCE_PATTERN.search(prose):
+        return "response refers to the writer as 'the author'"
+    if not book_introduction and FIRST_PERSON_PATTERN.search(prose):
+        return "response uses first person outside the book introduction"
+    return None
+
+
+def manuscript_validation_error(
+    prose: str,
+    form: str = "prose",
+    book_introduction: bool = False,
+) -> str | None:
     if CJK_PATTERN.search(prose):
         return "response contains CJK text"
     if not prose.strip():
@@ -967,12 +1011,15 @@ def manuscript_validation_error(prose: str, form: str = "prose") -> str | None:
     if form == "poetry":
         if len(prose.strip()) < 80:
             return "response appears truncated"
-        return poetry_meter_error(prose)
+        meter = poetry_meter_error(prose)
+        if meter:
+            return meter
+        return writer_voice_error(prose, book_introduction)
     if re.search(r"^\s*(?:[-+*]|\d+[.)])\s+", prose, re.MULTILINE):
         return "response contains a list"
     if prose.rstrip()[-1] not in SENTENCE_END_CHARS:
         return "response appears truncated"
-    return None
+    return writer_voice_error(prose, book_introduction)
 
 
 def plan_validation_error(plan: str) -> str | None:
@@ -1439,6 +1486,7 @@ def main():
                 messages,
                 max_new_tokens=MAX_NEW_TOKENS,
                 form=guidance_for("manuscript", row["System"]).get("form", "prose"),
+                book_introduction=is_book_introduction(row),
             )
 
             out.write("".join(headings) + prose + "\n\n")

@@ -379,6 +379,7 @@ def test_guidance_templates_accept_runtime_fields() -> None:
     )
 
     assert "fixed paragraph count" in manuscript
+    assert "first person only in the book introduction" in manuscript
     assert "10 distinct" in concepts
     assert '"Tautology"' in training
 
@@ -391,6 +392,7 @@ def test_invocation_uses_poetry_manuscript_guidance() -> None:
     assert invocation["form"] == "poetry"
     assert "finished poetry" in invocation["system"]
     assert "as poetry, not philosophical prose" in invocation["instructions"]
+    assert "first person only in the book introduction" in invocation["instructions"]
     assert "8 to 16 syllables" in invocation["system"]
     assert "8 to 16 syllables" in invocation["instructions"]
     assert "8 to 16 syllables" in outline["instructions"]
@@ -411,6 +413,47 @@ def test_invocation_uses_poetry_manuscript_guidance() -> None:
     assert "composing Invocation as verse" in prompt
     assert "flowing paragraphs" not in prompt
     assert "NOTE EVIDENCE" in prompt
+    assert "This is not the book introduction" in prompt
+    assert 'Do not refer to the writer as "I"' in prompt
+
+    intro = {
+        "System": "Evocation", "Chapter": "0", "Sub-Chapter": "",
+        "Sub-Sub-Chapter": "", "Name": "Introduction", "Generate Text": "Yes",
+        "Description": "", "Alternative Names": "",
+    }
+    intro_prompt = "\n".join(
+        message["content"]
+        for message in write_book.build_messages(
+            intro,
+            {write_book.row_key(intro): intro},
+            "NOTE EVIDENCE",
+            "- Note-grounded title: Opening.",
+        )
+    )
+    assert "This is the book introduction" in intro_prompt
+    assert "Write in the first person as the writer" in intro_prompt
+
+
+def test_manuscript_voice_rejects_author_and_non_intro_first_person() -> None:
+    impersonal = (
+        "Existence is self-sustaining under these conditions.\n\n"
+        "The argument follows from the notes without a personal frame."
+    )
+    assert write_book.manuscript_validation_error(impersonal) is None
+    assert write_book.manuscript_validation_error(
+        "The word the author has held for this phase carries its meaning in its etymology."
+    )
+    assert write_book.manuscript_validation_error(
+        "I will now explain why substance precedes sentience in this order."
+    )
+    assert write_book.manuscript_validation_error(
+        "I begin from doubt, and I keep the first person only here.",
+        book_introduction=True,
+    ) is None
+    assert write_book.manuscript_validation_error(
+        "The author begins from doubt in this introduction.",
+        book_introduction=True,
+    )
 
 
 def sample_rows() -> tuple[dict, dict, dict]:
