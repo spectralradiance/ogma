@@ -4,7 +4,7 @@ import sys
 
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "write_book.py"
-SPEC = importlib.util.spec_from_file_location("sylph_write_book", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("ogma_write_book", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 write_book = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = write_book

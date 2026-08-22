@@ -4,7 +4,7 @@ import sys
 
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "analyze_corpus.py"
-SPEC = importlib.util.spec_from_file_location("sylph_analyze_corpus", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("ogma_analyze_corpus", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 analysis = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = analysis

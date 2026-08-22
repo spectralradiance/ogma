@@ -76,7 +76,7 @@ function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><img className="brand-icon" src="/favicon.svg" alt="" /><span>Sylph</span></div>
+      <div className="brand"><img className="brand-icon" src="/favicon.svg" alt="" /><span>Ogma</span></div>
       <nav>
         <button className={view === 'workspace' ? 'active' : ''} onClick={() => setView('workspace')}><Activity /> Workspace</button>
         <button className={view === 'editor' ? 'active' : ''} onClick={() => setView('editor')}><PencilLine /> Editor</button>

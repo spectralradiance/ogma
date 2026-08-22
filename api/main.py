@@ -1,4 +1,4 @@
-"""FastAPI boundary for Sylph's local corpus and manuscript workflows.
+"""FastAPI boundary for Ogma's local corpus and manuscript workflows.
 
 Read-only endpoints inspect artifacts directly. Mutating or compute-heavy
 operations are delegated to the serialized ``JobManager`` and existing Python
@@ -75,7 +75,7 @@ async def lifespan(_: FastAPI):
     await manager.stop()
 
 
-app = FastAPI(title="Sylph API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Ogma API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -279,7 +279,7 @@ async def update_workspace_file(request: WorkspaceFileUpdate) -> WorkspaceFileRe
     file_path = workspace_path(request.path)
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Workspace file not found")
-    temporary = file_path.with_name(f".{file_path.name}.sylph-tmp")
+    temporary = file_path.with_name(f".{file_path.name}.ogma-tmp")
     try:
         temporary.write_text(request.content, encoding="utf-8")
         temporary.replace(file_path)
