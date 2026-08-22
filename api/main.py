@@ -10,6 +10,7 @@ import csv
 from contextlib import asynccontextmanager
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Literal
@@ -52,6 +53,7 @@ DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
 PIPELINE_VERSION = "outline-v4"
 DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_GENERATION_MODEL = DEFAULT_WRITE_MODEL
 WORKSPACE_ROOTS = {
     "writing-desktop": INPUT_DIR / "writing-desktop",
@@ -62,9 +64,39 @@ WORKSPACE_EXTENSIONS = {"", ".md", ".markdown", ".txt", ".text"}
 manager = JobManager(ROOT)
 
 
+def load_project_env() -> None:
+    """Expose .env values such as CLAUDE_API_KEY to worker subprocesses."""
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return
+    with env_path.open(encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def generation_provider(request: OutlineRequest | ManuscriptRequest) -> str:
+    if request.provider:
+        return request.provider
+    names = [request.extract_model_name, request.model_name]
+    write_name = getattr(request, "write_model_name", None)
+    if write_name:
+        names.append(write_name)
+    if any(name and name.lower().startswith("claude") for name in names if name):
+        return "claude"
+    return "local"
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Create storage roots and bind the job queue to the server event loop."""
+    load_project_env()
     INTERMEDIARY_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     await manager.start()
@@ -332,12 +364,19 @@ async def start_outline(request: OutlineRequest) -> JobResponse:
     if request.cache_path and request.regenerate:
         raise HTTPException(status_code=422, detail="Choose cache reuse or regeneration")
     run_id = new_run_id()
+    provider = generation_provider(request)
+    extract_name = request.extract_model_name or request.model_name
+    if provider == "claude":
+        extract_name = extract_name or DEFAULT_CLAUDE_MODEL
+    else:
+        extract_name = extract_name or DEFAULT_EXTRACT_MODEL
     arguments = [
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
         "--outline-only",
-        "--extract-model-name", request.extract_model_name or request.model_name or DEFAULT_EXTRACT_MODEL,
+        "--provider", provider,
+        "--extract-model-name", extract_name,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])
@@ -352,12 +391,22 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
     run_id = request.run_id or new_run_id()
     if request.run_id and not (INTERMEDIARY_DIR / run_id / slug).exists():
         raise HTTPException(status_code=404, detail="Run not found for this system")
+    provider = generation_provider(request)
+    extract_name = request.extract_model_name or request.model_name
+    write_name = request.write_model_name or request.model_name
+    if provider == "claude":
+        extract_name = extract_name or DEFAULT_CLAUDE_MODEL
+        write_name = write_name or DEFAULT_CLAUDE_MODEL
+    else:
+        extract_name = extract_name or DEFAULT_EXTRACT_MODEL
+        write_name = write_name or DEFAULT_WRITE_MODEL
     arguments = [
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
-        "--extract-model-name", request.extract_model_name or request.model_name or DEFAULT_EXTRACT_MODEL,
-        "--write-model-name", request.write_model_name or request.model_name or DEFAULT_WRITE_MODEL,
+        "--provider", provider,
+        "--extract-model-name", extract_name,
+        "--write-model-name", write_name,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])

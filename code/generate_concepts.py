@@ -253,11 +253,26 @@ def main() -> None:
     )
     parser.add_argument("--allow-cpu", action="store_true")
     parser.add_argument(
+        "--provider",
+        choices=("local", "claude"),
+        default="local",
+        help="local loads Hugging Face weights; claude uses the Anthropic API",
+    )
+    parser.add_argument(
         "--extract-model-name",
         default=write_book.DEFAULT_EXTRACT_MODEL,
-        help="Hugging Face model used to extract concepts from notes",
+        help="Hugging Face or Claude model used to extract concepts from notes",
     )
     args = parser.parse_args()
+    write_book.load_project_env()
+    provider, extract_name, _write_name = write_book.resolve_generation_models(
+        args.provider,
+        args.extract_model_name,
+        args.extract_model_name,
+        None,
+    )
+    if provider == "claude" and args.notes_top_k == write_book.TOP_K:
+        args.notes_top_k = write_book.CLAUDE_NOTES_TOP_K
 
     if args.target_count < 1 or args.sections_per_batch < 1 or args.candidates_per_batch < 1:
         raise SystemExit("Counts and batch size must be positive integers.")
@@ -308,12 +323,13 @@ def main() -> None:
     print(
         f"Using {len(source_rows)} chapter sections and {collection.count()} indexed note chunks."
     )
+    print(f"Provider: {provider}; extract model: {extract_name}")
 
     model = tokenizer = None
     if missing_batches:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model, tokenizer = write_book.load_causal_lm(
-            args.extract_model_name,
+        model, tokenizer = write_book.load_generator(
+            extract_name,
             device,
             args.allow_cpu,
         )

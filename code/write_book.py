@@ -4,6 +4,7 @@ RAG-driven manuscript generator.
 Loads the metaphysics CSV, queries a local ChromaDB vector store for
 relevant notes, extracts a writing plan, and writes each section.
 Defaults use Qwen2.5 3B Instruct so the pipeline fits a 6 GB GPU.
+Pass --provider claude to use the Anthropic API with CLAUDE_API_KEY instead.
 
 Usage:
     python write_book.py [--db-dir PATH] [--notes-top-k N]
@@ -41,10 +42,13 @@ MAX_SEQ_LENGTH = 4096
 MAX_NEW_TOKENS = 900
 MAX_PLAN_TOKENS = 900
 TOP_K = 5
+CLAUDE_NOTES_TOP_K = 40
 DEFAULT_SYSTEM = "Universal Metaphysics"
 DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
+ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 MAX_LANGUAGE_RETRIES = 3
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -58,6 +62,117 @@ def load_guidance(path: str = GUIDANCE_FILE) -> dict:
 
 
 GUIDANCE = load_guidance()
+
+
+def load_project_env(path: str = ENV_FILE) -> None:
+    """Load key=value pairs from .env without overwriting a real environment."""
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def is_claude_model(name: str | None) -> bool:
+    return bool(name) and name.lower().replace("_", "-").startswith("claude")
+
+
+def claude_api_key() -> str:
+    load_project_env()
+    key = (os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        raise SystemExit(
+            "Claude generation requires CLAUDE_API_KEY in the environment or .env file."
+        )
+    return key
+
+
+def claude_messages(messages: list[dict]) -> tuple[str | None, list[dict[str, str]]]:
+    """Split system text and merge consecutive same-role turns for the Messages API."""
+    system_parts: list[str] = []
+    converted: list[dict[str, str]] = []
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
+        if role == "system":
+            system_parts.append(content)
+            continue
+        if role not in {"user", "assistant"}:
+            role = "user"
+        if converted and converted[-1]["role"] == role:
+            converted[-1]["content"] += "\n\n" + content
+        else:
+            converted.append({"role": role, "content": content})
+    if not converted:
+        converted = [{"role": "user", "content": "Respond now."}]
+    if converted[0]["role"] != "user":
+        converted.insert(0, {"role": "user", "content": "Continue."})
+    system = "\n\n".join(part.strip() for part in system_parts if part.strip()) or None
+    return system, converted
+
+
+def generate_claude_text(
+    model_name: str,
+    messages: list[dict],
+    max_new_tokens: int,
+    do_sample: bool,
+) -> str:
+    import anthropic
+
+    system, converted = claude_messages(messages)
+    client = anthropic.Anthropic(api_key=claude_api_key())
+    request = {
+        "model": model_name,
+        "max_tokens": max_new_tokens,
+        "messages": converted,
+        "temperature": 0.75 if do_sample else 0,
+    }
+    if system:
+        request["system"] = system
+    response = client.messages.create(**request)
+    texts = [
+        block.text
+        for block in response.content
+        if getattr(block, "text", None)
+    ]
+    return strip_thinking("\n".join(texts).strip())
+
+
+def resolve_generation_models(
+    provider: str,
+    extract_name: str,
+    write_name: str,
+    model_name: str | None,
+) -> tuple[str, str, str]:
+    extract = model_name or extract_name
+    write = model_name or write_name
+    if provider == "claude":
+        if not is_claude_model(extract):
+            extract = DEFAULT_CLAUDE_MODEL
+        if not is_claude_model(write):
+            write = DEFAULT_CLAUDE_MODEL
+    elif is_claude_model(extract) or is_claude_model(write):
+        provider = "claude"
+        if not is_claude_model(extract):
+            extract = DEFAULT_CLAUDE_MODEL
+        if not is_claude_model(write):
+            write = DEFAULT_CLAUDE_MODEL
+    return provider, extract, write
+
+
+def load_generator(model_name: str, device: str, allow_cpu: bool):
+    if is_claude_model(model_name):
+        claude_api_key()
+        print(f"Using Claude API ({model_name}). Notes stay local; only retrieved excerpts are sent.")
+        return model_name, None
+    return load_causal_lm(model_name, device, allow_cpu)
 
 
 def guidance_for(kind: str, system: str | None = None) -> dict:
@@ -592,6 +707,8 @@ def generate_text(
     max_new_tokens: int,
     do_sample: bool,
 ) -> str:
+    if tokenizer is None:
+        return generate_claude_text(str(model), messages, max_new_tokens, do_sample)
     text = format_chat(tokenizer, messages)
     device = next(model.parameters()).device
     inputs = tokenizer(
@@ -805,6 +922,8 @@ def load_causal_lm(model_name: str, device: str, allow_cpu: bool):
 
 
 def unload_causal_lm(model) -> None:
+    if model is None or isinstance(model, str):
+        return
     del model
     gc.collect()
     if torch.cuda.is_available():
@@ -821,6 +940,12 @@ def main():
         help="Book to process, such as 'Universal Metaphysics' or 'Tree of Life'",
     )
     parser.add_argument(
+        "--provider",
+        choices=("local", "claude"),
+        default="local",
+        help="local loads Hugging Face weights; claude sends retrieved excerpts to the Anthropic API",
+    )
+    parser.add_argument(
         "--allow-cpu",
         action="store_true",
         help="Explicitly allow slow CPU generation when CUDA is unavailable or fails",
@@ -828,17 +953,17 @@ def main():
     parser.add_argument(
         "--extract-model-name",
         default=DEFAULT_EXTRACT_MODEL,
-        help="Hugging Face model used to extract note-grounded structure and writing plans",
+        help="Hugging Face or Claude model used to extract note-grounded structure and writing plans",
     )
     parser.add_argument(
         "--write-model-name",
         default=DEFAULT_WRITE_MODEL,
-        help="Hugging Face model used to write manuscript prose",
+        help="Hugging Face or Claude model used to write manuscript prose",
     )
     parser.add_argument(
         "--model-name",
         default=None,
-        help="If set, use this Hugging Face model for both extraction and writing",
+        help="If set, use this model for both extraction and writing",
     )
     parser.add_argument(
         "--outline-only",
@@ -864,6 +989,15 @@ def main():
         help="Discard this run's existing writing plan and generate it again",
     )
     args = parser.parse_args()
+    load_project_env()
+    provider, extract_name, write_name = resolve_generation_models(
+        args.provider,
+        args.extract_model_name,
+        args.write_model_name,
+        args.model_name,
+    )
+    if provider == "claude" and args.notes_top_k == TOP_K:
+        args.notes_top_k = CLAUDE_NOTES_TOP_K
 
     paths = run_paths(args.system, args.run_id)
     os.makedirs(paths["intermediary_dir"], exist_ok=True)
@@ -963,8 +1097,7 @@ def main():
         )
 
     print(f"  Human outline: {paths['human_outline']}")
-    extract_name = args.model_name or args.extract_model_name
-    write_name = args.model_name or args.write_model_name
+    print(f"  Provider: {provider}")
     print(f"  Extract model: {extract_name}")
     print(f"  Write model: {write_name}")
 
@@ -989,7 +1122,7 @@ def main():
 
     # Ground parent titles and chapter-level scope before planning individual prose sections.
     if need_extract:
-        extract_model, extract_tokenizer = load_causal_lm(
+        extract_model, extract_tokenizer = load_generator(
             extract_name, device, args.allow_cpu
         )
         if missing_structures:
@@ -1046,7 +1179,7 @@ def main():
     if write_name == extract_name and extract_model is not None:
         model, tokenizer = extract_model, extract_tokenizer
     else:
-        model, tokenizer = load_causal_lm(write_name, device, args.allow_cpu)
+        model, tokenizer = load_generator(write_name, device, args.allow_cpu)
 
     # --- Generate ---
     output_file = paths["manuscript"]

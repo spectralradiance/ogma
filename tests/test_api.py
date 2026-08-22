@@ -40,10 +40,18 @@ def test_unknown_system_is_rejected() -> None:
 
 
 def test_generation_requests_default_to_split_extract_and_write_models() -> None:
-    from api.main import DEFAULT_EXTRACT_MODEL, DEFAULT_WRITE_MODEL
+    from api.main import DEFAULT_CLAUDE_MODEL, DEFAULT_EXTRACT_MODEL, DEFAULT_WRITE_MODEL
+    from api.main import generation_provider
+    from api.schemas import ManuscriptRequest, OutlineRequest
 
     assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
     assert DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_CLAUDE_MODEL == "claude-opus-5"
+    assert generation_provider(OutlineRequest(system="Invocation")) == "local"
+    assert generation_provider(ManuscriptRequest(system="Invocation", provider="claude")) == "claude"
+    assert generation_provider(
+        ManuscriptRequest(system="Invocation", extract_model_name="claude-opus-5")
+    ) == "claude"
 
 
 def test_workspace_lists_reads_and_rejects_unsafe_paths(tmp_path: Path) -> None:

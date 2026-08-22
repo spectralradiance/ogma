@@ -14,6 +14,55 @@ SPEC.loader.exec_module(write_book)
 def test_split_model_defaults() -> None:
     assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
     assert write_book.DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert write_book.DEFAULT_CLAUDE_MODEL == "claude-opus-5"
+
+
+def test_claude_provider_replaces_local_defaults() -> None:
+    provider, extract, write = write_book.resolve_generation_models(
+        "claude",
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen2.5-3B-Instruct",
+        None,
+    )
+    assert provider == "claude"
+    assert extract == write_book.DEFAULT_CLAUDE_MODEL
+    assert write == write_book.DEFAULT_CLAUDE_MODEL
+
+
+def test_claude_model_name_selects_claude_backend() -> None:
+    provider, extract, write = write_book.resolve_generation_models(
+        "local", "claude-sonnet-4-5", "Qwen/Qwen2.5-3B-Instruct", None
+    )
+    assert provider == "claude"
+    assert extract == "claude-sonnet-4-5"
+    assert write == write_book.DEFAULT_CLAUDE_MODEL
+
+
+def test_claude_messages_merge_consecutive_user_turns() -> None:
+    system, converted = write_book.claude_messages([
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "Plan this."},
+        {"role": "user", "content": "Retry."},
+    ])
+    assert system == "Be precise."
+    assert converted == [{"role": "user", "content": "Plan this.\n\nRetry."}]
+
+
+def test_generate_text_uses_claude_when_tokenizer_is_missing(monkeypatch) -> None:
+    captured = {}
+
+    def fake_claude(model_name, messages, max_new_tokens, do_sample):
+        captured["model"] = model_name
+        captured["do_sample"] = do_sample
+        return "Verse line."
+
+    monkeypatch.setattr(write_book, "generate_claude_text", fake_claude)
+    text = write_book.generate_text(
+        "claude-opus-5", None, [{"role": "user", "content": "hi"}], 40, True
+    )
+    assert text == "Verse line."
+    assert captured["model"] == "claude-opus-5"
+    assert captured["do_sample"] is True
 
 
 def test_strip_thinking_removes_qwen3_blocks() -> None:
