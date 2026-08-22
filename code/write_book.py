@@ -43,6 +43,8 @@ MAX_NEW_TOKENS = 900
 MAX_PLAN_TOKENS = 900
 TOP_K = 5
 CLAUDE_NOTES_TOP_K = 40
+CLAUDE_MAX_OUTPUT_TOKENS = 8192
+CLAUDE_MAX_CONTINUATIONS = 1
 DEFAULT_SYSTEM = "Universal Metaphysics"
 DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
@@ -50,8 +52,11 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
 ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 MAX_LANGUAGE_RETRIES = 3
+POETRY_SYLLABLE_RANGE = (8, 16)
+POETRY_SYLLABLE_OUTLIER_FRACTION = 0.2
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+SENTENCE_END_CHARS = '.!?…\"\'”’)'
 NOTE_SOURCE_KEYS = ("writing-desktop", "notion/Writing")
 
 
@@ -118,6 +123,18 @@ def claude_messages(messages: list[dict]) -> tuple[str | None, list[dict[str, st
     return system, converted
 
 
+def claude_visible_text(response) -> str:
+    """Keep only visible text blocks; Opus 5 thinking blocks have no usable .text."""
+    texts = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) in {"thinking", "redacted_thinking"}:
+            continue
+        text = getattr(block, "text", None)
+        if text:
+            texts.append(text)
+    return "\n".join(texts)
+
+
 def generate_claude_text(
     model_name: str,
     messages: list[dict],
@@ -126,23 +143,57 @@ def generate_claude_text(
 ) -> str:
     import anthropic
 
+    # Anthropic SDK 1.0 and Claude Opus 5 reject temperature/top_p/top_k.
+    _ = do_sample
     system, converted = claude_messages(messages)
     client = anthropic.Anthropic(api_key=claude_api_key())
     request = {
         "model": model_name,
-        "max_tokens": max_new_tokens,
+        # Thinking tokens count against max_tokens. Disable thinking and keep a
+        # floor large enough for labeled plans; local GPU still uses 500–900.
+        "max_tokens": max(max_new_tokens, CLAUDE_MAX_OUTPUT_TOKENS),
         "messages": converted,
-        "temperature": 0.75 if do_sample else 0,
+        "thinking": {"type": "disabled"},
+        "output_config": {"effort": "high"},
     }
     if system:
         request["system"] = system
-    response = client.messages.create(**request)
-    texts = [
-        block.text
-        for block in response.content
-        if getattr(block, "text", None)
-    ]
-    return strip_thinking("\n".join(texts).strip())
+    conversation = list(converted)
+    chunks: list[str] = []
+    stop = None
+    block_types = []
+    for continuation in range(1 + CLAUDE_MAX_CONTINUATIONS):
+        request["messages"] = conversation
+        response = client.messages.create(**request)
+        text = claude_visible_text(response)
+        if not chunks:
+            text = text.lstrip()
+        if text:
+            chunks.append(text)
+        stop = getattr(response, "stop_reason", None)
+        block_types = [
+            getattr(block, "type", type(block).__name__) for block in response.content
+        ]
+        if stop != "max_tokens" or continuation >= CLAUDE_MAX_CONTINUATIONS:
+            break
+        print(
+            f"  Claude hit max_tokens; continuing "
+            f"({continuation + 1}/{CLAUDE_MAX_CONTINUATIONS})"
+        )
+        conversation = [
+            *conversation,
+            {"role": "assistant", "content": text or "(empty)"},
+            {
+                "role": "user",
+                "content": "Continue from the exact point you stopped. Do not restart or repeat.",
+            },
+        ]
+    combined = strip_thinking("".join(chunks)).strip()
+    if combined:
+        return combined
+    raise RuntimeError(
+        f"Claude returned no text (stop_reason={stop}, blocks={block_types})"
+    )
 
 
 def resolve_generation_models(
@@ -534,6 +585,11 @@ def load_structure(path: str) -> dict[str, str]:
     }
 
 
+def has_grounded_plan(text: str | None) -> bool:
+    normalized = re.sub(r"[*#]", "", text or "").lower()
+    return "note-grounded title:" in normalized
+
+
 def grounded_title(content: str, fallback: str) -> str:
     match = re.search(r"^- Note-grounded title:\s*(.+)$", content, re.MULTILINE)
     return match.group(1).strip().strip('"') if match else fallback
@@ -555,30 +611,47 @@ def resolved_title(row: dict | None, records: dict[str, str], fallback: str) -> 
     return grounded_title(records.get(section_key(row), ""), fallback)
 
 
-def append_structure(path: str, row: dict, plan: str) -> None:
-    new_file = not os.path.exists(path)
-    with open(path, "a", encoding="utf-8") as outline_file:
-        if new_file:
-            outline_file.write(f"# {row['System']} Writing Outline\n\n")
-        outline_file.write(
-            f"<!-- structure: {section_key(row)} -->\n"
-            f"## Structure {section_number(row)}\n\n"
-            f"{plan.strip()}\n"
-            "<!-- /structure -->\n\n"
+def write_outline_block(path: str, kind: str, key: str, heading: str, body: str, title: str) -> None:
+    start_tag = f"<!-- {kind}: {key} -->"
+    end_tag = f"<!-- /{kind} -->"
+    block = f"{start_tag}\n{heading}\n\n{body.strip()}\n{end_tag}\n\n"
+    content = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as outline_file:
+            content = outline_file.read()
+        pattern = re.compile(
+            re.escape(start_tag) + r".*?" + re.escape(end_tag) + r"\n*",
+            re.DOTALL,
         )
+        if pattern.search(content):
+            with open(path, "w", encoding="utf-8") as outline_file:
+                outline_file.write(pattern.sub(block, content, count=1))
+            return
+    prefix = title if not content.strip() else ""
+    with open(path, "a", encoding="utf-8") as outline_file:
+        outline_file.write(prefix + block)
+
+
+def append_structure(path: str, row: dict, plan: str) -> None:
+    write_outline_block(
+        path,
+        "structure",
+        section_key(row),
+        f"## Structure {section_number(row)}",
+        plan,
+        f"# {row['System']} Writing Outline\n\n",
+    )
 
 
 def append_outline(path: str, row: dict, plan: str) -> None:
-    new_file = not os.path.exists(path)
-    with open(path, "a", encoding="utf-8") as outline_file:
-        if new_file:
-            outline_file.write(f"# {row['System']} Writing Outline\n\n")
-        outline_file.write(
-            f"<!-- section: {section_key(row)} -->\n"
-            f"## {section_number(row)} {row['Name']}\n\n"
-            f"{plan.strip()}\n"
-            "<!-- /section -->\n\n"
-        )
+    write_outline_block(
+        path,
+        "section",
+        section_key(row),
+        f"## {section_number(row)} {row['Name']}",
+        plan,
+        f"# {row['System']} Writing Outline\n\n",
+    )
 
 
 def write_human_outline(
@@ -743,23 +816,135 @@ def generate_english_text(
     max_new_tokens: int,
     form: str = "prose",
 ) -> str:
+    attempts = list(messages)
+    last_error = "unknown validation error"
+    prose = ""
     for attempt in range(1, MAX_LANGUAGE_RETRIES + 1):
-        prose = generate_text(
-            model,
-            tokenizer,
-            messages,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-        )
-        error = manuscript_validation_error(prose, form=form)
-        if not error:
-            return prose
+        try:
+            prose = generate_text(
+                model,
+                tokenizer,
+                attempts,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+            )
+        except RuntimeError as exc:
+            last_error = str(exc)
+            prose = ""
+        else:
+            prose = strip_leading_markdown_headings(prose)
+            if form != "poetry":
+                prose = close_truncated_prose(prose)
+            last_error = manuscript_validation_error(prose, form=form) or ""
+            if not last_error:
+                return prose
+        ending = (prose or "").rstrip().replace("\n", " ")[-80:]
         print(
-            f"  Rejected manuscript generation ({error}); retrying "
+            f"  Rejected manuscript generation ({last_error}); retrying "
             f"({attempt}/{MAX_LANGUAGE_RETRIES})"
         )
+        if ending:
+            print(f"  Ending: …{ending}")
+        retry = (
+            f"Your previous response was invalid because {last_error}. "
+            "Return only the finished section. Do not use Markdown headings, "
+            "code fences, bullet lists, or writing-plan labels. "
+            "Begin the first line of the text immediately."
+        )
+        if "truncated" in last_error:
+            retry = (
+                f"Your previous response was invalid because {last_error}. "
+                "Finish the last sentence and close the section with a complete "
+                "sentence. Do not restart at greater length. Do not use Markdown "
+                "headings, code fences, or lists."
+            )
+        attempts = [
+            *messages,
+            {"role": "assistant", "content": prose or "(empty)"},
+            {"role": "user", "content": retry},
+        ]
     raise RuntimeError(
-        f"Generation remained invalid after {MAX_LANGUAGE_RETRIES} attempts: {error}"
+        f"Generation remained invalid after {MAX_LANGUAGE_RETRIES} attempts: {last_error}"
+    )
+
+
+LEADING_MARKDOWN_HEADING = re.compile(r"^(?:[ \t]*#{1,6}[ \t]+[^\r\n]+\r?\n+)+")
+TRAILING_MARKDOWN_HEADING = re.compile(r"(?:\r?\n+[ \t]*#{1,6}[ \t]+[^\r\n]+)+\s*$")
+
+
+def close_truncated_prose(text: str) -> str:
+    """Drop an unfinished tail so a cut-off generation can still be kept."""
+    stripped = text.rstrip()
+    if not stripped or stripped[-1] in SENTENCE_END_CHARS:
+        return stripped
+    last_end = max((stripped.rfind(char) for char in ".!?…"), default=-1)
+    if last_end < 0:
+        return stripped
+    end = last_end + 1
+    while end < len(stripped) and stripped[end] in "\"'”’)":
+        end += 1
+    salvaged = stripped[:end].rstrip()
+    if len(salvaged) < 80:
+        return stripped
+    return salvaged
+
+
+def strip_leading_markdown_headings(text: str) -> str:
+    """Drop title lines Claude often prepends before prose or verse."""
+    return LEADING_MARKDOWN_HEADING.sub("", text.lstrip()).strip()
+
+
+def trim_trailing_manuscript_headings(path: str) -> None:
+    """Remove orphan chapter/section headings left by a failed write."""
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as manuscript:
+        content = manuscript.read()
+    trimmed = TRAILING_MARKDOWN_HEADING.sub("\n", content)
+    if trimmed != content:
+        with open(path, "w", encoding="utf-8") as manuscript:
+            manuscript.write(trimmed)
+
+
+def count_word_syllables(word: str) -> int:
+    """Estimate English syllables from vowel groups; good enough for line-length checks."""
+    cleaned = re.sub(r"[^a-z']", "", word.lower()).strip("'")
+    if not cleaned:
+        return 0
+    vowels = set("aeiouy")
+    count = 0
+    prev_vowel = False
+    for index, char in enumerate(cleaned):
+        is_vowel = char in vowels and not (char == "y" and index == 0)
+        if is_vowel and not prev_vowel:
+            count += 1
+        prev_vowel = is_vowel
+    if cleaned.endswith("e") and not cleaned.endswith(("le", "ye", "ie")) and count > 1:
+        count -= 1
+    return max(count, 1)
+
+
+def count_line_syllables(line: str) -> int:
+    return sum(count_word_syllables(word) for word in re.findall(r"[A-Za-z']+", line))
+
+
+def poetry_meter_error(prose: str) -> str | None:
+    low, high = POETRY_SYLLABLE_RANGE
+    lines = [line.strip() for line in prose.splitlines() if line.strip()]
+    outside = []
+    for line in lines:
+        syllables = count_line_syllables(line)
+        if syllables < low or syllables > high:
+            outside.append((syllables, line))
+    allowed = max(1, int(len(lines) * POETRY_SYLLABLE_OUTLIER_FRACTION))
+    if len(outside) <= allowed:
+        return None
+    samples = "; ".join(
+        f"{syllables} syllables: {line[:70]}" for syllables, line in outside[:3]
+    )
+    return (
+        f"lines should be about {low}-{high} syllables "
+        f"({len(outside)}/{len(lines)} outside range; {samples})"
     )
 
 
@@ -782,10 +967,10 @@ def manuscript_validation_error(prose: str, form: str = "prose") -> str | None:
     if form == "poetry":
         if len(prose.strip()) < 80:
             return "response appears truncated"
-        return None
+        return poetry_meter_error(prose)
     if re.search(r"^\s*(?:[-+*]|\d+[.)])\s+", prose, re.MULTILINE):
         return "response contains a list"
-    if prose.rstrip()[-1] not in '.!?\"\'”’':
+    if prose.rstrip()[-1] not in SENTENCE_END_CHARS:
         return "response appears truncated"
     return None
 
@@ -819,22 +1004,28 @@ def generate_plan_text(model, tokenizer, messages: list[dict]) -> str:
     attempts = list(messages)
     last_error = "unknown validation error"
     for attempt in range(1, MAX_LANGUAGE_RETRIES + 1):
-        plan = generate_text(
-            model,
-            tokenizer,
-            attempts,
-            max_new_tokens=MAX_PLAN_TOKENS,
-            do_sample=attempt > 1,
-        )
-        last_error = plan_validation_error(plan) or ""
-        if not last_error:
-            return plan
+        try:
+            plan = generate_text(
+                model,
+                tokenizer,
+                attempts,
+                max_new_tokens=MAX_PLAN_TOKENS,
+                do_sample=attempt > 1,
+            )
+        except RuntimeError as exc:
+            plan = ""
+            last_error = str(exc)
+        else:
+            last_error = plan_validation_error(plan) or ""
+            if not last_error:
+                return plan
         print(
             f"  Rejected writing plan ({last_error}); retrying "
             f"({attempt}/{MAX_LANGUAGE_RETRIES})"
         )
         attempts = [
             *messages,
+            {"role": "assistant", "content": plan or "(empty)"},
             {
                 "role": "user",
                 "content": (
@@ -1062,8 +1253,13 @@ def main():
     book_outline_path = paths["outline"]
     plans = load_outline(book_outline_path)
     structures = load_structure(book_outline_path)
-    missing_plans = [row for row in section_rows if section_key(row) not in plans]
-    missing_structures = [row for row in structure_rows if section_key(row) not in structures]
+    missing_plans = [
+        row for row in section_rows if not has_grounded_plan(plans.get(section_key(row)))
+    ]
+    missing_structures = [
+        row for row in structure_rows
+        if not has_grounded_plan(structures.get(section_key(row)))
+    ]
 
     print("\nCurrent process")
     print(f"  Book: {args.system}")
@@ -1184,6 +1380,8 @@ def main():
     # --- Generate ---
     output_file = paths["manuscript"]
     write_mode = "a" if done_keys else "w"
+    if write_mode == "a":
+        trim_trailing_manuscript_headings(output_file)
     with open(output_file, write_mode, encoding="utf-8") as out:
         if write_mode == "w":
             out.write(f"# {args.system}\n\n")
@@ -1192,6 +1390,7 @@ def main():
         current_sub = None
 
         for row in pending:
+            headings = []
             if row["Chapter"] != current_chapter:
                 chapter_row = hierarchy_row(row, rows_by_key, "chapter")
                 if row["Chapter"] == "0":
@@ -1199,28 +1398,28 @@ def main():
                 else:
                     fallback = chapter_title(chapter_row) if chapter_row else args.system
                     heading = resolved_title(chapter_row, structures, fallback)
-                out.write(f"\n## {row['Chapter']} {heading}\n\n")
+                headings.append(f"\n## {row['Chapter']} {heading}\n\n")
                 current_chapter = row["Chapter"]
                 current_sub = None
 
             if is_chapter_introduction(row):
                 if row["Chapter"] != "0":
-                    out.write(f"### {row['Chapter']}.0 Introduction\n\n")
+                    headings.append(f"### {row['Chapter']}.0 Introduction\n\n")
             elif row["Sub-Sub-Chapter"] and row["Sub-Chapter"] != current_sub:
                 sub_row = rows_by_key.get(
                     (args.system, row["Chapter"], row["Sub-Chapter"], "")
                 )
                 fallback = sub_row["Name"] if sub_row else row["Sub-Chapter"]
                 heading = resolved_title(sub_row, structures, fallback)
-                out.write(f"### {row['Sub-Chapter']} {heading}\n\n")
+                headings.append(f"### {row['Sub-Chapter']} {heading}\n\n")
                 current_sub = row["Sub-Chapter"]
             elif not row["Sub-Sub-Chapter"]:
-                out.write(f"### {row['Sub-Chapter']} {row['Name']}\n\n")
+                headings.append(f"### {row['Sub-Chapter']} {row['Name']}\n\n")
                 current_sub = row["Sub-Chapter"]
 
             if row["Sub-Sub-Chapter"]:
                 title = grounded_title(plans[section_key(row)], row["Name"])
-                out.write(f"#### {row['Sub-Sub-Chapter']} {title}\n\n")
+                headings.append(f"#### {row['Sub-Sub-Chapter']} {title}\n\n")
 
             query = build_query(row, rows_by_key)
             context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
@@ -1230,6 +1429,10 @@ def main():
                 context,
                 plans[section_key(row)],
             )
+            print(
+                f"  Writing {section_number(row)}: "
+                f"{grounded_title(plans[section_key(row)], row['Name'])}"
+            )
             prose = generate_english_text(
                 model,
                 tokenizer,
@@ -1238,7 +1441,7 @@ def main():
                 form=guidance_for("manuscript", row["System"]).get("form", "prose"),
             )
 
-            out.write(prose + "\n\n")
+            out.write("".join(headings) + prose + "\n\n")
             out.flush()
 
             done_keys.add(section_key(row))
