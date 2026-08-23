@@ -11,6 +11,47 @@ write_book = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = write_book
 SPEC.loader.exec_module(write_book)
 
+SHORT_VERSE = "\n".join(
+    [
+        "The first fire remembers its name.",
+        "A second mouth answers from water.",
+        "Night keeps the hidden well from speaking.",
+        "Ash falls through the open winter dark.",
+        "Names return as a low flame.",
+        "The well still holds what the mouth lost.",
+        "Breath counts the hidden river stones.",
+        "Dawn does not finish the telling.",
+    ]
+)
+
+
+def test_new_run_id_uses_generated_timestamp(monkeypatch, tmp_path) -> None:
+    intermediary = tmp_path / "intermediary"
+    output = tmp_path / "output"
+    intermediary.mkdir()
+    output.mkdir()
+    monkeypatch.setattr(write_book, "INTERMEDIARY_DIR", str(intermediary))
+    monkeypatch.setattr(write_book, "OUTPUT_DIR", str(output))
+
+    run_id = write_book.new_run_id()
+    assert run_id.startswith("generated")
+    assert len(run_id) == len("generatedYYYYMMDDHHMM")
+
+    (output / run_id).mkdir()
+    assert write_book.new_run_id() == f"{run_id}-2"
+
+    (intermediary / "generated202608221200" / "invocation").mkdir(parents=True)
+    (output / "generated202608221201" / "invocation").mkdir(parents=True)
+    assert write_book.latest_run_id_for("Invocation") == "generated202608221201"
+
+
+def test_run_paths_nests_under_run_id() -> None:
+    paths = write_book.run_paths("Invocation", "generated202608221525")
+    manuscript = paths["manuscript"].replace("\\", "/")
+    outline = paths["outline"].replace("\\", "/")
+    assert manuscript.endswith("generated202608221525/invocation/manuscript.md")
+    assert outline.endswith("generated202608221525/invocation/writing_plan.md")
+
 
 def test_split_model_defaults() -> None:
     assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
@@ -279,30 +320,61 @@ def test_manuscript_validation_rejects_outline_and_truncation() -> None:
     assert "is cut" not in closed
     assert write_book.manuscript_validation_error(closed) is None
     assert write_book.manuscript_validation_error("A sentence cut off in the middle")
-    verse = (
-        "The first fire remembers its name in the well.\n\n"
-        "A second mouth answers from the dark water."
-    )
-    assert write_book.manuscript_validation_error(verse, form="poetry") is None
+    assert write_book.manuscript_validation_error(SHORT_VERSE, form="poetry") is None
     assert write_book.manuscript_validation_error("Too short", form="poetry")
-    long_line_poem = "\n".join(
+    too_few_lines = "\n".join(SHORT_VERSE.splitlines()[:7])
+    assert "at least 8 short lines" in write_book.manuscript_validation_error(
+        too_few_lines, form="poetry"
+    )
+    wrapped_sentence = "\n".join(
         [
-            "The first fire remembers its name in the well.",
-            "A second mouth answers from the dark water.",
-            "And then a much longer line that keeps adding clauses until the breath runs out of room entirely.",
-            "Another stretched sentence follows it with still more extra furniture and no line break at all.",
-            "So the meter check has several lines clearly outside the intended syllable range.",
+            "One cannot hope to hold the whole of truth",
+            "inside a single book, and none should pretend",
+            "the search for knowledge is all of humanity",
+            "as if a sentence broken at the margin",
+            "could stand in place of a spoken line",
+            "while still carrying the whole argument",
+            "forward without ever becoming verse",
+            "or leaving the long clause unfinished",
         ]
     )
-    assert "8-16 syllables" in write_book.manuscript_validation_error(long_line_poem, form="poetry")
+    wrapped_error = write_book.manuscript_validation_error(wrapped_sentence, form="poetry")
+    assert wrapped_error
+    assert "wrap one sentence" in wrapped_error
+    spoken_verse = "\n".join(
+        [
+            "I am not in the least afraid of failure.",
+            "No book has ever held it.",
+            "It starts in the woods, with a child who does not yet know.",
+            "They are incarnations of their ancestors, wearing borrowed skin.",
+            *SHORT_VERSE.splitlines()[4:],
+        ]
+    )
+    assert write_book.manuscript_validation_error(
+        spoken_verse, form="poetry", book_introduction=True
+    ) is None
+    long_word_poem = "\n".join(
+        [
+            *SHORT_VERSE.splitlines()[:7],
+            "The doctrine of the arbitrary birthplace is not chosen by the child at all in this telling of the story.",
+        ]
+    )
+    assert "at most 18 words" in write_book.manuscript_validation_error(
+        long_word_poem, form="poetry"
+    )
+    long_line_poem = "\n".join(
+        [
+            *SHORT_VERSE.splitlines()[:7],
+            "Uncharacteristically metaphysical contemplations overwhelm understanding immediately and catastrophically.",
+        ]
+    )
+    assert "6-24 syllables" in write_book.manuscript_validation_error(
+        long_line_poem, form="poetry"
+    )
 
 
 def test_strip_leading_markdown_headings_salvages_titled_verse() -> None:
-    raw = (
-        "# Youth\n\n"
-        "The first fire remembers its name in the well.\n\n"
-        "A second mouth answers from the dark water."
-    )
+    raw = f"# Youth\n\n{SHORT_VERSE}"
     cleaned = write_book.strip_leading_markdown_headings(raw)
     assert cleaned.startswith("The first fire")
     assert write_book.manuscript_validation_error(cleaned, form="poetry") is None
@@ -317,10 +389,7 @@ def test_trim_trailing_manuscript_headings_removes_orphan_titles(tmp_path) -> No
 
 
 def test_generate_english_text_retries_with_assistant_turn(monkeypatch) -> None:
-    verse = (
-        "The first fire remembers its name in the well.\n\n"
-        "A second mouth answers from the dark water."
-    )
+    verse = SHORT_VERSE
     seen = []
 
     def fake_generate_text(model, tokenizer, messages, max_new_tokens, do_sample):
@@ -380,7 +449,9 @@ def test_guidance_templates_accept_runtime_fields() -> None:
 
     assert "fixed paragraph count" in manuscript
     assert "first person only in the book introduction" in manuscript
+    assert "notes/mysticism/meta-random" in manuscript
     assert "10 distinct" in concepts
+    assert "meta-random" in concepts
     assert '"Tautology"' in training
 
 
@@ -393,9 +464,14 @@ def test_invocation_uses_poetry_manuscript_guidance() -> None:
     assert "finished poetry" in invocation["system"]
     assert "as poetry, not philosophical prose" in invocation["instructions"]
     assert "first person only in the book introduction" in invocation["instructions"]
-    assert "8 to 16 syllables" in invocation["system"]
-    assert "8 to 16 syllables" in invocation["instructions"]
-    assert "8 to 16 syllables" in outline["instructions"]
+    assert "six to sixteen words" in invocation["system"]
+    assert "Do not wrap one sentence across consecutive lines" in invocation["system"]
+    assert "six to sixteen words" in invocation["instructions"]
+    assert "Do not wrap a long sentence across lines" in invocation["instructions"]
+    assert "six to sixteen words" in outline["instructions"]
+    assert "at most 24 syllables" in invocation["system"]
+    assert "at most 24 syllables" in invocation["instructions"]
+    assert "at most 24 syllables" in outline["instructions"]
     assert evocation.get("form", "prose") == "prose"
     assert "flowing paragraphs" in evocation["system"]
     assert "sequence of poems" in outline["system"]
@@ -415,6 +491,8 @@ def test_invocation_uses_poetry_manuscript_guidance() -> None:
     assert "NOTE EVIDENCE" in prompt
     assert "This is not the book introduction" in prompt
     assert 'Do not refer to the writer as "I"' in prompt
+    assert "notes/mysticism/meta-random" in prompt
+    assert "core concepts and themes" in prompt
 
     intro = {
         "System": "Evocation", "Chapter": "0", "Sub-Chapter": "",
@@ -485,9 +563,11 @@ def test_csv_descriptions_and_aliases_do_not_enter_retrieval_or_planning() -> No
     prompt = "\n".join(message["content"] for message in messages)
 
     assert query == "Tree of Life Substance Nature [Limit of Logic]"
+    assert write_book.lexical_hint(section) == "Limit of Logic"
     assert "POISON" not in query + prompt
     assert "Optional AI-generated name suggestion: Limit of Logic" in prompt
     assert "NOTE EVIDENCE" in prompt
+    assert "notes/mysticism/meta-random" in prompt
 
 
 def test_grounded_titles_replace_provisional_hierarchy_names(tmp_path: Path) -> None:
@@ -534,3 +614,53 @@ def test_query_expansion_uses_recurring_note_context() -> None:
     assert "pathetic" in terms
     assert "subjective" in terms
     assert "reality" in terms
+
+
+def test_core_theme_note_matches_windows_and_posix_paths() -> None:
+    assert write_book.is_core_theme_note({
+        "rel_path": r"notes\mysticism\meta-random",
+        "filename": "meta-random",
+    })
+    assert write_book.is_core_theme_note({
+        "rel_path": "notes/mysticism/meta-random",
+        "filename": "meta-random",
+    })
+    assert not write_book.is_core_theme_note({
+        "rel_path": "notes/mysticism/other",
+        "filename": "other",
+    })
+
+
+def test_retrieve_context_pins_core_theme_note() -> None:
+    class FakeCollection:
+        def get(self, **kwargs):
+            return {"documents": []}
+
+        def query(self, query_texts, n_results, include, **options):
+            where = options.get("where") or {}
+            if where.get("filename") == "meta-random":
+                return {
+                    "ids": [["core-0"]],
+                    "documents": [["The universal current crosses the void."]],
+                    "metadatas": [[{
+                        "source": "writing-desktop",
+                        "rel_path": r"notes\mysticism\meta-random",
+                        "filename": "meta-random",
+                    }]],
+                    "distances": [[0.4]],
+                }
+            return {
+                "ids": [["other-0"]],
+                "documents": [["A peripheral note about an adjacent topic."]],
+                "metadatas": [[{
+                    "source": "writing-desktop",
+                    "rel_path": "notes/other.txt",
+                    "filename": "other.txt",
+                }]],
+                "distances": [[0.1]],
+            }
+
+    context = write_book.retrieve_context(FakeCollection(), "Evocation Substance", 5, "")
+    assert "CORE THEMES" in context
+    assert "notes/mysticism/meta-random" in context
+    assert "universal current" in context

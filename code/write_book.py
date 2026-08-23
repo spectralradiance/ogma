@@ -15,6 +15,7 @@ Requires index_notes.py to have been run first.
 import argparse
 from collections import Counter
 import csv
+from datetime import datetime
 import gc
 import json
 import os
@@ -52,8 +53,11 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
 ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 MAX_LANGUAGE_RETRIES = 3
-POETRY_SYLLABLE_RANGE = (8, 16)
+POETRY_MIN_LINES = 8
+POETRY_MAX_WORDS = 18
+POETRY_SYLLABLE_RANGE = (6, 24)
 POETRY_SYLLABLE_OUTLIER_FRACTION = 0.2
+POETRY_WRAP_FRACTION = 0.25
 CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 SENTENCE_END_CHARS = '.!?…\"\'”’)'
@@ -63,6 +67,8 @@ AUTHOR_REFERENCE_PATTERN = re.compile(
 )
 FIRST_PERSON_PATTERN = re.compile(r"\b(?:I|me|my|mine|myself)\b")
 NOTE_SOURCE_KEYS = ("writing-desktop", "notion/Writing")
+CORE_THEME_NOTE = "notes/mysticism/meta-random"
+CORE_THEME_CHUNK_LIMIT = 3
 
 
 def load_guidance(path: str = GUIDANCE_FILE) -> dict:
@@ -289,6 +295,34 @@ def manuscript_path(system: str, output_dir: str = OUTPUT_DIR) -> str:
     return os.path.join(output_dir, f"{safe_name(system)}.md")
 
 
+def new_run_id() -> str:
+    """Minute-based folder name, with a suffix when two runs share a minute."""
+    base = f"generated{datetime.now():%Y%m%d%H%M}"
+    candidate = base
+    suffix = 2
+    while os.path.exists(os.path.join(OUTPUT_DIR, candidate)) or os.path.exists(
+        os.path.join(INTERMEDIARY_DIR, candidate)
+    ):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def latest_run_id_for(system: str) -> str | None:
+    """Most recent dated (or named) run that already has this book's folders."""
+    book = safe_name(system)
+    matches = []
+    for root in (INTERMEDIARY_DIR, OUTPUT_DIR):
+        if not os.path.isdir(root):
+            continue
+        for name in os.listdir(root):
+            if os.path.isdir(os.path.join(root, name, book)):
+                matches.append(name)
+    generated = [name for name in matches if name.startswith("generated")]
+    pool = generated or matches
+    return max(pool) if pool else None
+
+
 def run_paths(system: str, run_id: str | None) -> dict[str, str]:
     if not run_id:
         return {
@@ -384,6 +418,37 @@ def build_query(row: dict, rows_by_key: dict) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+def normalize_note_path(path: str) -> str:
+    return str(path or "").replace("\\", "/").lstrip("./")
+
+
+def is_core_theme_note(metadata: dict | None) -> bool:
+    """True for the mysticism/meta-random note of core concepts and themes."""
+    metadata = metadata or {}
+    rel = normalize_note_path(metadata.get("rel_path", "")).lower()
+    name = str(metadata.get("filename") or "").lower()
+    return rel.endswith(CORE_THEME_NOTE) or (
+        name == "meta-random" and "/mysticism/" in f"/{rel}/"
+    )
+
+
+def core_theme_instruction() -> str:
+    return (
+        "Pay special attention to excerpts from notes/mysticism/meta-random. "
+        "That note is the map of core concepts and themes for all four books "
+        "(Universal Metaphysics, Tree of Life, Invocation, and Evocation). "
+        "Prefer its terminology, motifs, and conceptual relationships when they "
+        "bear on the current section."
+    )
+
+
+def with_core_theme_instruction(text: str) -> str:
+    note = core_theme_instruction()
+    if note in text:
+        return text
+    return text.rstrip() + "\n\n" + note
+
+
 def lexical_hint(row: dict) -> str:
     return row["Name"].strip().strip("[]").strip()
 
@@ -476,16 +541,30 @@ def retrieve_context(collection, query: str, k: int, term: str = "") -> str:
             results["distances"][0],
         ):
             score = _retrieval_score(document, float(distance), term_constrained)
+            if is_core_theme_note(metadata):
+                score -= 0.6
             if chunk_id not in candidates or score < candidates[chunk_id][0]:
                 candidates[chunk_id] = (score, document, metadata)
 
-    if not candidates:
-        return ""
     ranked = sorted(candidates.values(), key=lambda item: item[0])
-    selected = []
+    core = [item for item in ranked if is_core_theme_note(item[2])]
+    if len(core) < CORE_THEME_CHUNK_LIMIT:
+        seen = {(item[1], normalize_note_path(item[2].get("rel_path", ""))) for item in core}
+        for item in query_core_theme_chunks(collection, semantic_query, CORE_THEME_CHUNK_LIMIT):
+            key = (item[1], normalize_note_path(item[2].get("rel_path", "")))
+            if key in seen:
+                continue
+            core.append(item)
+            seen.add(key)
+            if len(core) >= CORE_THEME_CHUNK_LIMIT:
+                break
+    core = core[:CORE_THEME_CHUNK_LIMIT]
+    if not ranked and not core:
+        return ""
+    selected = list(core)
     for source in NOTE_SOURCE_KEYS:
         source_candidate = next(
-            (item for item in ranked if item[2].get("source") == source),
+            (item for item in ranked if item[2].get("source") == source and item not in selected),
             None,
         )
         if source_candidate is not None:
@@ -495,9 +574,38 @@ def retrieve_context(collection, query: str, k: int, term: str = "") -> str:
     excerpts = []
     for _, document, metadata in selected[:k]:
         source_root = metadata.get("source", "notes")
-        relative_path = metadata.get("rel_path", metadata.get("filename", "note"))
-        excerpts.append(f"[{source_root}/{relative_path}]\n{document.strip()}")
+        relative_path = normalize_note_path(
+            metadata.get("rel_path", metadata.get("filename", "note"))
+        )
+        prefix = "CORE THEMES " if is_core_theme_note(metadata) else ""
+        excerpts.append(f"[{prefix}{source_root}/{relative_path}]\n{document.strip()}")
     return "\n\n---\n\n".join(excerpts)
+
+
+def query_core_theme_chunks(collection, query: str, limit: int) -> list[tuple]:
+    """Fetch the closest chunks from the pinned core-concepts note."""
+    try:
+        results = collection.query(
+            query_texts=[query],
+            n_results=max(limit, 1),
+            include=["documents", "metadatas", "distances"],
+            where={"filename": os.path.basename(CORE_THEME_NOTE)},
+        )
+    except Exception:
+        return []
+    if not results.get("ids") or not results["ids"][0]:
+        return []
+    items = []
+    for document, metadata, distance in zip(
+        results["documents"][0],
+        results["metadatas"][0],
+        results["distances"][0],
+    ):
+        if not document or not is_core_theme_note(metadata):
+            continue
+        score = _retrieval_score(document, float(distance), False) - 0.6
+        items.append((score, document, metadata or {}))
+    return items[:limit]
 
 
 def chapter_structure(row: dict, section_rows: list[dict]) -> str:
@@ -525,7 +633,7 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
         },
         {
             "role": "user",
-            "content": (
+            "content": with_core_theme_instruction(
                 f"Create a note-grounded writing plan for section {section_number(row)}.\n"
                 f"{display_name_hint(row)}\n\n"
                 f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}\n\n"
@@ -546,11 +654,13 @@ def build_structure_messages(row: dict, child_rows: list[dict], context: str) ->
         {"role": "system", "content": structure["system"]},
         {
             "role": "user",
-            "content": structure["instructions"].format(
-                number=section_number(row),
-                name_hint=display_name_hint(row),
-                children=children or "- No child rows",
-                context=context,
+            "content": with_core_theme_instruction(
+                structure["instructions"].format(
+                    number=section_number(row),
+                    name_hint=display_name_hint(row),
+                    children=children or "- No child rows",
+                    context=context,
+                )
             ),
         },
     ]
@@ -775,7 +885,7 @@ def build_messages(
             "role": "system",
             "content": manuscript["system"],
         },
-        {"role": "user", "content": instruction},
+        {"role": "user", "content": with_core_theme_instruction(instruction)},
     ]
 
 
@@ -884,6 +994,22 @@ def generate_english_text(
                 "sentence. Do not restart at greater length. Do not use Markdown "
                 "headings, code fences, or lists."
             )
+        elif (
+            "syllable" in last_error
+            or "verse" in last_error
+            or "words" in last_error
+            or "wrap" in last_error
+        ):
+            retry = (
+                f"Your previous response was invalid because {last_error}. "
+                "Rewrite as short lyric lines, not sentences broken across lines. "
+                f"Each line about {POETRY_SYLLABLE_RANGE[0]} to "
+                f"{POETRY_SYLLABLE_RANGE[1]} syllables and at most "
+                f"{POETRY_MAX_WORDS} words. Short punch lines are fine. "
+                "End most lines as a spoken breath; do not continue a sentence "
+                "in lowercase on the next line. "
+                f"Use at least {POETRY_MIN_LINES} lines. Begin the first line immediately."
+            )
         elif "first person" in last_error or "the author" in last_error:
             retry = (
                 f"Your previous response was invalid because {last_error}. "
@@ -963,21 +1089,51 @@ def count_line_syllables(line: str) -> int:
 def poetry_meter_error(prose: str) -> str | None:
     low, high = POETRY_SYLLABLE_RANGE
     lines = [line.strip() for line in prose.splitlines() if line.strip()]
-    outside = []
+    if len(lines) < POETRY_MIN_LINES:
+        return (
+            f"verse needs at least {POETRY_MIN_LINES} short lines; "
+            "do not write long sentences as a few wrapped lines"
+        )
+    continued = [line for line in lines if line[:1].islower()]
+    allowed_wraps = max(2, int(len(lines) * POETRY_WRAP_FRACTION))
+    if len(continued) > allowed_wraps:
+        return (
+            "do not wrap one sentence across consecutive lines "
+            f"({len(continued)}/{len(lines)} continue in lowercase: {continued[0][:70]})"
+        )
+    long_word_lines = []
+    long_syllable_lines = []
+    short_syllable_lines = []
     for line in lines:
+        words = len(re.findall(r"[A-Za-z']+", line))
         syllables = count_line_syllables(line)
-        if syllables < low or syllables > high:
-            outside.append((syllables, line))
-    allowed = max(1, int(len(lines) * POETRY_SYLLABLE_OUTLIER_FRACTION))
-    if len(outside) <= allowed:
-        return None
-    samples = "; ".join(
-        f"{syllables} syllables: {line[:70]}" for syllables, line in outside[:3]
-    )
-    return (
-        f"lines should be about {low}-{high} syllables "
-        f"({len(outside)}/{len(lines)} outside range; {samples})"
-    )
+        if words > POETRY_MAX_WORDS:
+            long_word_lines.append((words, line))
+        if syllables > high:
+            long_syllable_lines.append((syllables, line))
+        elif syllables < low:
+            short_syllable_lines.append((syllables, line))
+    if long_word_lines:
+        words, line = long_word_lines[0]
+        return (
+            f"verse lines should be short, at most {POETRY_MAX_WORDS} words "
+            f"({words} words: {line[:70]})"
+        )
+    if long_syllable_lines:
+        syllables, line = long_syllable_lines[0]
+        return (
+            f"lines should be about {low}-{high} syllables "
+            f"({syllables} syllables: {line[:70]})"
+        )
+    allowed_short = int(len(lines) * POETRY_SYLLABLE_OUTLIER_FRACTION)
+    if len(short_syllable_lines) > allowed_short:
+        syllables, line = short_syllable_lines[0]
+        return (
+            f"lines should be about {low}-{high} syllables "
+            f"({len(short_syllable_lines)}/{len(lines)} too short; "
+            f"{syllables} syllables: {line[:70]})"
+        )
+    return None
 
 
 def writer_voice_error(prose: str, book_introduction: bool) -> str | None:
@@ -1215,7 +1371,10 @@ def main():
     )
     parser.add_argument(
         "--run-id",
-        help="Isolate artifacts under output/<run-id>/<book> and intermediary/<run-id>/<book>",
+        help=(
+            "Artifact folder under intermediary/ and output/. "
+            "Defaults to generatedYYYYMMDDHHMM. Pass an existing id to resume."
+        ),
     )
     parser.add_argument(
         "--outline-cache",
@@ -1236,6 +1395,16 @@ def main():
     )
     if provider == "claude" and args.notes_top_k == TOP_K:
         args.notes_top_k = CLAUDE_NOTES_TOP_K
+
+    if not args.run_id:
+        if args.status_only:
+            args.run_id = latest_run_id_for(args.system)
+            if not args.run_id:
+                raise SystemExit(
+                    "No dated run found. Generate first, or pass --run-id to inspect a run."
+                )
+        else:
+            args.run_id = new_run_id()
 
     paths = run_paths(args.system, args.run_id)
     os.makedirs(paths["intermediary_dir"], exist_ok=True)
@@ -1310,6 +1479,7 @@ def main():
 
     print("\nCurrent process")
     print(f"  Book: {args.system}")
+    print(f"  Run: {args.run_id}")
     print(
         f"  Outline: {len(plans)} / {len(section_rows)} sections available at "
         f"{book_outline_path}"

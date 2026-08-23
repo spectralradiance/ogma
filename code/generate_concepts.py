@@ -119,9 +119,11 @@ def build_concept_messages(
         },
         {
             "role": "user",
-            "content": write_book.GUIDANCE["concepts"]["instructions"].format(
-                candidate_count=candidate_count,
-                source_material="\n\n---\n\n".join(source_blocks),
+            "content": write_book.with_core_theme_instruction(
+                write_book.GUIDANCE["concepts"]["instructions"].format(
+                    candidate_count=candidate_count,
+                    source_material="\n\n---\n\n".join(source_blocks),
+                )
             ),
         },
     ]
