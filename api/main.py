@@ -10,6 +10,7 @@ import csv
 from contextlib import asynccontextmanager
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Literal
@@ -50,12 +51,10 @@ CSV_FILE = INPUT_DIR / "chapter_structure.csv"
 INDEX_METADATA = INTERMEDIARY_DIR / "index_metadata.json"
 DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
 PIPELINE_VERSION = "outline-v4"
-DEFAULT_GENERATION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-SYSTEM_SLUGS = {
-    "Universal Metaphysics": "universal_metaphysics",
-    "Tree of Life": "tree_of_life",
-    "Invocation": "invocation",
-}
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_CLAUDE_MODEL = "claude-opus-5"
+DEFAULT_GENERATION_MODEL = DEFAULT_WRITE_MODEL
 WORKSPACE_ROOTS = {
     "writing-desktop": INPUT_DIR / "writing-desktop",
     "notion/Writing": INPUT_DIR / "notion" / "Writing",
@@ -65,9 +64,39 @@ WORKSPACE_EXTENSIONS = {"", ".md", ".markdown", ".txt", ".text"}
 manager = JobManager(ROOT)
 
 
+def load_project_env() -> None:
+    """Expose .env values such as CLAUDE_API_KEY to worker subprocesses."""
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return
+    with env_path.open(encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def generation_provider(request: OutlineRequest | ManuscriptRequest) -> str:
+    if request.provider:
+        return request.provider
+    names = [request.extract_model_name, request.model_name]
+    write_name = getattr(request, "write_model_name", None)
+    if write_name:
+        names.append(write_name)
+    if any(name and name.lower().startswith("claude") for name in names if name):
+        return "claude"
+    return "local"
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Create storage roots and bind the job queue to the server event loop."""
+    load_project_env()
     INTERMEDIARY_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     await manager.start()
@@ -91,6 +120,19 @@ def load_rows() -> list[dict[str, str]]:
         return list(csv.DictReader(csv_file))
 
 
+def slugify_system(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def system_slugs() -> dict[str, str]:
+    """Map book names from chapter_structure.csv to filesystem-safe slugs."""
+    slugs: dict[str, str] = {}
+    for row in load_rows():
+        name = row["System"]
+        slugs.setdefault(name, slugify_system(name))
+    return slugs
+
+
 def selected_rows(system: str) -> list[dict[str, str]]:
     """Return only rows explicitly marked for generated prose."""
     return [
@@ -101,9 +143,10 @@ def selected_rows(system: str) -> list[dict[str, str]]:
 
 def ensure_system(system: str) -> str:
     """Validate a public book name and return its filesystem-safe slug."""
-    if system not in SYSTEM_SLUGS:
+    slugs = system_slugs()
+    if system not in slugs:
         raise HTTPException(status_code=422, detail=f"Unknown system: {system}")
-    return SYSTEM_SLUGS[system]
+    return slugs[system]
 
 
 def new_run_id() -> str:
@@ -304,7 +347,10 @@ async def start_index(request: IndexRequest) -> JobResponse:
 
 @app.get("/api/systems", response_model=list[SystemSummary])
 async def systems() -> list[SystemSummary]:
-    return [SystemSummary(name=system, sections=len(selected_rows(system))) for system in SYSTEM_SLUGS]
+    return [
+        SystemSummary(name=system, sections=len(selected_rows(system)))
+        for system in system_slugs()
+    ]
 
 
 @app.get("/api/outlines/{system}/caches", response_model=list[OutlineCache])
@@ -318,12 +364,19 @@ async def start_outline(request: OutlineRequest) -> JobResponse:
     if request.cache_path and request.regenerate:
         raise HTTPException(status_code=422, detail="Choose cache reuse or regeneration")
     run_id = new_run_id()
+    provider = generation_provider(request)
+    extract_name = request.extract_model_name or request.model_name
+    if provider == "claude":
+        extract_name = extract_name or DEFAULT_CLAUDE_MODEL
+    else:
+        extract_name = extract_name or DEFAULT_EXTRACT_MODEL
     arguments = [
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
         "--outline-only",
-        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
+        "--provider", provider,
+        "--extract-model-name", extract_name,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])
@@ -338,11 +391,22 @@ async def start_manuscript(request: ManuscriptRequest) -> JobResponse:
     run_id = request.run_id or new_run_id()
     if request.run_id and not (INTERMEDIARY_DIR / run_id / slug).exists():
         raise HTTPException(status_code=404, detail="Run not found for this system")
+    provider = generation_provider(request)
+    extract_name = request.extract_model_name or request.model_name
+    write_name = request.write_model_name or request.model_name
+    if provider == "claude":
+        extract_name = extract_name or DEFAULT_CLAUDE_MODEL
+        write_name = write_name or DEFAULT_CLAUDE_MODEL
+    else:
+        extract_name = extract_name or DEFAULT_EXTRACT_MODEL
+        write_name = write_name or DEFAULT_WRITE_MODEL
     arguments = [
         str(CODE_DIR / "write_book.py"),
         "--system", request.system,
         "--run-id", run_id,
-        "--model-name", request.model_name or DEFAULT_GENERATION_MODEL,
+        "--provider", provider,
+        "--extract-model-name", extract_name,
+        "--write-model-name", write_name,
     ]
     if request.cache_path:
         arguments.extend(["--outline-cache", str(validate_cache(request.cache_path))])
@@ -408,7 +472,8 @@ async def analysis(run_id: str) -> dict:
 
 @app.get("/api/runs", response_model=list[RunSummary])
 async def runs(system: str | None = None) -> list[RunSummary]:
-    requested = [system] if system else list(SYSTEM_SLUGS)
+    slugs = system_slugs()
+    requested = [system] if system else list(slugs)
     for item in requested:
         ensure_system(item)
     run_dirs = sorted(INTERMEDIARY_DIR.glob("generated*"), reverse=True)
@@ -417,7 +482,7 @@ async def runs(system: str | None = None) -> list[RunSummary]:
         if not run_dir.is_dir():
             continue
         for item in requested:
-            slug = SYSTEM_SLUGS[item]
+            slug = slugs[item]
             if (run_dir / slug).exists() or (OUTPUT_DIR / run_dir.name / slug).exists():
                 summaries.append(run_summary(run_dir, item))
     return sorted(summaries, key=lambda item: item.modified_at, reverse=True)

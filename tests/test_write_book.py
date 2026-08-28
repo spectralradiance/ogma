@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import types
 
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "write_book.py"
@@ -9,6 +10,270 @@ assert SPEC is not None and SPEC.loader is not None
 write_book = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = write_book
 SPEC.loader.exec_module(write_book)
+
+SHORT_VERSE = "\n".join(
+    [
+        "The first fire remembers its name.",
+        "A second mouth answers from water.",
+        "Night keeps the hidden well from speaking.",
+        "Ash falls through the open winter dark.",
+        "Names return as a low flame.",
+        "The well still holds what the mouth lost.",
+        "Breath counts the hidden river stones.",
+        "Dawn does not finish the telling.",
+    ]
+)
+
+
+def test_new_run_id_uses_generated_timestamp(monkeypatch, tmp_path) -> None:
+    intermediary = tmp_path / "intermediary"
+    output = tmp_path / "output"
+    intermediary.mkdir()
+    output.mkdir()
+    monkeypatch.setattr(write_book, "INTERMEDIARY_DIR", str(intermediary))
+    monkeypatch.setattr(write_book, "OUTPUT_DIR", str(output))
+
+    run_id = write_book.new_run_id()
+    assert run_id.startswith("generated")
+    assert len(run_id) == len("generatedYYYYMMDDHHMM")
+
+    (output / run_id).mkdir()
+    assert write_book.new_run_id() == f"{run_id}-2"
+
+    (intermediary / "generated202608221200" / "invocation").mkdir(parents=True)
+    (output / "generated202608221201" / "invocation").mkdir(parents=True)
+    assert write_book.latest_run_id_for("Invocation") == "generated202608221201"
+
+
+def test_run_paths_nests_under_run_id() -> None:
+    paths = write_book.run_paths("Invocation", "generated202608221525")
+    manuscript = paths["manuscript"].replace("\\", "/")
+    outline = paths["outline"].replace("\\", "/")
+    assert manuscript.endswith("generated202608221525/invocation/manuscript.md")
+    assert outline.endswith("generated202608221525/invocation/writing_plan.md")
+
+
+def test_split_model_defaults() -> None:
+    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert write_book.DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert write_book.DEFAULT_CLAUDE_MODEL == "claude-opus-5"
+
+
+def test_claude_provider_replaces_local_defaults() -> None:
+    provider, extract, write = write_book.resolve_generation_models(
+        "claude",
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen2.5-3B-Instruct",
+        None,
+    )
+    assert provider == "claude"
+    assert extract == write_book.DEFAULT_CLAUDE_MODEL
+    assert write == write_book.DEFAULT_CLAUDE_MODEL
+
+
+def test_claude_model_name_selects_claude_backend() -> None:
+    provider, extract, write = write_book.resolve_generation_models(
+        "local", "claude-sonnet-4-5", "Qwen/Qwen2.5-3B-Instruct", None
+    )
+    assert provider == "claude"
+    assert extract == "claude-sonnet-4-5"
+    assert write == write_book.DEFAULT_CLAUDE_MODEL
+
+
+def test_claude_messages_merge_consecutive_user_turns() -> None:
+    system, converted = write_book.claude_messages([
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "Plan this."},
+        {"role": "user", "content": "Retry."},
+    ])
+    assert system == "Be precise."
+    assert converted == [{"role": "user", "content": "Plan this.\n\nRetry."}]
+
+
+def test_generate_claude_text_omits_temperature(monkeypatch) -> None:
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Block:
+                text = "ok"
+
+            class Response:
+                content = [Block()]
+
+            return Response()
+
+    class FakeClient:
+        def __init__(self, api_key=None):
+            self.messages = FakeMessages()
+
+    fake_anthropic = types.ModuleType("anthropic")
+    fake_anthropic.Anthropic = FakeClient
+    monkeypatch.setattr(write_book, "claude_api_key", lambda: "test-key")
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+    text = write_book.generate_claude_text(
+        "claude-opus-5",
+        [{"role": "system", "content": "Be precise."}, {"role": "user", "content": "Write."}],
+        40,
+        True,
+    )
+    assert text == "ok"
+    assert "temperature" not in captured
+    assert captured["model"] == "claude-opus-5"
+    assert captured["max_tokens"] == write_book.CLAUDE_MAX_OUTPUT_TOKENS
+    assert captured["thinking"] == {"type": "disabled"}
+    assert captured["output_config"] == {"effort": "high"}
+    assert captured["system"] == "Be precise."
+    assert captured["messages"] == [{"role": "user", "content": "Write."}]
+
+
+def test_generate_claude_text_continues_after_max_tokens(monkeypatch) -> None:
+    calls = []
+
+    class Block:
+        def __init__(self, text):
+            self.type = "text"
+            self.text = text
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+
+            class Response:
+                def __init__(self, text, stop):
+                    self.content = [Block(text)]
+                    self.stop_reason = stop
+
+            if len(calls) == 1:
+                return Response("Start of the argument", "max_tokens")
+            return Response(" continues here.", "end_turn")
+
+    class FakeClient:
+        def __init__(self, api_key=None):
+            self.messages = FakeMessages()
+
+    fake_anthropic = types.ModuleType("anthropic")
+    fake_anthropic.Anthropic = FakeClient
+    monkeypatch.setattr(write_book, "claude_api_key", lambda: "test-key")
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+    text = write_book.generate_claude_text(
+        "claude-opus-5",
+        [{"role": "user", "content": "Write."}],
+        40,
+        True,
+    )
+    assert text == "Start of the argument continues here."
+    assert len(calls) == 2
+
+
+def test_claude_visible_text_skips_thinking_blocks() -> None:
+    class Block:
+        def __init__(self, type_name, text=None):
+            self.type = type_name
+            self.text = text
+
+    class Response:
+        content = [Block("thinking", ""), Block("text", "Labeled plan.")]
+
+    assert write_book.claude_visible_text(Response()) == "Labeled plan."
+
+
+def test_generate_plan_text_retries_with_assistant_turn(monkeypatch) -> None:
+    valid = """- Note-grounded title: Digital Transformation.
+- Scope and chronological position: After agriculture.
+- Transition from previous section: Technology scales civilization.
+- Central claim: Industrial and digital systems transform society.
+- Ordered principles to cover: Energy, machinery, computation.
+- Essential concepts and evidence: Factories and networks.
+- Important terms and phrases from the notes: Industrialization, digitalization.
+- Material reserved for other sections: Personal development."""
+    seen = []
+
+    def fake_generate_text(model, tokenizer, messages, max_new_tokens, do_sample):
+        seen.append([message["role"] for message in messages])
+        if len(seen) == 1:
+            return "not a plan"
+        return valid
+
+    monkeypatch.setattr(write_book, "generate_text", fake_generate_text)
+    plan = write_book.generate_plan_text(object(), object(), [{"role": "user", "content": "Plan."}])
+    assert plan == valid
+    assert seen[1][:3] == ["user", "assistant", "user"]
+
+
+def test_write_outline_block_replaces_empty_structure(tmp_path) -> None:
+    path = tmp_path / "writing_plan.md"
+    row = {
+        "System": "Invocation",
+        "Chapter": "1",
+        "Sub-Chapter": "1",
+        "Sub-Sub-Chapter": "",
+        "Name": "Protasis",
+        "Generate Text": "No",
+    }
+    write_book.append_structure(path, row, "")
+    write_book.append_structure(path, row, "- Note-grounded title: Protasis.")
+    content = path.read_text(encoding="utf-8")
+    assert content.count("<!-- structure:") == 1
+    assert "- Note-grounded title: Protasis." in content
+    loaded = write_book.load_structure(path)
+    assert write_book.has_grounded_plan(next(iter(loaded.values())))
+    assert not write_book.has_grounded_plan("## Structure 1")
+
+
+def test_generate_text_uses_claude_when_tokenizer_is_missing(monkeypatch) -> None:
+    captured = {}
+
+    def fake_claude(model_name, messages, max_new_tokens, do_sample):
+        captured["model"] = model_name
+        captured["do_sample"] = do_sample
+        return "Verse line."
+
+    monkeypatch.setattr(write_book, "generate_claude_text", fake_claude)
+    text = write_book.generate_text(
+        "claude-opus-5", None, [{"role": "user", "content": "hi"}], 40, True
+    )
+    assert text == "Verse line."
+    assert captured["model"] == "claude-opus-5"
+    assert captured["do_sample"] is True
+
+
+def test_strip_thinking_removes_qwen3_blocks() -> None:
+    raw = "<think>internal plan</think>\n\nExistence is self-sustaining."
+    assert write_book.strip_thinking(raw) == "Existence is self-sustaining."
+
+
+def test_format_chat_disables_thinking_when_template_supports_it() -> None:
+    class Tokenizer:
+        chat_template = "{% if enable_thinking %}think{% endif %}"
+        kwargs = None
+
+        def apply_chat_template(self, messages, **kwargs):
+            self.kwargs = kwargs
+            return "prompt"
+
+    tokenizer = Tokenizer()
+    prompt = write_book.format_chat(tokenizer, [{"role": "user", "content": "hi"}])
+
+    assert prompt == "prompt"
+    assert tokenizer.kwargs["enable_thinking"] is False
+
+
+def test_format_chat_omits_thinking_flag_for_plain_templates() -> None:
+    class Tokenizer:
+        chat_template = "{{ messages }}"
+        kwargs = None
+
+        def apply_chat_template(self, messages, **kwargs):
+            self.kwargs = kwargs
+            return "prompt"
+
+    tokenizer = Tokenizer()
+    write_book.format_chat(tokenizer, [{"role": "user", "content": "hi"}])
+
+    assert "enable_thinking" not in tokenizer.kwargs
 
 
 def test_generate_english_text_retries_cjk_output(monkeypatch) -> None:
@@ -27,13 +292,118 @@ def test_generate_english_text_retries_cjk_output(monkeypatch) -> None:
     assert len(attempts) == 2
 
 
+def test_generate_english_text_keeps_complete_sentences_when_cut_off(monkeypatch) -> None:
+    clipped = (
+        "First complete paragraph of philosophical prose that ends properly.\n\n"
+        "Second complete paragraph that also finishes with a period.\n\n"
+        "Third complete paragraph that is long enough to keep in the salvage. The next clause is cut"
+    )
+    monkeypatch.setattr(write_book, "generate_text", lambda *args, **kwargs: clipped)
+    prose = write_book.generate_english_text(object(), object(), [], 100)
+    assert prose.endswith("salvage.")
+    assert "is cut" not in prose
+
+
 def test_manuscript_validation_rejects_outline_and_truncation() -> None:
     assert write_book.manuscript_validation_error("## Central Claim\n\nProse.")
     assert write_book.manuscript_validation_error("1. First item\n2. Second item")
-    assert write_book.manuscript_validation_error("A sentence cut off in the middle")
     assert write_book.manuscript_validation_error(
         "First complete paragraph.\n\nSecond complete paragraph.\n\nThird complete paragraph."
     ) is None
+    clipped = (
+        "First complete paragraph of philosophical prose that ends properly.\n\n"
+        "Second complete paragraph that also finishes with a period.\n\n"
+        "Third complete paragraph that is long enough to keep in the salvage. The next clause is cut"
+    )
+    closed = write_book.close_truncated_prose(clipped)
+    assert closed.endswith("salvage.")
+    assert "is cut" not in closed
+    assert write_book.manuscript_validation_error(closed) is None
+    assert write_book.manuscript_validation_error("A sentence cut off in the middle")
+    assert write_book.manuscript_validation_error(SHORT_VERSE, form="poetry") is None
+    assert write_book.manuscript_validation_error("Too short", form="poetry")
+    too_few_lines = "\n".join(SHORT_VERSE.splitlines()[:7])
+    assert "at least 8 short lines" in write_book.manuscript_validation_error(
+        too_few_lines, form="poetry"
+    )
+    wrapped_sentence = "\n".join(
+        [
+            "One cannot hope to hold the whole of truth",
+            "inside a single book, and none should pretend",
+            "the search for knowledge is all of humanity",
+            "as if a sentence broken at the margin",
+            "could stand in place of a spoken line",
+            "while still carrying the whole argument",
+            "forward without ever becoming verse",
+            "or leaving the long clause unfinished",
+        ]
+    )
+    wrapped_error = write_book.manuscript_validation_error(wrapped_sentence, form="poetry")
+    assert wrapped_error
+    assert "wrap one sentence" in wrapped_error
+    spoken_verse = "\n".join(
+        [
+            "I am not in the least afraid of failure.",
+            "No book has ever held it.",
+            "It starts in the woods, with a child who does not yet know.",
+            "They are incarnations of their ancestors, wearing borrowed skin.",
+            *SHORT_VERSE.splitlines()[4:],
+        ]
+    )
+    assert write_book.manuscript_validation_error(
+        spoken_verse, form="poetry", book_introduction=True
+    ) is None
+    long_word_poem = "\n".join(
+        [
+            *SHORT_VERSE.splitlines()[:7],
+            "The doctrine of the arbitrary birthplace is not chosen by the child at all in this telling of the story.",
+        ]
+    )
+    assert "at most 18 words" in write_book.manuscript_validation_error(
+        long_word_poem, form="poetry"
+    )
+    long_line_poem = "\n".join(
+        [
+            *SHORT_VERSE.splitlines()[:7],
+            "Uncharacteristically metaphysical contemplations overwhelm understanding immediately and catastrophically.",
+        ]
+    )
+    assert "6-24 syllables" in write_book.manuscript_validation_error(
+        long_line_poem, form="poetry"
+    )
+
+
+def test_strip_leading_markdown_headings_salvages_titled_verse() -> None:
+    raw = f"# Youth\n\n{SHORT_VERSE}"
+    cleaned = write_book.strip_leading_markdown_headings(raw)
+    assert cleaned.startswith("The first fire")
+    assert write_book.manuscript_validation_error(cleaned, form="poetry") is None
+
+
+def test_trim_trailing_manuscript_headings_removes_orphan_titles(tmp_path) -> None:
+    path = tmp_path / "manuscript.md"
+    path.write_text("# Invocation\n\nVerse remains.\n\n## 1 Protasis\n\n### 1.1 Youth\n\n", encoding="utf-8")
+    write_book.trim_trailing_manuscript_headings(path)
+    assert "Protasis" not in path.read_text(encoding="utf-8")
+    assert path.read_text(encoding="utf-8").replace("\r\n", "\n").endswith("Verse remains.\n")
+
+
+def test_generate_english_text_retries_with_assistant_turn(monkeypatch) -> None:
+    verse = SHORT_VERSE
+    seen = []
+
+    def fake_generate_text(model, tokenizer, messages, max_new_tokens, do_sample):
+        seen.append([message["role"] for message in messages])
+        if len(seen) == 1:
+            return f"{verse}\n\n## Later\n\nAnother stanza still headed."
+        return verse
+
+    monkeypatch.setattr(write_book, "generate_text", fake_generate_text)
+    prose = write_book.generate_english_text(
+        object(), object(), [{"role": "user", "content": "Write."}], 100, form="poetry"
+    )
+    assert prose == verse
+    assert seen[1][:3] == ["user", "assistant", "user"]
 
 
 def test_plan_validation_rejects_duplicate_fenced_or_truncated_plans() -> None:
@@ -55,7 +425,8 @@ def test_guidance_is_loaded_from_input_file() -> None:
     guidance = write_book.load_guidance()
 
     assert guidance["manuscript"]["style_tiers"] == write_book.GUIDANCE["manuscript"]["style_tiers"]
-    assert "{n_paragraphs}" in guidance["manuscript"]["instructions"]
+    assert "{style_instruction}" in guidance["manuscript"]["instructions"]
+    assert "{n_paragraphs}" not in guidance["manuscript"]["instructions"]
     assert "Write exclusively in English" in guidance["manuscript"]["system"]
 
 
@@ -63,7 +434,6 @@ def test_guidance_templates_accept_runtime_fields() -> None:
     guidance = write_book.GUIDANCE
 
     manuscript = guidance["manuscript"]["instructions"].format(
-        n_paragraphs=3,
         style_instruction=guidance["manuscript"]["style_tiers"][0],
     )
     concepts = guidance["concepts"]["instructions"].format(
@@ -77,9 +447,91 @@ def test_guidance_templates_accept_runtime_fields() -> None:
         system="Tree of Life",
     )
 
-    assert "3 paragraphs" in manuscript
+    assert "fixed paragraph count" in manuscript
+    assert "first person only in the book introduction" in manuscript
+    assert "notes/mysticism/meta-random" in manuscript
     assert "10 distinct" in concepts
+    assert "meta-random" in concepts
     assert '"Tautology"' in training
+
+
+def test_invocation_uses_poetry_manuscript_guidance() -> None:
+    invocation = write_book.guidance_for("manuscript", "Invocation")
+    evocation = write_book.guidance_for("manuscript", "Evocation")
+    outline = write_book.guidance_for("outline", "Invocation")
+
+    assert invocation["form"] == "poetry"
+    assert "finished poetry" in invocation["system"]
+    assert "as poetry, not philosophical prose" in invocation["instructions"]
+    assert "first person only in the book introduction" in invocation["instructions"]
+    assert "six to sixteen words" in invocation["system"]
+    assert "Do not wrap one sentence across consecutive lines" in invocation["system"]
+    assert "six to sixteen words" in invocation["instructions"]
+    assert "Do not wrap a long sentence across lines" in invocation["instructions"]
+    assert "six to sixteen words" in outline["instructions"]
+    assert "at most 24 syllables" in invocation["system"]
+    assert "at most 24 syllables" in invocation["instructions"]
+    assert "at most 24 syllables" in outline["instructions"]
+    assert evocation.get("form", "prose") == "prose"
+    assert "flowing paragraphs" in evocation["system"]
+    assert "sequence of poems" in outline["system"]
+    assert "Do not write finished verse." in outline["instructions"]
+
+    section = {
+        "System": "Invocation", "Chapter": "1", "Sub-Chapter": "1.1",
+        "Sub-Sub-Chapter": "", "Name": "Youth", "Generate Text": "Yes",
+        "Description": "", "Alternative Names": "",
+    }
+    rows_by_key = {write_book.row_key(section): section}
+    messages = write_book.build_messages(section, rows_by_key, "NOTE EVIDENCE", "- Note-grounded title: Youth.")
+    prompt = "\n".join(message["content"] for message in messages)
+
+    assert "composing Invocation as verse" in prompt
+    assert "flowing paragraphs" not in prompt
+    assert "NOTE EVIDENCE" in prompt
+    assert "This is not the book introduction" in prompt
+    assert 'Do not refer to the writer as "I"' in prompt
+    assert "notes/mysticism/meta-random" in prompt
+    assert "core concepts and themes" in prompt
+
+    intro = {
+        "System": "Evocation", "Chapter": "0", "Sub-Chapter": "",
+        "Sub-Sub-Chapter": "", "Name": "Introduction", "Generate Text": "Yes",
+        "Description": "", "Alternative Names": "",
+    }
+    intro_prompt = "\n".join(
+        message["content"]
+        for message in write_book.build_messages(
+            intro,
+            {write_book.row_key(intro): intro},
+            "NOTE EVIDENCE",
+            "- Note-grounded title: Opening.",
+        )
+    )
+    assert "This is the book introduction" in intro_prompt
+    assert "Write in the first person as the writer" in intro_prompt
+
+
+def test_manuscript_voice_rejects_author_and_non_intro_first_person() -> None:
+    impersonal = (
+        "Existence is self-sustaining under these conditions.\n\n"
+        "The argument follows from the notes without a personal frame."
+    )
+    assert write_book.manuscript_validation_error(impersonal) is None
+    assert write_book.manuscript_validation_error(
+        "The word the author has held for this phase carries its meaning in its etymology."
+    )
+    assert write_book.manuscript_validation_error(
+        "I will now explain why substance precedes sentience in this order."
+    )
+    assert write_book.manuscript_validation_error(
+        "I begin from doubt, and I keep the first person only here.",
+        book_introduction=True,
+    ) is None
+    assert write_book.manuscript_validation_error(
+        "The author begins from doubt in this introduction.",
+        book_introduction=True,
+    )
 
 
 def sample_rows() -> tuple[dict, dict, dict]:
@@ -111,9 +563,11 @@ def test_csv_descriptions_and_aliases_do_not_enter_retrieval_or_planning() -> No
     prompt = "\n".join(message["content"] for message in messages)
 
     assert query == "Tree of Life Substance Nature [Limit of Logic]"
+    assert write_book.lexical_hint(section) == "Limit of Logic"
     assert "POISON" not in query + prompt
     assert "Optional AI-generated name suggestion: Limit of Logic" in prompt
     assert "NOTE EVIDENCE" in prompt
+    assert "notes/mysticism/meta-random" in prompt
 
 
 def test_grounded_titles_replace_provisional_hierarchy_names(tmp_path: Path) -> None:
@@ -160,3 +614,53 @@ def test_query_expansion_uses_recurring_note_context() -> None:
     assert "pathetic" in terms
     assert "subjective" in terms
     assert "reality" in terms
+
+
+def test_core_theme_note_matches_windows_and_posix_paths() -> None:
+    assert write_book.is_core_theme_note({
+        "rel_path": r"notes\mysticism\meta-random",
+        "filename": "meta-random",
+    })
+    assert write_book.is_core_theme_note({
+        "rel_path": "notes/mysticism/meta-random",
+        "filename": "meta-random",
+    })
+    assert not write_book.is_core_theme_note({
+        "rel_path": "notes/mysticism/other",
+        "filename": "other",
+    })
+
+
+def test_retrieve_context_pins_core_theme_note() -> None:
+    class FakeCollection:
+        def get(self, **kwargs):
+            return {"documents": []}
+
+        def query(self, query_texts, n_results, include, **options):
+            where = options.get("where") or {}
+            if where.get("filename") == "meta-random":
+                return {
+                    "ids": [["core-0"]],
+                    "documents": [["The universal current crosses the void."]],
+                    "metadatas": [[{
+                        "source": "writing-desktop",
+                        "rel_path": r"notes\mysticism\meta-random",
+                        "filename": "meta-random",
+                    }]],
+                    "distances": [[0.4]],
+                }
+            return {
+                "ids": [["other-0"]],
+                "documents": [["A peripheral note about an adjacent topic."]],
+                "metadatas": [[{
+                    "source": "writing-desktop",
+                    "rel_path": "notes/other.txt",
+                    "filename": "other.txt",
+                }]],
+                "distances": [[0.1]],
+            }
+
+    context = write_book.retrieve_context(FakeCollection(), "Evocation Substance", 5, "")
+    assert "CORE THEMES" in context
+    assert "notes/mysticism/meta-random" in context
+    assert "universal current" in context

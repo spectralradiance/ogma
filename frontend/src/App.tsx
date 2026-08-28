@@ -24,6 +24,7 @@ function App() {
   const [view, setView] = useState<View>('workspace')
   const [system, setSystem] = useState('Universal Metaphysics')
   const [cachePath, setCachePath] = useState('')
+  const [provider, setProvider] = useState<'local' | 'claude'>('local')
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [submittedJob, setSubmittedJob] = useState<Job | null>(null)
   const [artifact, setArtifact] = useState<Artifact | null>(null)
@@ -46,11 +47,11 @@ function App() {
     void queryClient.invalidateQueries({ queryKey: ['jobs'] })
   }
   const indexMutation = useMutation({ mutationFn: api.startIndex, onSuccess: track })
-  const outlineMutation = useMutation({ mutationFn: () => api.startOutline(system, cachePath || undefined), onSuccess: track })
+  const outlineMutation = useMutation({ mutationFn: () => api.startOutline(system, cachePath || undefined, provider), onSuccess: track })
   const manuscriptMutation = useMutation({
     // Supplying a run resumes its progress.json; omitting it creates a fresh,
     // timestamped run using either the selected plan cache or regenerated plans.
-    mutationFn: (run?: RunSummary) => api.startManuscript(system, run?.run_id, run ? undefined : cachePath || undefined),
+    mutationFn: (run?: RunSummary) => api.startManuscript(system, run?.run_id, run ? undefined : cachePath || undefined, provider),
     onSuccess: track,
   })
   const cancelMutation = useMutation({ mutationFn: api.cancelJob })
@@ -108,6 +109,7 @@ function App() {
           <div className="panel controls-panel">
             <div className="panel-title"><div><p className="eyebrow">Pipeline</p><h2>Build a text</h2></div><button className="icon-button" title="Refresh" onClick={() => void queryClient.invalidateQueries()}><RefreshCw /></button></div>
             <label>Source text<select value={system} onChange={(event) => { setSystem(event.target.value); setCachePath('') }}>{systems.data?.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
+            <label>Writer<select value={provider} onChange={(event) => setProvider(event.target.value as 'local' | 'claude')}><option value="local">Local GPU (Qwen2.5 3B)</option><option value="claude">Claude API (Opus 5)</option></select></label>
             <label>Writing plan<select value={cachePath} onChange={(event) => setCachePath(event.target.value)}><option value="">Regenerate from indexed notes</option>{caches.data?.map((cache) => <option key={cache.path} value={cache.path}>{formatDate(cache.modified_at)} · {cache.sections} sections</option>)}</select></label>
             <div className="action-stack"><button onClick={() => outlineMutation.mutate()}><Play /> Generate outline</button><button className="primary" onClick={() => manuscriptMutation.mutate(undefined)}><BookOpenText /> Outline + manuscript</button></div>
             <div className="divider" />

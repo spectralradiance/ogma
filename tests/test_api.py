@@ -19,6 +19,7 @@ def test_health_and_systems() -> None:
             "Universal Metaphysics": 100,
             "Tree of Life": 37,
             "Invocation": 10,
+            "Evocation": 5,
         }
 
 
@@ -38,10 +39,19 @@ def test_unknown_system_is_rejected() -> None:
         assert response.status_code == 422
 
 
-def test_generation_requests_default_to_memory_safe_model() -> None:
-    from api.main import DEFAULT_GENERATION_MODEL
+def test_generation_requests_default_to_split_extract_and_write_models() -> None:
+    from api.main import DEFAULT_CLAUDE_MODEL, DEFAULT_EXTRACT_MODEL, DEFAULT_WRITE_MODEL
+    from api.main import generation_provider
+    from api.schemas import ManuscriptRequest, OutlineRequest
 
-    assert DEFAULT_GENERATION_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_CLAUDE_MODEL == "claude-opus-5"
+    assert generation_provider(OutlineRequest(system="Invocation")) == "local"
+    assert generation_provider(ManuscriptRequest(system="Invocation", provider="claude")) == "claude"
+    assert generation_provider(
+        ManuscriptRequest(system="Invocation", extract_model_name="claude-opus-5")
+    ) == "claude"
 
 
 def test_workspace_lists_reads_and_rejects_unsafe_paths(tmp_path: Path) -> None:

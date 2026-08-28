@@ -78,7 +78,7 @@ requirements.txt         Python runtime and test dependencies
 Model-facing editorial instructions live in `data/input/guidance.json`. This file controls the
 outline and manuscript prompts, manuscript style progression, concept extraction, chat behavior,
 and legacy training prompts. Runtime values such as section metadata, retrieved note excerpts,
-paragraph counts, and output schemas are still assembled by the Python code.
+and output schemas are still assembled by the Python code.
 
 Restart a running API or command after changing the guidance file so it is loaded again. Keep the
 template fields in braces unchanged because the generation code fills them at runtime.
@@ -111,7 +111,7 @@ npm install
 cd ..
 ```
 
-The first model-backed operation may download sentence-transformer or Qwen weights from Hugging Face. Setting `HF_TOKEN` is optional but raises download rate limits.
+The first model-backed operation may download sentence-transformer or Qwen weights from Hugging Face. Setting `HF_TOKEN` is optional but raises download rate limits. Paid Claude generation reads `CLAUDE_API_KEY` from `.env` and sends only retrieved excerpts, not the full note tree.
 
 ## Running the Web Application
 
@@ -264,7 +264,14 @@ python code/write_book.py --system "Universal Metaphysics" --outline-only
 python code/write_book.py --system "Tree of Life" --run-id generated202608161531
 ```
 
-Generation is CUDA-only unless `--allow-cpu` is deliberately supplied.
+Local generation is CUDA-only unless `--allow-cpu` is deliberately supplied.
+
+Use Claude instead of a local GPU model. The vector index stays on disk; only the retrieved excerpts for the current section are sent:
+
+```powershell
+python code/write_book.py --system Invocation --provider claude --run-id claude-invocation
+python code/generate_concepts.py --provider claude --system Invocation --system Evocation
+```
 
 ### Analyze a corpus
 

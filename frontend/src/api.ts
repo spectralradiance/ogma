@@ -36,17 +36,18 @@ export const api = {
   artifact: (runId: string, system: string, kind: Artifact['kind']) =>
     request<Artifact>(`/api/runs/${runId}/${encodeURIComponent(system)}/artifacts/${kind}`),
   startIndex: () => request<Job>('/api/index', { method: 'POST', body: '{}' }),
-  startOutline: (system: string, cachePath?: string) => request<Job>('/api/outlines', {
+  startOutline: (system: string, cachePath?: string, provider: 'local' | 'claude' = 'local') => request<Job>('/api/outlines', {
     method: 'POST',
-    body: JSON.stringify({ system, cache_path: cachePath || null, regenerate: !cachePath }),
+    body: JSON.stringify({ system, cache_path: cachePath || null, regenerate: !cachePath, provider }),
   }),
-  startManuscript: (system: string, runId?: string, cachePath?: string) => request<Job>('/api/manuscripts', {
+  startManuscript: (system: string, runId?: string, cachePath?: string, provider: 'local' | 'claude' = 'local') => request<Job>('/api/manuscripts', {
     method: 'POST',
     body: JSON.stringify({
       system,
       run_id: runId || null,
       cache_path: cachePath || null,
       regenerate_outline: !runId && !cachePath,
+      provider,
     }),
   }),
   cancelJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`, { method: 'DELETE' }),

@@ -76,6 +76,8 @@ class OutlineRequest(BaseModel):
     system: str
     cache_path: str | None = None
     regenerate: bool = False
+    provider: Literal["local", "claude"] | None = None
+    extract_model_name: str | None = None
     model_name: str | None = None
 
 
@@ -84,6 +86,9 @@ class ManuscriptRequest(BaseModel):
     run_id: str | None = None
     cache_path: str | None = None
     regenerate_outline: bool = False
+    provider: Literal["local", "claude"] | None = None
+    extract_model_name: str | None = None
+    write_model_name: str | None = None
     model_name: str | None = None
 
 
