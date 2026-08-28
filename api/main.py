@@ -24,10 +24,14 @@ from api.schemas import (
     AnalysisRequest,
     AnalysisSummary,
     ArtifactResponse,
+    ChaosStatus,
+    ConceptsArtifact,
+    ConceptsRequest,
     IndexRequest,
     IndexStatus,
     JobResponse,
     ManuscriptRequest,
+    OrganizeChaosRequest,
     OutlineCache,
     OutlineRequest,
     RunSummary,
@@ -51,8 +55,8 @@ CSV_FILE = INPUT_DIR / "chapter_structure.csv"
 INDEX_METADATA = INTERMEDIARY_DIR / "index_metadata.json"
 DB_FILE = INTERMEDIARY_DIR / "chroma_db" / "chroma.sqlite3"
 PIPELINE_VERSION = "outline-v4"
-DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_GENERATION_MODEL = DEFAULT_WRITE_MODEL
 WORKSPACE_ROOTS = {
@@ -60,6 +64,9 @@ WORKSPACE_ROOTS = {
     "notion/Writing": INPUT_DIR / "notion" / "Writing",
 }
 WORKSPACE_EXTENSIONS = {"", ".md", ".markdown", ".txt", ".text"}
+NOTES_DIR = INPUT_DIR / "writing-desktop" / "notes"
+CHAOS_IMPORT_SUFFIX = " (chaos import).md"
+CONCEPTS_FILE = OUTPUT_DIR / "concepts.md"
 
 manager = JobManager(ROOT)
 
@@ -107,7 +114,13 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Ogma API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # Vite auto-increments past 5173 when another local project already owns it,
+    # so the next couple of ports are allowed too rather than only the default.
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+        "http://localhost:5175", "http://127.0.0.1:5175",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -345,6 +358,34 @@ async def start_index(request: IndexRequest) -> JobResponse:
     return await manager.submit("index", arguments)
 
 
+@app.get("/api/organize-chaos/status", response_model=ChaosStatus)
+async def organize_chaos_status() -> ChaosStatus:
+    unsorted_dir = NOTES_DIR / "_unsorted"
+    unsorted_files = list(unsorted_dir.glob("*.md")) if unsorted_dir.is_dir() else []
+    imported_files = list(NOTES_DIR.rglob(f"*{CHAOS_IMPORT_SUFFIX}")) if NOTES_DIR.is_dir() else []
+    newest = max(unsorted_files + imported_files, key=lambda p: p.stat().st_mtime, default=None)
+    last_run_at = datetime.fromtimestamp(newest.stat().st_mtime).astimezone() if newest else None
+    return ChaosStatus(
+        unsorted_files=len(unsorted_files),
+        imported_files=len(imported_files),
+        last_run_at=last_run_at,
+    )
+
+
+@app.post("/api/organize-chaos", response_model=JobResponse, status_code=202)
+async def start_organize_chaos(request: OrganizeChaosRequest) -> JobResponse:
+    # Matching runs over the full chaos tree; treat repeats as reconnects.
+    active = manager.active("organize_chaos")
+    if active is not None:
+        return active.response()
+    arguments = [str(CODE_DIR / "organize_chaos.py")]
+    if request.dry_run:
+        arguments.append("--dry-run")
+    if request.threshold is not None:
+        arguments.extend(["--threshold", str(request.threshold)])
+    return await manager.submit("organize_chaos", arguments)
+
+
 @app.get("/api/systems", response_model=list[SystemSummary])
 async def systems() -> list[SystemSummary]:
     return [
@@ -430,6 +471,8 @@ async def start_analysis(request: AnalysisRequest) -> JobResponse:
     ]
     if request.min_topic_size is not None:
         arguments.extend(["--min-topic-size", str(request.min_topic_size)])
+    if request.embedding_model:
+        arguments.extend(["--embedding-model", request.embedding_model])
     if request.source:
         source = Path(request.source).resolve()
         if not source.is_dir():
@@ -455,6 +498,7 @@ async def analyses() -> list[AnalysisSummary]:
             run_id=payload["run_id"],
             created_at=payload["created_at"],
             source=payload["source"],
+            embedding_model=payload.get("embedding_model"),
             document_count=payload["document_count"],
             keyword_count=len(payload.get("keywords", [])),
             topic_count=len([topic for topic in payload.get("topics", []) if topic.get("Topic", -1) >= 0]),
@@ -468,6 +512,37 @@ async def analysis(run_id: str) -> dict:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Analysis not found")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.post("/api/concepts", response_model=JobResponse, status_code=202)
+async def start_concepts(request: ConceptsRequest) -> JobResponse:
+    active = manager.active("concepts")
+    if active is not None:
+        return active.response()
+    provider = request.provider or "local"
+    extract_name = request.extract_model_name or (
+        DEFAULT_CLAUDE_MODEL if provider == "claude" else DEFAULT_EXTRACT_MODEL
+    )
+    arguments = [
+        str(CODE_DIR / "generate_concepts.py"),
+        "--target-count", str(request.target_count),
+        "--provider", provider,
+        "--extract-model-name", extract_name,
+    ]
+    for system in request.systems or []:
+        arguments.extend(["--system", system])
+    return await manager.submit("concepts", arguments)
+
+
+@app.get("/api/concepts", response_model=ConceptsArtifact)
+async def concepts_artifact() -> ConceptsArtifact:
+    if not CONCEPTS_FILE.is_file():
+        raise HTTPException(status_code=404, detail="Concepts glossary not generated yet")
+    stat = CONCEPTS_FILE.stat()
+    return ConceptsArtifact(
+        content=CONCEPTS_FILE.read_text(encoding="utf-8"),
+        modified_at=datetime.fromtimestamp(stat.st_mtime).astimezone(),
+    )
 
 
 @app.get("/api/runs", response_model=list[RunSummary])

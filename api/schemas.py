@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 # Literal state values keep the generated OpenAPI schema and TypeScript client
 # honest about the finite set of operations the job queue understands.
-JobKind = Literal["index", "outline", "manuscript", "analysis"]
+JobKind = Literal["index", "organize_chaos", "outline", "manuscript", "analysis", "concepts"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -72,6 +72,17 @@ class IndexRequest(BaseModel):
     notes_dirs: list[str] | None = None
 
 
+class OrganizeChaosRequest(BaseModel):
+    dry_run: bool = False
+    threshold: float | None = Field(default=None, gt=0, le=1)
+
+
+class ChaosStatus(BaseModel):
+    unsorted_files: int
+    imported_files: int
+    last_run_at: datetime | None = None
+
+
 class OutlineRequest(BaseModel):
     system: str
     cache_path: str | None = None
@@ -96,15 +107,29 @@ class AnalysisRequest(BaseModel):
     source: str | None = None
     max_chars: int = Field(default=12000, ge=500, le=100000)
     min_topic_size: int | None = Field(default=None, ge=2, le=1000)
+    embedding_model: str | None = None
 
 
 class AnalysisSummary(BaseModel):
     run_id: str
     created_at: str
     source: str
+    embedding_model: str | None = None
     document_count: int
     keyword_count: int
     topic_count: int
+
+
+class ConceptsRequest(BaseModel):
+    target_count: int = Field(default=200, ge=1, le=5000)
+    provider: Literal["local", "claude"] | None = None
+    extract_model_name: str | None = None
+    systems: list[str] | None = None
+
+
+class ConceptsArtifact(BaseModel):
+    content: str
+    modified_at: datetime | None = None
 
 
 class JobResponse(BaseModel):

@@ -44,8 +44,8 @@ def test_generation_requests_default_to_split_extract_and_write_models() -> None
     from api.main import generation_provider
     from api.schemas import ManuscriptRequest, OutlineRequest
 
-    assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
-    assert DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-7B-Instruct"
+    assert DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-7B-Instruct"
     assert DEFAULT_CLAUDE_MODEL == "claude-opus-5"
     assert generation_provider(OutlineRequest(system="Invocation")) == "local"
     assert generation_provider(ManuscriptRequest(system="Invocation", provider="claude")) == "claude"
@@ -120,6 +120,53 @@ def test_job_manager_streams_subprocess_output() -> None:
         await manager.stop()
 
     asyncio.run(scenario())
+
+
+def test_organize_chaos_status_and_submission_reuses_active_job() -> None:
+    with TestClient(app) as client:
+        status = client.get("/api/organize-chaos/status")
+        assert status.status_code == 200
+        body = status.json()
+        assert isinstance(body["unsorted_files"], int)
+        assert isinstance(body["imported_files"], int)
+
+    active = Job(
+        id="existing-organize-chaos",
+        kind="organize_chaos",
+        command=[],
+        created_at=datetime.now().astimezone(),
+        status="running",
+    )
+    manager.jobs[active.id] = active
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/organize-chaos", json={"dry_run": True})
+        assert response.status_code == 202
+        assert response.json()["id"] == active.id
+    finally:
+        manager.jobs.pop(active.id, None)
+
+
+def test_concepts_artifact_missing_and_submission_reuses_active_job() -> None:
+    with TestClient(app) as client:
+        missing = client.get("/api/concepts")
+        assert missing.status_code == 404
+
+    active = Job(
+        id="existing-concepts",
+        kind="concepts",
+        command=[],
+        created_at=datetime.now().astimezone(),
+        status="running",
+    )
+    manager.jobs[active.id] = active
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/concepts", json={"target_count": 50})
+        assert response.status_code == 202
+        assert response.json()["id"] == active.id
+    finally:
+        manager.jobs.pop(active.id, None)
 
 
 def test_active_job_prefers_running_over_queued() -> None:

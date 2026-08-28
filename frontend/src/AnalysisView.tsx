@@ -1,14 +1,23 @@
 import { useDeferredValue, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BarChart3, Clock3, LoaderCircle, Network, Play, Square, Tags, Terminal } from 'lucide-react'
+import { BarChart3, Network, Play, Tags } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from './api'
 import { CorpusBrowser } from './CorpusBrowser'
+import { JobBanner } from './JobBanner'
 import type { AnalysisResult, Job } from './types'
 import { useJobEvents } from './useJobEvents'
 
 const exportMetadataTerm = /(?:^|\s)(?:zim|wiki format|text zim wiki)(?:\s|$)/i
+// Analysis embeds its own working set fresh each run (it never touches the
+// ChromaDB index), so unlike the index's embedding model this one is a free
+// per-run choice with no downstream consistency requirement.
+const ANALYSIS_MODELS = [
+  { value: 'BAAI/bge-large-en-v1.5', label: 'BGE large · best quality' },
+  { value: 'BAAI/bge-base-en-v1.5', label: 'BGE base · faster' },
+  { value: 'all-MiniLM-L6-v2', label: 'MiniLM · fastest' },
+]
 
 function legacyTopicLabel(name: string) {
   const generic = new Set(['self', 'thing', 'things', 'world', 'write', 'writing'])
@@ -21,28 +30,10 @@ function legacyTopicLabel(name: string) {
   }).slice(0, 3).map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' / ')
 }
 
-function analysisProgress(job: Job) {
-  if (job.status === 'completed') return 100
-  if (job.status === 'queued') return 0
-  const logs = job.logs.join('\n')
-  const phaseMatches = [...logs.matchAll(/Phase (\d)\/6[^\n]*/g)]
-  const latestPhase = phaseMatches.at(-1)
-  if (!latestPhase) return 2
-  const phase = Number(latestPhase[1])
-  const detail = latestPhase[0].match(/(\d+)\/(\d+) documents/)
-  const withinPhase = detail ? Number(detail[1]) / Number(detail[2]) : 0.12
-  return Math.min(99, Math.round(((phase - 1 + withinPhase) / 6) * 100))
-}
-
-function latestProgressLine(job: Job) {
-  return [...job.logs].reverse().find((line) => line.trim() && (
-    line.includes('Phase ') || line.startsWith('Still running:') || line.startsWith('Complete:')
-  )) ?? job.logs.at(-1) ?? (job.status === 'queued' ? 'Waiting for the background worker' : 'Starting analysis')
-}
-
 export function AnalysisView({ jobs, onTrack, onOpenJob }: { jobs: Job[]; onTrack: (job: Job) => void; onOpenJob: (jobId: string) => void }) {
   const queryClient = useQueryClient()
   const [selectedRun, setSelectedRun] = useState<string | null>(null)
+  const [embeddingModel, setEmbeddingModel] = useState(ANALYSIS_MODELS[0].value)
   // Defer loading a potentially large graph payload so selecting a history row
   // remains responsive while React transitions to the new visualization.
   const deferredRun = useDeferredValue(selectedRun)
@@ -52,7 +43,7 @@ export function AnalysisView({ jobs, onTrack, onOpenJob }: { jobs: Job[]; onTrac
     queryFn: () => api.analysis(deferredRun!),
     enabled: Boolean(deferredRun),
   })
-  const start = useMutation({ mutationFn: api.startAnalysis, onSuccess: onTrack })
+  const start = useMutation({ mutationFn: () => api.startAnalysis(embeddingModel), onSuccess: onTrack })
   const cancel = useMutation({ mutationFn: api.cancelJob })
   const activeAnalysisJobs = jobs
     .filter((job) => job.kind === 'analysis' && (job.status === 'queued' || job.status === 'running'))
@@ -77,17 +68,14 @@ export function AnalysisView({ jobs, onTrack, onOpenJob }: { jobs: Job[]; onTrac
   return <>
     <section className="analysis-toolbar panel">
       <div><p className="eyebrow">BERTopic + KeyBERT</p><h2>Corpus analysis</h2><span>Analyze every eligible note across the complete directory tree.</span>{start.error && <strong className="request-error">{start.error.message}</strong>}</div>
+      <label>Embeddings<select value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)}>{ANALYSIS_MODELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       <button className="primary-command" onClick={() => start.mutate()} disabled={start.isPending || Boolean(activeJob)}><Play /> {start.isPending ? 'Queueing...' : activeJob ? 'Analysis running' : 'Run analysis'}</button>
     </section>
 
-    {activeJob && <section className={`panel analysis-progress ${activeJob.status}`}>
-      <div className="progress-icon">{activeJob.status === 'running' ? <LoaderCircle className="spin" /> : <Clock3 />}</div>
-      <div className="progress-copy"><div><strong>{activeJob.status === 'running' ? 'Analysis in progress' : 'Analysis queued'}</strong><span>{analysisProgress(activeJob)}%</span></div><div className="progress-track"><i style={{ width: `${analysisProgress(activeJob)}%` }} /></div><p>{latestProgressLine(activeJob)}</p>{activeJob.run_id && <code>{activeJob.run_id}</code>}</div>
-      <div className="progress-actions">{queuedBehind > 0 && <span>{queuedBehind} queued</span>}<button onClick={() => onOpenJob(activeJob.id)}><Terminal /> Logs</button><button className="stop" onClick={() => cancel.mutate(activeJob.id)}><Square /> Stop</button></div>
-    </section>}
+    {activeJob && <JobBanner job={activeJob} onOpenLogs={onOpenJob} onCancel={cancel.mutate} queuedBehind={queuedBehind} />}
 
     <section className="analysis-layout">
-      <div className="panel analysis-list"><div className="panel-title"><div><p className="eyebrow">History</p><h2>Analysis runs</h2></div></div>{analyses.data?.length ? analyses.data.map((item) => <button key={item.run_id} className={selectedRun === item.run_id ? 'selected' : ''} onClick={() => setSelectedRun(item.run_id)}><strong>{item.run_id.replace('generated', '')}</strong><span>{item.document_count} docs · {item.topic_count} topics</span></button>) : <p className="empty-copy">No analyses yet.</p>}</div>
+      <div className="panel analysis-list"><div className="panel-title"><div><p className="eyebrow">History</p><h2>Analysis runs</h2></div></div>{analyses.data?.length ? analyses.data.map((item) => <button key={item.run_id} className={selectedRun === item.run_id ? 'selected' : ''} onClick={() => setSelectedRun(item.run_id)}><strong>{item.run_id.replace('generated', '')}</strong><span>{item.document_count} docs · {item.topic_count} topics{item.embedding_model ? ` · ${item.embedding_model.split('/').pop()}` : ''}</span></button>) : <p className="empty-copy">No analyses yet.</p>}</div>
       <div className="analysis-results">
         {!result.data ? <div className="panel analysis-empty"><Network /><h2>Select an analysis run</h2><p>Completed keyword, topic, and graph results appear here.</p></div> : <AnalysisResultView result={result.data} />}
       </div>

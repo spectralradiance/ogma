@@ -314,7 +314,7 @@ def main() -> None:
     missing_batches = [rows for rows in row_batches if batch_key(rows) not in cached]
 
     embedding_function = SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2",
+        model_name=write_book.EMBEDDING_MODEL,
         device="cpu",
     )
     client = write_book.chromadb.PersistentClient(path=write_book.DEFAULT_DB_DIR)

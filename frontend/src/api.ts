@@ -1,4 +1,4 @@
-import type { AnalysisResult, AnalysisSummary, Artifact, DictionaryEntry, DictionarySearchResult, IndexStatus, Job, OutlineCache, RunSummary, SystemSummary, WorkspaceFile, WorkspaceFileSummary } from './types'
+import type { AnalysisResult, AnalysisSummary, Artifact, ChaosStatus, ConceptsArtifact, DictionaryEntry, DictionarySearchResult, IndexStatus, Job, OutlineCache, RunSummary, SystemSummary, WorkspaceFile, WorkspaceFileSummary } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const DICTIONARY_API = import.meta.env.VITE_DICTIONARY_API_URL ?? 'http://127.0.0.1:3001'
@@ -36,11 +36,11 @@ export const api = {
   artifact: (runId: string, system: string, kind: Artifact['kind']) =>
     request<Artifact>(`/api/runs/${runId}/${encodeURIComponent(system)}/artifacts/${kind}`),
   startIndex: () => request<Job>('/api/index', { method: 'POST', body: '{}' }),
-  startOutline: (system: string, cachePath?: string, provider: 'local' | 'claude' = 'local') => request<Job>('/api/outlines', {
+  startOutline: (system: string, cachePath?: string, provider: 'local' | 'claude' = 'local', modelName?: string) => request<Job>('/api/outlines', {
     method: 'POST',
-    body: JSON.stringify({ system, cache_path: cachePath || null, regenerate: !cachePath, provider }),
+    body: JSON.stringify({ system, cache_path: cachePath || null, regenerate: !cachePath, provider, model_name: modelName || null }),
   }),
-  startManuscript: (system: string, runId?: string, cachePath?: string, provider: 'local' | 'claude' = 'local') => request<Job>('/api/manuscripts', {
+  startManuscript: (system: string, runId?: string, cachePath?: string, provider: 'local' | 'claude' = 'local', modelName?: string) => request<Job>('/api/manuscripts', {
     method: 'POST',
     body: JSON.stringify({
       system,
@@ -48,14 +48,25 @@ export const api = {
       cache_path: cachePath || null,
       regenerate_outline: !runId && !cachePath,
       provider,
+      model_name: modelName || null,
     }),
   }),
   cancelJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`, { method: 'DELETE' }),
+  chaosStatus: () => request<ChaosStatus>('/api/organize-chaos/status'),
+  startOrganizeChaos: (dryRun = false) => request<Job>('/api/organize-chaos', {
+    method: 'POST',
+    body: JSON.stringify({ dry_run: dryRun }),
+  }),
   analyses: () => request<AnalysisSummary[]>('/api/analyses'),
   analysis: (runId: string) => request<AnalysisResult>(`/api/analyses/${runId}`),
-  startAnalysis: () => request<Job>('/api/analyses', {
+  startAnalysis: (embeddingModel?: string) => request<Job>('/api/analyses', {
     method: 'POST',
-    body: '{}',
+    body: JSON.stringify({ embedding_model: embeddingModel || null }),
+  }),
+  concepts: () => request<ConceptsArtifact>('/api/concepts'),
+  startConcepts: (targetCount = 200, provider: 'local' | 'claude' = 'local') => request<Job>('/api/concepts', {
+    method: 'POST',
+    body: JSON.stringify({ target_count: targetCount, provider }),
   }),
   eventsUrl: (jobId: string) => `${API}/api/jobs/${jobId}/events`,
   workspaceFiles: () => request<WorkspaceFileSummary[]>('/api/workspace/files'),

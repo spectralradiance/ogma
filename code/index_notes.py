@@ -28,7 +28,12 @@ TEXT_EXTENSIONS = {".md", ".txt", ".markdown", ".text", ""}
 # Byte-order marks / null bytes indicate a binary file; skip them
 _BINARY_SIGNALS = (b"\x00", b"\xff\xfe", b"\xfe\xff", b"\x89PNG", b"PK\x03")
 COLLECTION_NAME = "notes"
-INDEX_VERSION = 2
+# write_book.py, generate_concepts.py, and chat.py all query this same store and
+# must embed with this exact model, so it cannot be picked per-run like the
+# analysis/generation models can. Changing it requires bumping INDEX_VERSION
+# below so the mismatched-dimension collection is rebuilt instead of erroring.
+EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+INDEX_VERSION = 3
 
 
 def _prefer_below_normal_priority() -> None:
@@ -121,10 +126,10 @@ def main():
     for d in notes_dirs:
         print(f"  {d}")
     print(f"ChromaDB  : {db_dir}")
-    print(f"Embeddings: MiniLM on {device}, {BATCH_SIZE} chunks/batch, skip files > {MAX_FILE_BYTES} bytes")
+    print(f"Embeddings: {EMBEDDING_MODEL} on {device}, {BATCH_SIZE} chunks/batch, skip files > {MAX_FILE_BYTES} bytes")
 
     ef = SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2",
+        model_name=EMBEDDING_MODEL,
         device=device,
     )
     client = chromadb.PersistentClient(path=db_dir)
@@ -212,6 +217,7 @@ def main():
     print(f"Total chunks in store: {collection.count()}")
     metadata = {
         "index_version": INDEX_VERSION,
+        "embedding_model": EMBEDDING_MODEL,
         "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_dirs": notes_dirs,
         "files_found": len(all_files),

@@ -54,8 +54,8 @@ def test_run_paths_nests_under_run_id() -> None:
 
 
 def test_split_model_defaults() -> None:
-    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-3B-Instruct"
-    assert write_book.DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-3B-Instruct"
+    assert write_book.DEFAULT_EXTRACT_MODEL == "Qwen/Qwen2.5-7B-Instruct"
+    assert write_book.DEFAULT_WRITE_MODEL == "Qwen/Qwen2.5-7B-Instruct"
     assert write_book.DEFAULT_CLAUDE_MODEL == "claude-opus-5"
 
 

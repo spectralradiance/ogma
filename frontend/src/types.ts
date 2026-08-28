@@ -32,7 +32,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 
 export interface Job {
   id: string
-  kind: 'index' | 'outline' | 'manuscript' | 'analysis'
+  kind: 'index' | 'organize_chaos' | 'outline' | 'manuscript' | 'analysis' | 'concepts'
   status: JobStatus
   created_at: string
   started_at: string | null
@@ -45,10 +45,22 @@ export interface Job {
   error: string | null
 }
 
+export interface ChaosStatus {
+  unsorted_files: number
+  imported_files: number
+  last_run_at: string | null
+}
+
+export interface ConceptsArtifact {
+  content: string
+  modified_at: string | null
+}
+
 export interface AnalysisSummary {
   run_id: string
   created_at: string
   source: string
+  embedding_model?: string | null
   document_count: number
   keyword_count: number
   topic_count: number

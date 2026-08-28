@@ -28,6 +28,10 @@ ZIM_METADATA = re.compile(
     re.IGNORECASE,
 )
 GENERIC_TOPIC_TERMS = {"thing", "things", "world", "write", "writing", "self"}
+# Analysis embeds its own working set fresh every run and never touches the
+# ChromaDB store, so unlike index_notes.py's model this one is safe to pick
+# per run without invalidating anything else.
+DEFAULT_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 
 
 class ProgressReporter:
@@ -222,6 +226,7 @@ def main() -> None:
     parser.add_argument("--run-id")
     parser.add_argument("--max-chars", type=int, default=12000)
     parser.add_argument("--min-topic-size", type=int)
+    parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     args = parser.parse_args()
 
     source = args.source.resolve()
@@ -267,7 +272,8 @@ def main() -> None:
         raise SystemExit("At least five non-empty documents are required for topic modeling.")
 
     progress.update(f"Phase 1/6 complete: Loaded {len(records)} documents from {source}")
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    progress.update(f"Embedding model: {args.embedding_model}")
+    model = SentenceTransformer(args.embedding_model)
     documents = [record["text"] for record in records]
     embedding_batches = []
     for start in range(0, len(documents), 64):
@@ -346,6 +352,7 @@ def main() -> None:
         "run_id": run_id,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source": str(source),
+        "embedding_model": args.embedding_model,
         "document_count": len(records),
         "keywords": [{"term": term, "score": float(score)} for term, score in keywords],
         "topics": topic_info,

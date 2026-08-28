@@ -91,7 +91,7 @@ def load_collection(db_dir: str):
         return None
     if not os.path.isdir(db_dir):
         return None
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    ef = SentenceTransformerEmbeddingFunction(model_name=write_book.EMBEDDING_MODEL)
     client = chromadb.PersistentClient(path=db_dir)
     try:
         return client.get_collection(name=COLLECTION_NAME, embedding_function=ef)

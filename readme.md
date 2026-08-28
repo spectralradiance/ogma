@@ -54,6 +54,7 @@ api/
     jobs.py              serialized subprocess queue and cancellation
     schemas.py           Pydantic API contracts
 code/
+    organize_chaos.py    route raw chaos/ notes into the organized notes/ tree
     index_notes.py       recursive text indexing into ChromaDB
     write_book.py        writing-plan, outline, and manuscript generation
     analyze_corpus.py    KeyBERT, BERTopic, and graph analysis
@@ -138,6 +139,29 @@ Set `VITE_API_URL` before starting Vite when the API is not on `http://localhost
 
 ## Web Workspaces
 
+### Pipeline
+
+The landing workspace is a single, linear view of the whole corpus-to-manuscript flow: organize
+chaos, index notes, analyze the corpus, generate a concept glossary, and write manuscripts. Each
+stage shows its own status (counts, last-run time, or live progress while a job is running) and a
+primary action that starts it with sensible defaults. Stages that already have a dedicated
+workspace (Analysis, Workspace, Run Library) also link out to it for deeper configuration; the
+Pipeline view itself is where you see how the stages connect and trigger any of them without
+leaving the browser.
+
+Organize chaos semantically routes raw, unstructured notes under `data/input/writing-desktop/chaos`
+into the organized `notes/` tree used everywhere else. It embeds each chaos file's outline-style
+sections and each existing notes file (enriched with matching `chapter_structure.csv` rows) with
+`BAAI/bge-large-en-v1.5`, then appends every section to the closest-matching notes file as a
+`<name> (chaos import).md` sibling, tagged with its source path so it stays traceable and is never
+imported twice. Chaos files themselves are never modified or deleted. Sections with no confident
+match are grouped by chaos top-level range folder under `notes/_unsorted/` for manual review. Because
+this corpus is a stream-of-consciousness outline where most headings introduce only a line or two,
+adjacent raw sections are merged until they carry enough context to embed meaningfully, and the
+default similarity threshold (`--threshold 0.65`, calibrated for `BAAI/bge-large-en-v1.5`'s higher
+score range) is tuned to require a reasonably confident match before an assignment is made rather
+than accepting the closest available guess.
+
 ### Manuscript Operations
 
 The main workspace displays index health, available texts, generated runs, compatible writing-plan caches, and recent background activity.
@@ -165,7 +189,9 @@ The Analysis workspace processes every eligible document under `data/input/writi
 The worker:
 
 1. Traverses the complete selected source directory and reads bounded text samples.
-2. Embeds documents with `all-MiniLM-L6-v2`.
+2. Embeds documents with a selectable model (`BAAI/bge-large-en-v1.5` by default; `bge-base` and
+   `all-MiniLM-L6-v2` are also available for faster, lower-quality runs). Unlike the index's
+   embedding model, this choice only affects this run's clustering and is safe to change freely.
 3. Extracts diverse phrases with KeyBERT and maximal marginal relevance.
 4. Fits BERTopic using precomputed embeddings and `KeyBERTInspired` labels.
 5. Maps topic frequencies to relative source directories with `topics_per_class`.
@@ -230,6 +256,19 @@ Minute collisions receive `-2`, `-3`, and subsequent suffixes. New runs therefor
 
 The web interface is recommended, but each worker remains independently usable.
 
+### Organize chaos into notes
+
+```powershell
+python code/organize_chaos.py --dry-run
+python code/organize_chaos.py
+```
+
+`--dry-run` reports match-score percentiles and a sample of borderline sections without writing
+anything. Useful controls:
+
+- `--threshold` sets the minimum cosine similarity required for a confident match (default `0.65`).
+- `--limit-files N` processes only the first N chaos files, for quick prototyping.
+
 ### Index notes
 
 ```powershell
@@ -284,6 +323,7 @@ Useful controls:
 - `--max-chars` bounds each document sample.
 - `--min-topic-size` controls BERTopic cluster granularity.
 - `--run-id` selects the output directory name.
+- `--embedding-model` selects the sentence-transformers model (default `BAAI/bge-large-en-v1.5`).
 
 ### Generate a concept glossary
 
@@ -344,6 +384,8 @@ Commands: `/history`, `/clear`, `/save [file]`, and `/quit`.
 | `GET` | `/api/health` | Process health |
 | `GET` | `/api/index/status` | Vector-index status and metadata |
 | `POST` | `/api/index` | Queue indexing |
+| `GET` | `/api/organize-chaos/status` | Chaos-import counts and last-run time |
+| `POST` | `/api/organize-chaos` | Queue chaos-to-notes routing |
 | `GET` | `/api/systems` | Available manuscript systems and section counts |
 | `GET` | `/api/outlines/{system}/caches` | Compatible writing-plan caches |
 | `POST` | `/api/outlines` | Queue outline generation or cache reuse |
@@ -353,6 +395,8 @@ Commands: `/history`, `/clear`, `/save [file]`, and `/quit`.
 | `POST` | `/api/analyses` | Queue KeyBERT/BERTopic/NetworkX analysis |
 | `GET` | `/api/analyses` | Completed analysis summaries |
 | `GET` | `/api/analyses/{run}` | Full analysis payload |
+| `POST` | `/api/concepts` | Queue concept glossary generation |
+| `GET` | `/api/concepts` | Read the generated concept glossary |
 | `GET` | `/api/jobs` | Current API-session job history |
 | `GET` | `/api/jobs/{id}/events` | Live SSE job snapshots |
 | `DELETE` | `/api/jobs/{id}` | Cancel queued/running work |

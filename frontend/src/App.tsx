@@ -1,15 +1,24 @@
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpenText, Clock3, Database, FileText, Library, LoaderCircle, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal } from 'lucide-react'
+import { Activity, BookOpenText, Database, FileText, Library, LoaderCircle, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal, Workflow } from 'lucide-react'
 import { api } from './api'
-import { generationProgress } from './jobProgress'
+import { JobBanner } from './JobBanner'
 import type { Artifact, Job, RunSummary } from './types'
 import { useJobEvents } from './useJobEvents'
 import './App.css'
 
-type View = 'workspace' | 'editor' | 'analysis' | 'runs' | 'jobs'
-// Topic charts and canvas graph dependencies are large, so keep them out of the
-// initial manuscript-workspace bundle until the Analysis navigation is selected.
+type View = 'pipeline' | 'workspace' | 'editor' | 'analysis' | 'runs' | 'jobs'
+// Curated rather than free-text: an unloadable model name only surfaces as a
+// failure deep in a background job, so keep the picker to models known to work.
+const WRITER_MODELS = [
+  { value: 'Qwen/Qwen2.5-7B-Instruct', label: 'Local GPU · Qwen2.5 7B' },
+  { value: 'Qwen/Qwen2.5-14B-Instruct', label: 'Local GPU · Qwen2.5 14B' },
+  { value: 'claude-opus-5', label: 'Claude API · Opus 5' },
+  { value: 'claude-sonnet-5', label: 'Claude API · Sonnet 5' },
+]
+// Topic charts, canvas graph, and pipeline-status dependencies are lazy so the
+// initial manuscript-workspace bundle stays small until each tab is selected.
+const PipelineView = lazy(() => import('./PipelineView').then((module) => ({ default: module.PipelineView })))
 const AnalysisView = lazy(() => import('./AnalysisView').then((module) => ({ default: module.AnalysisView })))
 const WorkspaceEditor = lazy(() => import('./editor/WorkspaceEditor').then((module) => ({ default: module.WorkspaceEditor })))
 
@@ -21,10 +30,11 @@ function App() {
   const queryClient = useQueryClient()
   // Local state is limited to navigation and selections. Durable workflow state
   // lives in FastAPI/data directories and server state is owned by TanStack Query.
-  const [view, setView] = useState<View>('workspace')
+  const [view, setView] = useState<View>('pipeline')
   const [system, setSystem] = useState('Universal Metaphysics')
   const [cachePath, setCachePath] = useState('')
-  const [provider, setProvider] = useState<'local' | 'claude'>('local')
+  const [modelName, setModelName] = useState(WRITER_MODELS[0].value)
+  const provider = modelName.toLowerCase().startsWith('claude') ? 'claude' : 'local'
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [submittedJob, setSubmittedJob] = useState<Job | null>(null)
   const [artifact, setArtifact] = useState<Artifact | null>(null)
@@ -47,11 +57,11 @@ function App() {
     void queryClient.invalidateQueries({ queryKey: ['jobs'] })
   }
   const indexMutation = useMutation({ mutationFn: api.startIndex, onSuccess: track })
-  const outlineMutation = useMutation({ mutationFn: () => api.startOutline(system, cachePath || undefined, provider), onSuccess: track })
+  const outlineMutation = useMutation({ mutationFn: () => api.startOutline(system, cachePath || undefined, provider, modelName), onSuccess: track })
   const manuscriptMutation = useMutation({
     // Supplying a run resumes its progress.json; omitting it creates a fresh,
     // timestamped run using either the selected plan cache or regenerated plans.
-    mutationFn: (run?: RunSummary) => api.startManuscript(system, run?.run_id, run ? undefined : cachePath || undefined, provider),
+    mutationFn: (run?: RunSummary) => api.startManuscript(system, run?.run_id, run ? undefined : cachePath || undefined, provider, modelName),
     onSuccess: track,
   })
   const cancelMutation = useMutation({ mutationFn: api.cancelJob })
@@ -67,7 +77,6 @@ function App() {
   const generationJob = polledGenerationJob?.status === 'running'
     ? polledGenerationJob
     : trackedGenerationJob ?? polledGenerationJob
-  const generation = generationJob ? generationProgress(generationJob) : null
 
   const filteredRuns = (runs.data ?? []).filter((run) => {
     const needle = search.toLowerCase()
@@ -79,6 +88,7 @@ function App() {
     <aside className="sidebar">
       <div className="brand"><img className="brand-icon" src="/favicon.svg" alt="" /><span>Ogma</span></div>
       <nav>
+        <button className={view === 'pipeline' ? 'active' : ''} onClick={() => setView('pipeline')}><Workflow /> Pipeline</button>
         <button className={view === 'workspace' ? 'active' : ''} onClick={() => setView('workspace')}><Activity /> Workspace</button>
         <button className={view === 'editor' ? 'active' : ''} onClick={() => setView('editor')}><PencilLine /> Editor</button>
         <button className={view === 'analysis' ? 'active' : ''} onClick={() => setView('analysis')}><Network /> Analysis</button>
@@ -90,26 +100,23 @@ function App() {
 
     <main className={view === 'editor' ? 'editor-main' : ''}>
       <header className="topbar">
-        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
-        {view !== 'editor' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
+        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'pipeline' ? 'Pipeline overview' : view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
+        {view !== 'editor' && view !== 'pipeline' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
       </header>
 
+      {view === 'pipeline' && <Suspense fallback={<section className="panel analysis-empty">Loading pipeline...</section>}><PipelineView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} onNavigate={setView} /></Suspense>}
       {view === 'workspace' && <>
         <section className="metrics">
           <div><Database /><span>Indexed chunks</span><strong>{index.data?.total_chunks?.toLocaleString() ?? '24,818'}</strong><small>{formatDate(index.data?.completed_at ?? index.data?.database_modified_at)}</small></div>
           <div><BookOpenText /><span>Available texts</span><strong>{systems.data?.length ?? 3}</strong><small>{systems.data?.reduce((sum, item) => sum + item.sections, 0) ?? 147} sections</small></div>
           <div><FileText /><span>Generated runs</span><strong>{runs.data?.length ?? 0}</strong><small>{jobs.data?.filter((job) => job.status === 'running').length ?? 0} active jobs</small></div>
         </section>
-        {generationJob && generation && <section className={`panel analysis-progress generation-progress ${generationJob.status}`}>
-          <div className="progress-icon">{generationJob.status === 'running' ? <LoaderCircle className="spin" /> : <Clock3 />}</div>
-          <div className="progress-copy"><div><strong>{generation.label}</strong><span>{generation.percent}%</span></div><div className="progress-track"><i style={{ width: `${generation.percent}%` }} /></div><p>{generation.detail}</p>{generationJob.run_id && <code>{generationJob.run_id} · {generationJob.system}</code>}</div>
-          <div className="progress-actions"><button onClick={() => setActiveJobId(generationJob.id)}><Terminal /> Logs</button><button className="stop" onClick={() => cancelMutation.mutate(generationJob.id)}><Square /> Stop</button></div>
-        </section>}
+        {generationJob && <JobBanner job={generationJob} onOpenLogs={setActiveJobId} onCancel={cancelMutation.mutate} className="generation-progress" />}
         <section className="workspace-grid">
           <div className="panel controls-panel">
             <div className="panel-title"><div><p className="eyebrow">Pipeline</p><h2>Build a text</h2></div><button className="icon-button" title="Refresh" onClick={() => void queryClient.invalidateQueries()}><RefreshCw /></button></div>
             <label>Source text<select value={system} onChange={(event) => { setSystem(event.target.value); setCachePath('') }}>{systems.data?.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
-            <label>Writer<select value={provider} onChange={(event) => setProvider(event.target.value as 'local' | 'claude')}><option value="local">Local GPU (Qwen2.5 3B)</option><option value="claude">Claude API (Opus 5)</option></select></label>
+            <label>Writer<select value={modelName} onChange={(event) => setModelName(event.target.value)}>{WRITER_MODELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label>Writing plan<select value={cachePath} onChange={(event) => setCachePath(event.target.value)}><option value="">Regenerate from indexed notes</option>{caches.data?.map((cache) => <option key={cache.path} value={cache.path}>{formatDate(cache.modified_at)} · {cache.sections} sections</option>)}</select></label>
             <div className="action-stack"><button onClick={() => outlineMutation.mutate()}><Play /> Generate outline</button><button className="primary" onClick={() => manuscriptMutation.mutate(undefined)}><BookOpenText /> Outline + manuscript</button></div>
             <div className="divider" />

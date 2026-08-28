@@ -3,7 +3,9 @@ RAG-driven manuscript generator.
 
 Loads the metaphysics CSV, queries a local ChromaDB vector store for
 relevant notes, extracts a writing plan, and writes each section.
-Defaults use Qwen2.5 3B Instruct so the pipeline fits a 6 GB GPU.
+Defaults use Qwen2.5 7B Instruct, sized for a 16 GB GPU in 4-bit. Pass
+--extract-model-name/--write-model-name with a larger Qwen2.5 (e.g. 14B) if
+more VRAM is available, or a smaller one to fit a tighter GPU.
 Pass --provider claude to use the Anthropic API with CLAUDE_API_KEY instead.
 
 Usage:
@@ -46,9 +48,13 @@ TOP_K = 5
 CLAUDE_NOTES_TOP_K = 40
 CLAUDE_MAX_OUTPUT_TOKENS = 8192
 CLAUDE_MAX_CONTINUATIONS = 1
+# Must match index_notes.py's EMBEDDING_MODEL exactly: this queries the same
+# ChromaDB store that script built, and retrieval only works if both sides
+# embed with the identical model.
+EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 DEFAULT_SYSTEM = "Universal Metaphysics"
-DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_EXTRACT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_WRITE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 DEFAULT_CLAUDE_MODEL = "claude-opus-5"
 DEFAULT_MODEL_NAME = DEFAULT_WRITE_MODEL
 ENV_FILE = os.path.join(PROJECT_DIR, ".env")
@@ -1430,7 +1436,7 @@ def main():
         )
 
     # --- Connect to vector store ---
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
     client = chromadb.PersistentClient(path=db_dir)
     collection = client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
     print(f"Vector store loaded: {collection.count()} chunks")
