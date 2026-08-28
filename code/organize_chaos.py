@@ -7,8 +7,8 @@ file's own content plus, where its path corresponds to a System/Chapter/
 Sub-Chapter row in chapter_structure.csv (matched by folder name against the
 row's Name / Alternative Names), the Name/Description text of that row and
 its descendants. Every chaos file is split into outline sections, each
-section is embedded (all-MiniLM-L6-v2, same model as index_notes.py) and
-matched against the nearest notes chunk by cosine similarity.
+section is embedded (EMBEDDING_MODEL below) and matched against the nearest
+notes chunk by cosine similarity.
 
 Chaos is never modified or deleted. Matches are appended to a sibling
 "<name> (chaos import).md" file next to the best-matching notes file, each
@@ -35,6 +35,11 @@ from tqdm import tqdm
 
 CHUNK_SIZE = 1400
 CHUNK_OVERLAP = 250
+MIN_SECTION_CHARS = 120
+# Matching happens entirely in-memory each run (chaos and notes/ are both
+# embedded fresh here), so this doesn't need to match index_notes.py's model
+# the way retrieval does — but it's kept the same for consistent match quality.
+EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 TEXT_EXTENSIONS = {".md", ".txt", ".markdown", ".text", ""}
 _BINARY_SIGNALS = (b"\x00", b"\xff\xfe", b"\xfe\xff", b"\x89PNG", b"PK\x03")
 UNSORTED_DIRNAME = "_unsorted"
@@ -82,28 +87,43 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
 
 def split_sections(text: str) -> list[str]:
     """Break outline-style text at lines with no leading whitespace, which
-    this corpus consistently uses as section headings. Oversized sections
-    fall back to fixed-size chunking."""
+    this corpus consistently uses as section headings. This corpus is a
+    stream-of-consciousness outline: most headings introduce only one or two
+    short indented lines, sometimes none. Embedding those alone gives the
+    matcher almost no signal, so it latches onto coincidental wording in an
+    unrelated chapter instead of the actual topic. Adjacent raw sections are
+    therefore merged forward until they carry enough context to embed
+    meaningfully. Oversized sections fall back to fixed-size chunking."""
     lines = text.splitlines()
-    sections, current = [], []
+    raw_sections, current = [], []
     for line in lines:
         is_heading = bool(line) and not line[0].isspace()
         if is_heading and current:
             block = "\n".join(current).strip()
             if block:
-                sections.append(block)
+                raw_sections.append(block)
             current = [line]
         else:
             current.append(line)
     if current:
         block = "\n".join(current).strip()
         if block:
-            sections.append(block)
+            raw_sections.append(block)
+
+    merged, buffer = [], ""
+    for block in raw_sections:
+        buffer = f"{buffer}\n\n{block}" if buffer else block
+        if len(buffer) >= MIN_SECTION_CHARS:
+            merged.append(buffer)
+            buffer = ""
+    if buffer:
+        if merged:
+            merged[-1] = f"{merged[-1]}\n\n{buffer}"
+        else:
+            merged.append(buffer)
 
     final = []
-    for s in sections:
-        if len(s) < 15:
-            continue
+    for s in merged:
         if len(s) <= CHUNK_SIZE * 1.5:
             final.append(s)
         else:
@@ -297,7 +317,11 @@ def main():
     parser.add_argument("--chaos-dir", default=default_chaos)
     parser.add_argument("--notes-dir", default=default_notes)
     parser.add_argument("--csv", default=default_csv)
-    parser.add_argument("--threshold", type=float, default=0.38)
+    # BAAI/bge-large-en-v1.5 produces a much higher, more compressed cosine
+    # similarity range than MiniLM did (empirically ~0.55-0.80 rather than
+    # ~0.25-0.65), so this threshold was recalibrated against that
+    # distribution rather than reused from the MiniLM-era default.
+    parser.add_argument("--threshold", type=float, default=0.65)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit-files", type=int, default=None,
                          help="only process the first N chaos files (for prototyping)")
@@ -310,7 +334,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Embedding device: {device}")
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2", device=device)
+    ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL, device=device)
 
     target_vecs = []
     target_id_for_chunk = []
