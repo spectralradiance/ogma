@@ -1,4 +1,4 @@
-import type { AnalysisResult, AnalysisSummary, Artifact, ChaosStatus, ChatSession, ConceptsArtifact, DictionaryEntry, DictionarySearchResult, IndexStatus, Job, OutlineCache, PipelineRun, RunSummary, SystemSummary, WorkspaceFile, WorkspaceFileSummary } from './types'
+import type { AnalysisResult, AnalysisSummary, Artifact, ChaosStatus, ChatSession, ConceptsArtifact, DictionaryEntry, DictionarySearchResult, IndexStatus, Job, ModelCatalogEntry, OutlineCache, PipelineRun, RunSummary, SystemSummary, WorkspaceFile, WorkspaceFileSummary } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const DICTIONARY_API = import.meta.env.VITE_DICTIONARY_API_URL ?? 'http://127.0.0.1:3001'
@@ -69,7 +69,10 @@ export const api = {
     body: JSON.stringify({ target_count: targetCount, provider, run_id: runId || null }),
   }),
   pipelineRuns: () => request<PipelineRun[]>('/api/pipeline-runs'),
-  createPipelineRun: () => request<PipelineRun>('/api/pipeline-runs', { method: 'POST' }),
+  createPipelineRun: (generationModel: string, embeddingModel: string) => request<PipelineRun>('/api/pipeline-runs', {
+    method: 'POST',
+    body: JSON.stringify({ generation_model: generationModel, embedding_model: embeddingModel }),
+  }),
   chatSessions: () => request<ChatSession[]>('/api/chat/sessions'),
   chatSession: (sessionId: string) => request<ChatSession>(`/api/chat/${encodeURIComponent(sessionId)}`),
   clearChatSession: (sessionId: string) => request<{ status: string }>(`/api/chat/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }),
@@ -77,6 +80,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId, message, provider, model_name: modelName || null }),
   }),
+  models: () => request<ModelCatalogEntry[]>('/api/models'),
+  addModel: (entry: { value: string; label: string; kind: 'generation' | 'embedding'; provider?: 'local' | 'claude' }) =>
+    request<ModelCatalogEntry[]>('/api/models', { method: 'POST', body: JSON.stringify(entry) }),
+  removeModel: (value: string) => request<ModelCatalogEntry[]>(`/api/models/${encodeURIComponent(value)}`, { method: 'DELETE' }),
+  downloadModel: (value: string) => request<Job>('/api/models/download', { method: 'POST', body: JSON.stringify({ value }) }),
   eventsUrl: (jobId: string) => `${API}/api/jobs/${jobId}/events`,
   workspaceFiles: () => request<WorkspaceFileSummary[]>('/api/workspace/files'),
   workspaceFile: (path: string) => request<WorkspaceFile>(`/api/workspace/file?path=${encodeURIComponent(path)}`),

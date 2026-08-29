@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import api.main as api_main
 from api.main import app, manager
 from api.jobs import Job, JobManager
 from api.schemas import AnalysisRequest
@@ -215,6 +216,52 @@ def test_pipeline_run_can_be_created_and_listed() -> None:
         listed = client.get("/api/pipeline-runs")
         assert listed.status_code == 200
         assert isinstance(listed.json(), list)
+
+
+def test_model_catalog_lists_builtins_and_supports_custom_additions(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "INTERMEDIARY_DIR", tmp_path)
+    with TestClient(app) as client:
+        builtin = client.get("/api/models")
+        assert builtin.status_code == 200
+        values = {entry["value"] for entry in builtin.json()}
+        assert "Qwen/Qwen2.5-7B-Instruct" in values
+        assert "BAAI/bge-large-en-v1.5" in values
+        assert all(entry["builtin"] for entry in builtin.json())
+
+        added = client.post("/api/models", json={
+            "value": "intfloat/e5-large-v2", "label": "E5 large", "kind": "embedding", "provider": "local",
+        })
+        assert added.status_code == 201
+        custom_entry = next(entry for entry in added.json() if entry["value"] == "intfloat/e5-large-v2")
+        assert custom_entry["builtin"] is False
+        assert custom_entry["downloaded"] is False
+
+        duplicate = client.post("/api/models", json={
+            "value": "intfloat/e5-large-v2", "label": "dup", "kind": "embedding", "provider": "local",
+        })
+        assert duplicate.status_code == 409
+
+        builtin_conflict = client.post("/api/models", json={
+            "value": "BAAI/bge-large-en-v1.5", "label": "dup", "kind": "embedding", "provider": "local",
+        })
+        assert builtin_conflict.status_code == 409
+
+        removed = client.delete("/api/models/intfloat%2Fe5-large-v2")
+        assert removed.status_code == 200
+        assert "intfloat/e5-large-v2" not in {entry["value"] for entry in removed.json()}
+
+        cannot_remove_builtin = client.delete("/api/models/BAAI%2Fbge-large-en-v1.5")
+        assert cannot_remove_builtin.status_code == 409
+
+
+def test_download_model_rejects_unknown_and_claude_models(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "INTERMEDIARY_DIR", tmp_path)
+    with TestClient(app) as client:
+        unknown = client.post("/api/models/download", json={"value": "not/a-real-model"})
+        assert unknown.status_code == 404
+
+        claude_model = client.post("/api/models/download", json={"value": "claude-opus-5"})
+        assert claude_model.status_code == 422
 
 
 def test_active_job_prefers_running_over_queued() -> None:

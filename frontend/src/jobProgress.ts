@@ -117,6 +117,11 @@ const INDEX_MILESTONES: [RegExp, number][] = [
   [/^Done\./, 95],
 ]
 
+const DOWNLOAD_MODEL_MILESTONES: [RegExp, number][] = [
+  [/Downloading .* into the local Hugging Face cache/, 10],
+  [/^Done\. Cached at:/, 95],
+]
+
 /** Single entry point: every job kind's progress, from raw process logs, in one place. */
 export function progressFor(job: Job): JobProgress {
   switch (job.kind) {
@@ -131,6 +136,8 @@ export function progressFor(job: Job): JobProgress {
       return milestoneProgress(job, 'Organizing chaos', 'Organize chaos queued', ORGANIZE_CHAOS_MILESTONES)
     case 'index':
       return milestoneProgress(job, 'Indexing notes', 'Indexing queued', INDEX_MILESTONES)
+    case 'download_model':
+      return milestoneProgress(job, 'Downloading model', 'Download queued', DOWNLOAD_MODEL_MILESTONES)
     case 'chat':
       if (job.status === 'completed') return { percent: 100, label: 'Reply ready', detail: 'Complete' }
       if (job.status === 'queued') return { percent: 0, label: 'Waiting for a reply', detail: 'Waiting for the background worker' }

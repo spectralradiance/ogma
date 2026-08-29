@@ -1,25 +1,22 @@
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpenText, Database, FileText, LoaderCircle, MessageSquare, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal, Workflow } from 'lucide-react'
+import { Activity, BookOpenText, Database, FileText, LoaderCircle, MessageSquare, Network, PencilLine, Play, RefreshCw, Search, Settings, Square, Terminal, Workflow } from 'lucide-react'
 import { api } from './api'
 import { JobBanner } from './JobBanner'
 import type { Artifact, Job, RunSummary } from './types'
 import { useJobEvents } from './useJobEvents'
 import './App.css'
 
-type View = 'pipeline' | 'workspace' | 'editor' | 'analysis' | 'chat' | 'jobs'
-// Curated rather than free-text: an unloadable model name only surfaces as a
-// failure deep in a background job, so keep the picker to models known to work.
+type View = 'pipeline' | 'workspace' | 'editor' | 'analysis' | 'chat' | 'jobs' | 'settings'
+// Fallbacks while /api/models is loading (or for a server too old to have it):
+// the same curated lists this used to hardcode permanently. The Settings page
+// now owns the real catalog, including any models added there.
 const WRITER_MODELS = [
   { value: 'Qwen/Qwen2.5-7B-Instruct', label: 'Local GPU · Qwen2.5 7B' },
   { value: 'Qwen/Qwen2.5-14B-Instruct', label: 'Local GPU · Qwen2.5 14B' },
   { value: 'claude-opus-5', label: 'Claude API · Opus 5' },
   { value: 'claude-sonnet-5', label: 'Claude API · Sonnet 5' },
 ]
-// Analysis, organize_chaos, and indexing all embed their own working set
-// fresh, but the index's copy is shared and durable — changing it only takes
-// effect for organize_chaos/analysis immediately; the index itself needs an
-// explicit reindex before retrieval actually uses the new model.
 const EMBEDDING_MODELS = [
   { value: 'BAAI/bge-large-en-v1.5', label: 'BGE large · best quality' },
   { value: 'BAAI/bge-base-en-v1.5', label: 'BGE base · faster' },
@@ -31,6 +28,7 @@ const PipelineView = lazy(() => import('./PipelineView').then((module) => ({ def
 const AnalysisView = lazy(() => import('./AnalysisView').then((module) => ({ default: module.AnalysisView })))
 const ChatView = lazy(() => import('./ChatView').then((module) => ({ default: module.ChatView })))
 const WorkspaceEditor = lazy(() => import('./editor/WorkspaceEditor').then((module) => ({ default: module.WorkspaceEditor })))
+const SettingsView = lazy(() => import('./SettingsView').then((module) => ({ default: module.SettingsView })))
 
 const formatDate = (value?: string | null) => value
   ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
@@ -59,6 +57,15 @@ function App() {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 5000 })
   const jobs = useQuery({ queryKey: ['jobs'], queryFn: api.jobs, refetchInterval: 3000 })
   const caches = useQuery({ queryKey: ['caches', system], queryFn: () => api.caches(system) })
+  // The Settings page manages this catalog; everywhere else just reads it,
+  // falling back to the old hardcoded lists until it loads at least once.
+  const modelsQuery = useQuery({ queryKey: ['models'], queryFn: api.models, refetchInterval: 10000 })
+  const writerModelOptions = modelsQuery.data
+    ? modelsQuery.data.filter((entry) => entry.kind === 'generation').map((entry) => ({ value: entry.value, label: entry.label }))
+    : WRITER_MODELS
+  const embeddingModelOptions = modelsQuery.data
+    ? modelsQuery.data.filter((entry) => entry.kind === 'embedding').map((entry) => ({ value: entry.value, label: entry.label }))
+    : EMBEDDING_MODELS
 
   const track = (job: Job) => {
     // Opening the drawer immediately gives queued work visible feedback while
@@ -106,19 +113,20 @@ function App() {
         <button className={view === 'analysis' ? 'active' : ''} onClick={() => setView('analysis')}><Network /> Analysis</button>
         <button className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}><MessageSquare /> Chat</button>
         <button className={view === 'jobs' ? 'active' : ''} onClick={() => setView('jobs')}><Terminal /> Job console</button>
+        <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}><Settings /> Settings</button>
       </nav>
       <div className="sidebar-foot"><span className={`status-dot ${index.data?.available ? 'online' : ''}`} />{index.data?.available ? 'Index online' : 'Index unavailable'}</div>
     </aside>
 
     <main className={view === 'editor' ? 'editor-main' : ''}>
       <header className="topbar">
-        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'pipeline' ? 'Pipeline overview' : view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'chat' ? 'Notes chat' : 'Background jobs'}</h1></div>
+        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'pipeline' ? 'Pipeline overview' : view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'chat' ? 'Notes chat' : view === 'settings' ? 'Settings' : 'Background jobs'}</h1></div>
         {view === 'workspace' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
       </header>
 
       {view === 'pipeline' && <Suspense fallback={<section className="panel analysis-empty">Loading pipeline...</section>}><PipelineView
         jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} onNavigate={setView}
-        writerModels={WRITER_MODELS} embeddingModels={EMBEDDING_MODELS}
+        writerModels={writerModelOptions} embeddingModels={embeddingModelOptions}
         modelName={modelName} onModelNameChange={setModelName}
         embeddingModel={embeddingModel} onEmbeddingModelChange={setEmbeddingModel}
         onOpenArtifact={openArtifactByIds}
@@ -134,7 +142,7 @@ function App() {
           <div className="panel controls-panel">
             <div className="panel-title"><div><p className="eyebrow">Pipeline</p><h2>Build a text</h2></div><button className="icon-button" title="Refresh" onClick={() => void queryClient.invalidateQueries()}><RefreshCw /></button></div>
             <label>Source text<select value={system} onChange={(event) => { setSystem(event.target.value); setCachePath('') }}>{systems.data?.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
-            <label>Writer<select value={modelName} onChange={(event) => setModelName(event.target.value)}>{WRITER_MODELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label>Writer<select value={modelName} onChange={(event) => setModelName(event.target.value)}>{writerModelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label>Writing plan<select value={cachePath} onChange={(event) => setCachePath(event.target.value)}><option value="">Regenerate from indexed notes</option>{caches.data?.map((cache) => <option key={cache.path} value={cache.path}>{formatDate(cache.modified_at)} · {cache.sections} sections</option>)}</select></label>
             <div className="action-stack"><button onClick={() => outlineMutation.mutate()}><Play /> Generate outline</button><button className="primary" onClick={() => manuscriptMutation.mutate(undefined)}><BookOpenText /> Outline + manuscript</button></div>
             <div className="divider" />
@@ -144,9 +152,10 @@ function App() {
         </section>
       </>}
       {view === 'editor' && <Suspense fallback={<section className="panel analysis-empty">Loading editor...</section>}><WorkspaceEditor /></Suspense>}
-      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} embeddingModels={EMBEDDING_MODELS} embeddingModel={embeddingModel} onEmbeddingModelChange={setEmbeddingModel} /></Suspense>}
+      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} embeddingModels={embeddingModelOptions} embeddingModel={embeddingModel} onEmbeddingModelChange={setEmbeddingModel} /></Suspense>}
       {view === 'chat' && <Suspense fallback={<section className="panel analysis-empty">Loading chat...</section>}><ChatView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} /></Suspense>}
       {view === 'jobs' && <section className="panel full-panel"><JobTable jobs={jobs.data ?? []} onSelect={(job) => setActiveJobId(job.id)} /></section>}
+      {view === 'settings' && <Suspense fallback={<section className="panel analysis-empty">Loading settings...</section>}><SettingsView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} onCancel={cancelMutation.mutate} /></Suspense>}
     </main>
 
     {activeJobId && <aside className="drawer job-drawer"><div className="drawer-head"><div><p className="eyebrow">Live process</p><h2>{activeJob?.kind ?? 'Queued job'}</h2></div><button className="icon-button" onClick={() => setActiveJobId(null)}>×</button></div><div className={`job-state ${activeJob?.status ?? 'queued'}`}>{activeJob?.status === 'running' && <LoaderCircle className="spin" />}{activeJob?.status ?? 'connecting'}</div><pre>{activeJob?.logs.join('\n') || 'Waiting for output...'}</pre>{activeJob?.status === 'running' && <button className="danger" onClick={() => cancelMutation.mutate(activeJob.id)}><Square /> Stop job</button>}</aside>}

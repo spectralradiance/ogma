@@ -32,7 +32,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 
 export interface Job {
   id: string
-  kind: 'index' | 'organize_chaos' | 'outline' | 'manuscript' | 'analysis' | 'concepts' | 'chat'
+  kind: 'index' | 'organize_chaos' | 'outline' | 'manuscript' | 'analysis' | 'concepts' | 'chat' | 'download_model'
   status: JobStatus
   created_at: string
   started_at: string | null
@@ -164,4 +164,15 @@ export interface PipelineRun {
   run_id: string
   created_at: string
   steps: PipelineStepFiles[]
+  generation_model: string | null
+  embedding_model: string | null
+}
+
+export interface ModelCatalogEntry {
+  value: string
+  label: string
+  kind: 'generation' | 'embedding'
+  provider: 'local' | 'claude'
+  builtin: boolean
+  downloaded: boolean
 }

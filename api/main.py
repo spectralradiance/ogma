@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
 import paths as data_paths  # noqa: E402 - needs code/ on sys.path first
 
 from api.jobs import JobManager
+from api import model_catalog
 from api.schemas import (
+    AddModelRequest,
     AnalysisRequest,
     AnalysisSummary,
     ArtifactResponse,
@@ -34,10 +36,13 @@ from api.schemas import (
     ChatSession,
     ConceptsArtifact,
     ConceptsRequest,
+    CreatePipelineRunRequest,
+    DownloadModelRequest,
     IndexRequest,
     IndexStatus,
     JobResponse,
     ManuscriptRequest,
+    ModelCatalogEntry,
     OrganizeChaosRequest,
     OutlineCache,
     OutlineRequest,
@@ -586,8 +591,23 @@ def discover_run_ids() -> list[str]:
     return sorted(ids, reverse=True)
 
 
+def run_config_path(run_id: str) -> Path:
+    return OUTPUT_DIR / run_id / "run_config.json"
+
+
+def read_run_config(run_id: str) -> dict:
+    path = run_config_path(run_id)
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def pipeline_run_summary(run_id: str) -> PipelineRun:
     created = run_created_at(run_id) or datetime.now().astimezone()
+    run_config = read_run_config(run_id)
     steps = []
 
     manifest_path = OUTPUT_DIR / run_id / "organize-chaos" / "manifest.json"
@@ -645,7 +665,13 @@ def pipeline_run_summary(run_id: str) -> PipelineRun:
         if files:
             steps.append(PipelineStepFiles(step=f"write:{slug}", label=f"Write · {system}", done=manuscript.is_file(), files=files))
 
-    return PipelineRun(run_id=run_id, created_at=created, steps=steps)
+    return PipelineRun(
+        run_id=run_id,
+        created_at=created,
+        steps=steps,
+        generation_model=run_config.get("generation_model"),
+        embedding_model=run_config.get("embedding_model"),
+    )
 
 
 @app.get("/api/pipeline-runs", response_model=list[PipelineRun])
@@ -654,8 +680,63 @@ async def pipeline_runs() -> list[PipelineRun]:
 
 
 @app.post("/api/pipeline-runs", response_model=PipelineRun, status_code=201)
-async def create_pipeline_run() -> PipelineRun:
-    return pipeline_run_summary(new_run_id())
+async def create_pipeline_run(request: CreatePipelineRunRequest | None = None) -> PipelineRun:
+    request = request or CreatePipelineRunRequest()
+    run_id = new_run_id()
+    # Models are fixed at run creation and never touched again, so every step
+    # triggered under this run_id keeps using the same generation/embedding
+    # model regardless of what the picker elsewhere in the UI is later set to.
+    path = run_config_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "generation_model": request.generation_model,
+            "embedding_model": request.embedding_model,
+        }, indent=2),
+        encoding="utf-8",
+    )
+    return pipeline_run_summary(run_id)
+
+
+@app.get("/api/models", response_model=list[ModelCatalogEntry])
+async def list_models() -> list[dict]:
+    return model_catalog.full_catalog(INTERMEDIARY_DIR)
+
+
+@app.post("/api/models", response_model=list[ModelCatalogEntry], status_code=201)
+async def add_model(request: AddModelRequest) -> list[dict]:
+    if request.value in model_catalog.BUILTIN_VALUES:
+        raise HTTPException(status_code=409, detail=f"{request.value} is already a built-in model")
+    custom = model_catalog.load_custom_models(INTERMEDIARY_DIR)
+    if any(entry["value"] == request.value for entry in custom):
+        raise HTTPException(status_code=409, detail=f"{request.value} was already added")
+    custom.append(request.model_dump())
+    model_catalog.save_custom_models(INTERMEDIARY_DIR, custom)
+    return model_catalog.full_catalog(INTERMEDIARY_DIR)
+
+
+@app.delete("/api/models/{value:path}", response_model=list[ModelCatalogEntry])
+async def remove_model(value: str) -> list[dict]:
+    if value in model_catalog.BUILTIN_VALUES:
+        raise HTTPException(status_code=409, detail="Built-in models can't be removed")
+    custom = model_catalog.load_custom_models(INTERMEDIARY_DIR)
+    remaining = [entry for entry in custom if entry["value"] != value]
+    if len(remaining) == len(custom):
+        raise HTTPException(status_code=404, detail=f"{value} was not found in the custom catalog")
+    model_catalog.save_custom_models(INTERMEDIARY_DIR, remaining)
+    return model_catalog.full_catalog(INTERMEDIARY_DIR)
+
+
+@app.post("/api/models/download", response_model=JobResponse, status_code=202)
+async def download_model(request: DownloadModelRequest) -> JobResponse:
+    catalog = {entry["value"]: entry for entry in model_catalog.full_catalog(INTERMEDIARY_DIR)}
+    entry = catalog.get(request.value)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"{request.value} is not in the model catalog")
+    if entry["provider"] != "local":
+        raise HTTPException(status_code=422, detail="Only local Hugging Face models can be pre-downloaded")
+    arguments = [str(CODE_DIR / "download_model.py"), "--model-name", request.value]
+    return await manager.submit("download_model", arguments)
 
 
 def chat_session_path(session_id: str) -> Path:

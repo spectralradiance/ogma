@@ -12,6 +12,8 @@ const formatDate = (value?: string | null) => value
   ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   : 'Never'
 const RUN_STORAGE_KEY = 'ogma-pipeline-run'
+const labelFor = (options: ModelOption[], value: string | null | undefined) =>
+  options.find((option) => option.value === value)?.label ?? value ?? 'Unknown'
 
 /** A query's stat line: still loading, failed (with a way to say so), or resolved. */
 function queryStat<T>(query: { data?: T; isError: boolean }, render: (data: T) => string, emptyMessage?: string): string {
@@ -57,7 +59,6 @@ export function PipelineView({ jobs, onTrack, onOpenJob, onNavigate, writerModel
   onOpenArtifact: (runId: string, system: string, kind: Artifact['kind']) => void
 }) {
   const queryClient = useQueryClient()
-  const provider = modelName.toLowerCase().startsWith('claude') ? 'claude' : 'local'
   const [runId, setRunId] = useState<string | null>(() => localStorage.getItem(RUN_STORAGE_KEY))
 
   useEffect(() => {
@@ -80,17 +81,22 @@ export function PipelineView({ jobs, onTrack, onOpenJob, onNavigate, writerModel
     ?? (pendingRun?.run_id === runId ? pendingRun : null)
   const stepFor = (step: string) => currentRun?.steps.find((entry) => entry.step === step)
   const stepDone = (step: string) => stepFor(step)?.done ?? false
+  // Older runs created before models were locked at run-creation time have no
+  // stored choice — fall back to the picker's current selection for those only.
+  const runGenerationModel = currentRun?.generation_model ?? modelName
+  const runEmbeddingModel = currentRun?.embedding_model ?? embeddingModel
+  const provider = runGenerationModel.toLowerCase().startsWith('claude') ? 'claude' : 'local'
 
   const createRun = useMutation({
-    mutationFn: api.createPipelineRun,
+    mutationFn: (vars: { generationModel: string; embeddingModel: string }) => api.createPipelineRun(vars.generationModel, vars.embeddingModel),
     onSuccess: (run) => { setRunId(run.run_id); setPendingRun(run); void queryClient.invalidateQueries({ queryKey: ['pipeline-runs'] }) },
   })
   const organizeChaos = useMutation({ mutationFn: () => api.startOrganizeChaos(false, runId ?? undefined), onSuccess: onTrack })
   const reindex = useMutation({ mutationFn: api.startIndex, onSuccess: onTrack })
-  const analyze = useMutation({ mutationFn: () => api.startAnalysis(embeddingModel, runId ?? undefined), onSuccess: onTrack })
+  const analyze = useMutation({ mutationFn: () => api.startAnalysis(runEmbeddingModel, runId ?? undefined), onSuccess: onTrack })
   const generateConcepts = useMutation({ mutationFn: () => api.startConcepts(200, provider, runId ?? undefined), onSuccess: onTrack })
-  const startOutline = useMutation({ mutationFn: (system: string) => api.startOutline(system, undefined, provider, modelName, runId ?? undefined), onSuccess: onTrack })
-  const startManuscript = useMutation({ mutationFn: (system: string) => api.startManuscript(system, runId ?? undefined, undefined, provider, modelName), onSuccess: onTrack })
+  const startOutline = useMutation({ mutationFn: (system: string) => api.startOutline(system, undefined, provider, runGenerationModel, runId ?? undefined), onSuccess: onTrack })
+  const startManuscript = useMutation({ mutationFn: (system: string) => api.startManuscript(system, runId ?? undefined, undefined, provider, runGenerationModel), onSuccess: onTrack })
   const cancel = useMutation({
     mutationFn: api.cancelJob,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['jobs'] }),
@@ -108,7 +114,13 @@ export function PipelineView({ jobs, onTrack, onOpenJob, onNavigate, writerModel
       runs={runsQuery.data ?? []}
       loading={runsQuery.isLoading}
       creating={createRun.isPending}
-      onCreate={() => createRun.mutate()}
+      writerModels={writerModels}
+      embeddingModels={embeddingModels}
+      modelName={modelName}
+      onModelNameChange={onModelNameChange}
+      embeddingModel={embeddingModel}
+      onEmbeddingModelChange={onEmbeddingModelChange}
+      onCreate={() => createRun.mutate({ generationModel: modelName, embeddingModel })}
       onSelect={setRunId}
     />
   }
@@ -180,10 +192,6 @@ export function PipelineView({ jobs, onTrack, onOpenJob, onNavigate, writerModel
       onChangeRun={() => setRunId(null)}
       writerModels={writerModels}
       embeddingModels={embeddingModels}
-      modelName={modelName}
-      onModelNameChange={onModelNameChange}
-      embeddingModel={embeddingModel}
-      onEmbeddingModelChange={onEmbeddingModelChange}
     />
     <ol className="pipeline-stages">
       {stages.map((stage) => {
@@ -226,10 +234,16 @@ export function PipelineView({ jobs, onTrack, onOpenJob, onNavigate, writerModel
   </section>
 }
 
-function RunPicker({ runs, loading, creating, onCreate, onSelect }: {
+function RunPicker({ runs, loading, creating, writerModels, embeddingModels, modelName, onModelNameChange, embeddingModel, onEmbeddingModelChange, onCreate, onSelect }: {
   runs: PipelineRun[]
   loading: boolean
   creating: boolean
+  writerModels: ModelOption[]
+  embeddingModels: ModelOption[]
+  modelName: string
+  onModelNameChange: (value: string) => void
+  embeddingModel: string
+  onEmbeddingModelChange: (value: string) => void
   onCreate: () => void
   onSelect: (runId: string) => void
 }) {
@@ -238,6 +252,9 @@ function RunPicker({ runs, loading, creating, onCreate, onSelect }: {
       <p className="eyebrow">Corpus to manuscript</p>
       <h2>Start or continue a run</h2>
       <p>Every stage — organize chaos, index, analyze, concepts, write — shares one run, so output lands together and each step can build on the last.</p>
+      <p>Pick the models this run will use — they're locked in once the run starts; changing your mind means starting a new run.</p>
+      <label>Generation model<select value={modelName} onChange={(event) => onModelNameChange(event.target.value)}>{writerModels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+      <label>Embedding model<select value={embeddingModel} onChange={(event) => onEmbeddingModelChange(event.target.value)}>{embeddingModels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       <button className="primary run-create" disabled={creating} onClick={onCreate}><Plus size={15} /> {creating ? 'Starting...' : 'Start a new run'}</button>
     </div>
     <div className="panel run-list">
@@ -256,15 +273,11 @@ function RunPicker({ runs, loading, creating, onCreate, onSelect }: {
   </section>
 }
 
-function RunHeader({ run, onChangeRun, writerModels, embeddingModels, modelName, onModelNameChange, embeddingModel, onEmbeddingModelChange }: {
+function RunHeader({ run, onChangeRun, writerModels, embeddingModels }: {
   run: PipelineRun
   onChangeRun: () => void
   writerModels: ModelOption[]
   embeddingModels: ModelOption[]
-  modelName: string
-  onModelNameChange: (value: string) => void
-  embeddingModel: string
-  onEmbeddingModelChange: (value: string) => void
 }) {
   return <div className="panel pipeline-run-header">
     <div className="pipeline-run-id">
@@ -272,8 +285,14 @@ function RunHeader({ run, onChangeRun, writerModels, embeddingModels, modelName,
       <h2>{run.run_id.replace('generated', '')}</h2>
       <span>Started {formatDate(run.created_at)}</span>
     </div>
-    <label>Generation model<select value={modelName} onChange={(event) => onModelNameChange(event.target.value)}>{writerModels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-    <label>Embedding model<select value={embeddingModel} onChange={(event) => onEmbeddingModelChange(event.target.value)}>{embeddingModels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+    <div className="pipeline-run-models">
+      <span className="eyebrow">Generation model</span>
+      <strong>{labelFor(writerModels, run.generation_model)}</strong>
+    </div>
+    <div className="pipeline-run-models">
+      <span className="eyebrow">Embedding model</span>
+      <strong>{labelFor(embeddingModels, run.embedding_model)}</strong>
+    </div>
     <button className="text-button" onClick={onChangeRun}>Change run</button>
   </div>
 }

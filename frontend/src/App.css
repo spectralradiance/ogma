@@ -50,10 +50,26 @@ label { display: grid; gap: 7px; margin: 15px 0; color: #53615c; font-size: 12px
 .run-create { margin-top: 18px; }
 .run-list { margin-top: 16px; padding: 18px 0; }.run-list .panel-title { padding: 0 20px; margin-bottom: 12px; }.run-list > button { width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 12px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; text-align: left; }.run-list > button:hover { background: var(--green-soft); }.run-list > button strong { font-size: 13px; }.run-list > button span { grid-column: 1; color: var(--muted); font-size: 11px; }.run-list > button svg { grid-row: 1 / 3; color: var(--muted); width: 15px; }
 .pipeline-run-header { margin-bottom: 16px; padding: 18px 20px; display: grid; grid-template-columns: minmax(140px, 1fr) 200px 200px auto; gap: 16px; align-items: end; }.pipeline-run-header label { margin: 0; }.pipeline-run-id p.eyebrow { margin: 0; }.pipeline-run-id h2 { margin: 3px 0; font: 600 20px 'Source Serif 4', serif; }.pipeline-run-id span { color: var(--muted); font-size: 11px; }
+.pipeline-run-models { display: flex; flex-direction: column; }.pipeline-run-models strong { font-size: 13px; font-weight: 600; }
+.pipeline-intro label { display: block; margin: 12px 0 0; max-width: 320px; }
 @media (max-width: 900px) { .pipeline-run-header { grid-template-columns: 1fr 1fr; } }
 .pipeline-write-stage .pipeline-stage-stat { margin-bottom: 6px; }
 .pipeline-write-systems { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }.pipeline-write-systems > li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2, #f6f8f6); }
 .pipeline-write-system-head { display: flex; align-items: center; gap: 8px; }.pipeline-write-system-head strong { font-size: 12.5px; }
+
+/* Settings: model catalog + download management. */
+.settings-view { display: grid; gap: 14px; }
+.settings-section { padding: 20px; }.settings-section .panel-title { margin-bottom: 14px; }
+.settings-model-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.settings-model-list > li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2, #f6f8f6); }
+.settings-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; }
+.settings-model-info { display: grid; gap: 2px; min-width: 0; }.settings-model-info strong { font-size: 12.5px; }.settings-model-info code { color: var(--muted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-model-status .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; }
+.settings-model-actions { display: flex; gap: 6px; align-items: center; }.settings-model-actions .secondary { padding: 0 10px; height: 32px; font-size: 11px; }
+.settings-model-job.analysis-progress { margin-top: 10px; min-height: 0; padding: 10px 12px; background: #f4f7f4; border: 0; border-left: 3px solid var(--green); border-radius: 5px; box-shadow: none; grid-template-columns: 26px minmax(0, 1fr) auto; }.settings-model-job .progress-icon { width: 26px; height: 26px; background: transparent; }.settings-model-job .progress-icon svg { width: 15px; }.settings-model-job .progress-actions button { height: 28px; padding: 0 8px; }
+.settings-add { padding: 20px; }
+.settings-add-form { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.2fr) 200px auto; gap: 12px; align-items: end; }.settings-add-form label { margin: 0; }.settings-add-form input { height: 42px; padding: 0 11px; border: 1px solid #c9d1ca; border-radius: 5px; background: white; }.settings-add-form .primary { height: 42px; padding: 0 16px; border: 1px solid var(--green); border-radius: 5px; background: var(--green); color: white; display: flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 600; }.settings-add-form .primary:disabled { opacity: .55; }
+@media (max-width: 900px) { .settings-model-row { grid-template-columns: 1fr; justify-items: start; gap: 8px; }.settings-add-form { grid-template-columns: 1fr; } }
 .pipeline-write-actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }.pipeline-write-actions button { height: 30px; padding: 0 10px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 11px; font-weight: 600; }.pipeline-write-actions button.primary { border-color: var(--green); background: var(--green); color: white; }.pipeline-write-actions button:disabled { opacity: .55; }.pipeline-write-actions .text-button { border: 0; background: transparent; color: var(--green); font-weight: 600; }
 
 /* Local-first writing workspace */

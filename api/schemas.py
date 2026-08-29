@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 # Literal state values keep the generated OpenAPI schema and TypeScript client
 # honest about the finite set of operations the job queue understands.
-JobKind = Literal["index", "organize_chaos", "outline", "manuscript", "analysis", "concepts", "chat"]
+JobKind = Literal["index", "organize_chaos", "outline", "manuscript", "analysis", "concepts", "chat", "download_model"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -148,6 +148,33 @@ class PipelineRun(BaseModel):
     run_id: str
     created_at: datetime
     steps: list[PipelineStepFiles]
+    generation_model: str | None = None
+    embedding_model: str | None = None
+
+
+class CreatePipelineRunRequest(BaseModel):
+    generation_model: str | None = None
+    embedding_model: str | None = None
+
+
+class ModelCatalogEntry(BaseModel):
+    value: str
+    label: str
+    kind: Literal["generation", "embedding"]
+    provider: Literal["local", "claude"]
+    builtin: bool
+    downloaded: bool
+
+
+class AddModelRequest(BaseModel):
+    value: str
+    label: str
+    kind: Literal["generation", "embedding"]
+    provider: Literal["local", "claude"] = "local"
+
+
+class DownloadModelRequest(BaseModel):
+    value: str
 
 
 class ChatMessage(BaseModel):
