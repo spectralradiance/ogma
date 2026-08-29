@@ -31,6 +31,10 @@ DEFAULT_SOURCE = Path(paths.NOTES_ROOT)
 DEFAULT_OUTPUT_ROOT = ROOT / "data" / "output"
 DB_DIR = ROOT / "data" / "intermediary" / "chroma_db"
 INDEXED_ROOTS = [Path(paths.NOTES_ROOT), Path(paths.NOTION_ROOT)]
+# A single unfiltered collection.get() over the whole store trips SQLite's
+# bound-variable limit once the index has more than a few thousand chunks, so
+# fetch_pooled_embeddings pages through it in chunks of this size instead.
+INDEX_FETCH_PAGE_SIZE = 1000
 TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text", ""}
 ANALYSIS_VERSION = 3
 ZIM_METADATA = re.compile(
@@ -77,18 +81,20 @@ def fetch_pooled_embeddings(
         collection = client.get_collection(index_notes.COLLECTION_NAME)
     except Exception:
         return {}
-    if not collection.count():
+    total = collection.count()
+    if not total:
         return {}
-    stored = collection.get(include=["embeddings", "metadatas"])
     buckets: dict[tuple[str, str], list[np.ndarray]] = {}
-    for embedding, meta in zip(stored["embeddings"], stored["metadatas"]):
-        key = (meta.get("source"), meta.get("rel_path"))
-        if key not in wanted:
-            continue
-        vector = np.asarray(embedding, dtype=np.float32)
-        norm = np.linalg.norm(vector)
-        if norm > 0:
-            buckets.setdefault(key, []).append(vector / norm)
+    for offset in range(0, total, INDEX_FETCH_PAGE_SIZE):
+        stored = collection.get(limit=INDEX_FETCH_PAGE_SIZE, offset=offset, include=["embeddings", "metadatas"])
+        for embedding, meta in zip(stored["embeddings"], stored["metadatas"]):
+            key = (meta.get("source"), meta.get("rel_path"))
+            if key not in wanted:
+                continue
+            vector = np.asarray(embedding, dtype=np.float32)
+            norm = np.linalg.norm(vector)
+            if norm > 0:
+                buckets.setdefault(key, []).append(vector / norm)
     pooled: dict[tuple[str, str], np.ndarray] = {}
     for key, vectors in buckets.items():
         mean_vector = np.mean(vectors, axis=0)

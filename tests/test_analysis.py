@@ -107,3 +107,34 @@ def test_fetch_pooled_embeddings_normalizes_before_and_after_pooling(tmp_path: P
     expected = np.array([0.3, 0.9])
     expected = expected / np.linalg.norm(expected)
     assert np.allclose(vector, expected, atol=1e-5)
+
+
+def test_fetch_pooled_embeddings_pages_through_large_stores(tmp_path: Path) -> None:
+    # Regression test: a single unfiltered collection.get() over the whole
+    # store crashed with "too many SQL variables" once the index held more
+    # than a few thousand chunks. A tiny page size here exercises the same
+    # multi-page code path without needing thousands of rows in a test.
+    original_page_size = analysis.INDEX_FETCH_PAGE_SIZE
+    try:
+        analysis.INDEX_FETCH_PAGE_SIZE = 2
+        db_dir = tmp_path / "chroma_db"
+        client = analysis.chromadb.PersistentClient(path=str(db_dir))
+        collection = client.get_or_create_collection(name=analysis.index_notes.COLLECTION_NAME)
+        # Five chunks across two files, spread over three pages of two rows each.
+        collection.add(
+            ids=[f"writing-desktop/note.md::{i}" for i in range(4)] + ["writing-desktop/other.md::0"],
+            embeddings=[[1.0, 0.0]] * 4 + [[0.0, 1.0]],
+            metadatas=[{"source": "writing-desktop", "rel_path": "note.md"}] * 4
+            + [{"source": "writing-desktop", "rel_path": "other.md"}],
+            documents=[f"chunk {i}" for i in range(5)],
+        )
+
+        pooled = analysis.fetch_pooled_embeddings(
+            db_dir, {("writing-desktop", "note.md"), ("writing-desktop", "other.md")}
+        )
+
+        assert set(pooled) == {("writing-desktop", "note.md"), ("writing-desktop", "other.md")}
+        assert np.allclose(pooled[("writing-desktop", "note.md")], [1.0, 0.0], atol=1e-5)
+        assert np.allclose(pooled[("writing-desktop", "other.md")], [0.0, 1.0], atol=1e-5)
+    finally:
+        analysis.INDEX_FETCH_PAGE_SIZE = original_page_size
