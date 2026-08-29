@@ -309,6 +309,11 @@ def main() -> None:
     parser.add_argument("--max-chars", type=int, default=12000)
     parser.add_argument("--min-topic-size", type=int)
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
+    parser.add_argument(
+        "--device", choices=["auto", "cpu", "cuda"], default="auto",
+        help="Force the embedding/topic-modeling device. Useful to rule out a GPU/driver "
+             "issue by comparing a --device cpu run against the default.",
+    )
     args = parser.parse_args()
 
     source = args.source.resolve()
@@ -354,8 +359,8 @@ def main() -> None:
         raise SystemExit("At least five non-empty documents are required for topic modeling.")
 
     progress.update(f"Phase 1/6 complete: Loaded {len(records)} documents from {source}")
-    progress.update(f"Embedding model: {args.embedding_model}")
-    model = SentenceTransformer(args.embedding_model)
+    progress.update(f"Embedding model: {args.embedding_model} (device: {args.device})")
+    model = SentenceTransformer(args.embedding_model, device=None if args.device == "auto" else args.device)
     documents = [record["text"] for record in records]
 
     # Reuse the shared index's already-computed chunk embeddings when this run
