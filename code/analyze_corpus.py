@@ -14,11 +14,13 @@ import sys
 from bertopic import BERTopic
 from bertopic.representation import KeyBERTInspired
 import chromadb
+from hdbscan import HDBSCAN
 from keybert import KeyBERT
 import networkx as nx
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
+from umap import UMAP
 
 # Tests may load this file via importlib rather than running it directly,
 # which doesn't add code/ to sys.path automatically.
@@ -35,6 +37,11 @@ INDEXED_ROOTS = [Path(paths.NOTES_ROOT), Path(paths.NOTION_ROOT)]
 # bound-variable limit once the index has more than a few thousand chunks, so
 # fetch_pooled_embeddings pages through it in chunks of this size instead.
 INDEX_FETCH_PAGE_SIZE = 1000
+# UMAP/HDBSCAN default to using every CPU core with no memory cap, which can
+# saturate a desktop machine during topic modeling. index_notes.py caps
+# embedding threads the same way for the same reason (see torch.set_num_threads
+# there) — keep BERTopic's clustering step to the same discipline.
+MAX_TOPIC_MODELING_THREADS = 2
 TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text", ""}
 ANALYSIS_VERSION = 3
 ZIM_METADATA = re.compile(
@@ -53,13 +60,19 @@ DEFAULT_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 def indexed_chunk_key(abs_path: Path) -> tuple[str, str] | None:
     """Map a file to the ``(source, rel_path)`` key index_notes.py stored its
     chunks under, or None if the file isn't under a root the shared index covers.
+
+    index_notes.py stores ``rel_path`` as a raw ``os.path.relpath()`` result —
+    backslash-separated on Windows — not a posix-normalized path. Matching
+    that exactly (instead of ``Path.as_posix()``) matters: on Windows every
+    lookup would otherwise silently miss and this would fall back to encoding
+    every document instead of reusing the index.
     """
     for root in INDEXED_ROOTS:
         try:
-            rel = abs_path.relative_to(root)
+            abs_path.relative_to(root)
         except ValueError:
             continue
-        return index_notes.source_key(str(root), paths.INPUT_DIR), rel.as_posix()
+        return index_notes.source_key(str(root), paths.INPUT_DIR), os.path.relpath(str(abs_path), str(root))
     return None
 
 
@@ -413,6 +426,14 @@ def main() -> None:
     progress.update(f"Phase 4/6: Using minimum topic size {min_topic_size}")
     topic_model = BERTopic(
         embedding_model=model,
+        umap_model=UMAP(
+            n_neighbors=15, n_components=5, min_dist=0.0, metric="cosine",
+            low_memory=True, n_jobs=MAX_TOPIC_MODELING_THREADS,
+        ),
+        hdbscan_model=HDBSCAN(
+            min_cluster_size=min_topic_size, metric="euclidean", cluster_selection_method="eom",
+            prediction_data=True, core_dist_n_jobs=MAX_TOPIC_MODELING_THREADS,
+        ),
         representation_model=KeyBERTInspired(),
         min_topic_size=min_topic_size,
         calculate_probabilities=False,

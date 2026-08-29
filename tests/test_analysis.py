@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import sys
 
@@ -76,7 +77,10 @@ def test_indexed_chunk_key_maps_files_under_indexed_roots_only(tmp_path: Path) -
         analysis.INDEXED_ROOTS = [notes_root]
         analysis.paths.INPUT_DIR = str(tmp_path / "input")
 
-        assert analysis.indexed_chunk_key(notes_root / "sub" / "note.md") == ("writing-desktop", "sub/note.md")
+        # index_notes.py stores rel_path via a raw os.path.relpath() call, which
+        # uses OS-native separators (backslashes on Windows) — this must match
+        # that exactly, not a posix-normalized path, or every lookup misses.
+        assert analysis.indexed_chunk_key(notes_root / "sub" / "note.md") == ("writing-desktop", os.path.join("sub", "note.md"))
         assert analysis.indexed_chunk_key(other_root / "note.md") is None
     finally:
         analysis.INDEXED_ROOTS, analysis.paths.INPUT_DIR = original_roots, original_input_dir
