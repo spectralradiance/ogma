@@ -1,13 +1,13 @@
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpenText, Database, FileText, Library, LoaderCircle, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal, Workflow } from 'lucide-react'
+import { Activity, BookOpenText, Database, FileText, LoaderCircle, MessageSquare, Network, PencilLine, Play, RefreshCw, Search, Square, Terminal, Workflow } from 'lucide-react'
 import { api } from './api'
 import { JobBanner } from './JobBanner'
 import type { Artifact, Job, RunSummary } from './types'
 import { useJobEvents } from './useJobEvents'
 import './App.css'
 
-type View = 'pipeline' | 'workspace' | 'editor' | 'analysis' | 'runs' | 'jobs'
+type View = 'pipeline' | 'workspace' | 'editor' | 'analysis' | 'chat' | 'jobs'
 // Curated rather than free-text: an unloadable model name only surfaces as a
 // failure deep in a background job, so keep the picker to models known to work.
 const WRITER_MODELS = [
@@ -16,10 +16,20 @@ const WRITER_MODELS = [
   { value: 'claude-opus-5', label: 'Claude API · Opus 5' },
   { value: 'claude-sonnet-5', label: 'Claude API · Sonnet 5' },
 ]
+// Analysis, organize_chaos, and indexing all embed their own working set
+// fresh, but the index's copy is shared and durable — changing it only takes
+// effect for organize_chaos/analysis immediately; the index itself needs an
+// explicit reindex before retrieval actually uses the new model.
+const EMBEDDING_MODELS = [
+  { value: 'BAAI/bge-large-en-v1.5', label: 'BGE large · best quality' },
+  { value: 'BAAI/bge-base-en-v1.5', label: 'BGE base · faster' },
+  { value: 'all-MiniLM-L6-v2', label: 'MiniLM · fastest' },
+]
 // Topic charts, canvas graph, and pipeline-status dependencies are lazy so the
 // initial manuscript-workspace bundle stays small until each tab is selected.
 const PipelineView = lazy(() => import('./PipelineView').then((module) => ({ default: module.PipelineView })))
 const AnalysisView = lazy(() => import('./AnalysisView').then((module) => ({ default: module.AnalysisView })))
+const ChatView = lazy(() => import('./ChatView').then((module) => ({ default: module.ChatView })))
 const WorkspaceEditor = lazy(() => import('./editor/WorkspaceEditor').then((module) => ({ default: module.WorkspaceEditor })))
 
 const formatDate = (value?: string | null) => value
@@ -34,6 +44,7 @@ function App() {
   const [system, setSystem] = useState('Universal Metaphysics')
   const [cachePath, setCachePath] = useState('')
   const [modelName, setModelName] = useState(WRITER_MODELS[0].value)
+  const [embeddingModel, setEmbeddingModel] = useState(EMBEDDING_MODELS[0].value)
   const provider = modelName.toLowerCase().startsWith('claude') ? 'claude' : 'local'
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [submittedJob, setSubmittedJob] = useState<Job | null>(null)
@@ -82,7 +93,8 @@ function App() {
     const needle = search.toLowerCase()
     return !needle || run.system.toLowerCase().includes(needle) || run.run_id.toLowerCase().includes(needle)
   })
-  const openArtifact = async (run: RunSummary, kind: Artifact['kind']) => setArtifact(await api.artifact(run.run_id, run.system, kind))
+  const openArtifactByIds = async (runId: string, runSystem: string, kind: Artifact['kind']) => setArtifact(await api.artifact(runId, runSystem, kind))
+  const openArtifact = (run: RunSummary, kind: Artifact['kind']) => openArtifactByIds(run.run_id, run.system, kind)
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -92,7 +104,7 @@ function App() {
         <button className={view === 'workspace' ? 'active' : ''} onClick={() => setView('workspace')}><Activity /> Workspace</button>
         <button className={view === 'editor' ? 'active' : ''} onClick={() => setView('editor')}><PencilLine /> Editor</button>
         <button className={view === 'analysis' ? 'active' : ''} onClick={() => setView('analysis')}><Network /> Analysis</button>
-        <button className={view === 'runs' ? 'active' : ''} onClick={() => setView('runs')}><Library /> Run library</button>
+        <button className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}><MessageSquare /> Chat</button>
         <button className={view === 'jobs' ? 'active' : ''} onClick={() => setView('jobs')}><Terminal /> Job console</button>
       </nav>
       <div className="sidebar-foot"><span className={`status-dot ${index.data?.available ? 'online' : ''}`} />{index.data?.available ? 'Index online' : 'Index unavailable'}</div>
@@ -100,11 +112,17 @@ function App() {
 
     <main className={view === 'editor' ? 'editor-main' : ''}>
       <header className="topbar">
-        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'pipeline' ? 'Pipeline overview' : view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'runs' ? 'Generated library' : 'Background jobs'}</h1></div>
-        {view !== 'editor' && view !== 'pipeline' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
+        <div><p className="eyebrow">Local semantic workspace</p><h1>{view === 'pipeline' ? 'Pipeline overview' : view === 'workspace' ? 'Manuscript operations' : view === 'editor' ? 'Markdown editor' : view === 'analysis' ? 'Corpus intelligence' : view === 'chat' ? 'Notes chat' : 'Background jobs'}</h1></div>
+        {view === 'workspace' && <div className="search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filter runs" /></div>}
       </header>
 
-      {view === 'pipeline' && <Suspense fallback={<section className="panel analysis-empty">Loading pipeline...</section>}><PipelineView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} onNavigate={setView} /></Suspense>}
+      {view === 'pipeline' && <Suspense fallback={<section className="panel analysis-empty">Loading pipeline...</section>}><PipelineView
+        jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} onNavigate={setView}
+        writerModels={WRITER_MODELS} embeddingModels={EMBEDDING_MODELS}
+        modelName={modelName} onModelNameChange={setModelName}
+        embeddingModel={embeddingModel} onEmbeddingModelChange={setEmbeddingModel}
+        onOpenArtifact={openArtifactByIds}
+      /></Suspense>}
       {view === 'workspace' && <>
         <section className="metrics">
           <div><Database /><span>Indexed chunks</span><strong>{index.data?.total_chunks?.toLocaleString() ?? '24,818'}</strong><small>{formatDate(index.data?.completed_at ?? index.data?.database_modified_at)}</small></div>
@@ -122,12 +140,12 @@ function App() {
             <div className="divider" />
             <div className="index-row"><div><strong>Source index</strong><span>{index.data?.available ? 'Ready for retrieval' : 'Needs indexing'}</span></div><button className="secondary" onClick={() => indexMutation.mutate()}><Database /> Reindex notes</button></div>
           </div>
-          <div className="panel recent-panel"><div className="panel-title"><div><p className="eyebrow">Recent</p><h2>Generation runs</h2></div><button className="text-button" onClick={() => setView('runs')}>View all</button></div><RunTable runs={filteredRuns.slice(0, 5)} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></div>
+          <div className="panel recent-panel"><div className="panel-title"><div><p className="eyebrow">Recent</p><h2>Generation runs</h2></div><button className="text-button" onClick={() => setView('pipeline')}>View all</button></div><RunTable runs={filteredRuns.slice(0, 5)} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></div>
         </section>
       </>}
       {view === 'editor' && <Suspense fallback={<section className="panel analysis-empty">Loading editor...</section>}><WorkspaceEditor /></Suspense>}
-      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} /></Suspense>}
-      {view === 'runs' && <section className="panel full-panel"><RunTable runs={filteredRuns} onArtifact={openArtifact} onContinue={(run) => { setSystem(run.system); manuscriptMutation.mutate(run) }} /></section>}
+      {view === 'analysis' && <Suspense fallback={<section className="panel analysis-empty">Loading analysis tools...</section>}><AnalysisView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} embeddingModels={EMBEDDING_MODELS} embeddingModel={embeddingModel} onEmbeddingModelChange={setEmbeddingModel} /></Suspense>}
+      {view === 'chat' && <Suspense fallback={<section className="panel analysis-empty">Loading chat...</section>}><ChatView jobs={jobs.data ?? []} onTrack={track} onOpenJob={setActiveJobId} /></Suspense>}
       {view === 'jobs' && <section className="panel full-panel"><JobTable jobs={jobs.data ?? []} onSelect={(job) => setActiveJobId(job.id)} /></section>}
     </main>
 

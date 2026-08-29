@@ -131,5 +131,10 @@ export function progressFor(job: Job): JobProgress {
       return milestoneProgress(job, 'Organizing chaos', 'Organize chaos queued', ORGANIZE_CHAOS_MILESTONES)
     case 'index':
       return milestoneProgress(job, 'Indexing notes', 'Indexing queued', INDEX_MILESTONES)
+    case 'chat':
+      if (job.status === 'completed') return { percent: 100, label: 'Reply ready', detail: 'Complete' }
+      if (job.status === 'queued') return { percent: 0, label: 'Waiting for a reply', detail: 'Waiting for the background worker' }
+      if (job.status === 'failed' || job.status === 'cancelled') return { percent: 100, label: job.status === 'failed' ? 'Failed' : 'Cancelled', detail: job.error ?? job.logs.at(-1) ?? 'No further detail' }
+      return { percent: 50, label: 'Thinking...', detail: job.logs.at(-1) ?? 'Generating a reply' }
   }
 }

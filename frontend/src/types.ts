@@ -32,7 +32,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 
 export interface Job {
   id: string
-  kind: 'index' | 'organize_chaos' | 'outline' | 'manuscript' | 'analysis' | 'concepts'
+  kind: 'index' | 'organize_chaos' | 'outline' | 'manuscript' | 'analysis' | 'concepts' | 'chat'
   status: JobStatus
   created_at: string
   started_at: string | null
@@ -139,4 +139,29 @@ export interface DictionarySearchResult {
   word: string
   pos: string | null
   gloss: string
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatSession {
+  session_id: string
+  updated_at: string | null
+  messages: ChatMessage[]
+}
+
+export interface PipelineStepFiles {
+  step: string
+  label: string
+  done: boolean
+  detail: string | null
+  files: string[]
+}
+
+export interface PipelineRun {
+  run_id: string
+  created_at: string
+  steps: PipelineStepFiles[]
 }

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 # Literal state values keep the generated OpenAPI schema and TypeScript client
 # honest about the finite set of operations the job queue understands.
-JobKind = Literal["index", "organize_chaos", "outline", "manuscript", "analysis", "concepts"]
+JobKind = Literal["index", "organize_chaos", "outline", "manuscript", "analysis", "concepts", "chat"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -75,6 +75,7 @@ class IndexRequest(BaseModel):
 class OrganizeChaosRequest(BaseModel):
     dry_run: bool = False
     threshold: float | None = Field(default=None, gt=0, le=1)
+    run_id: str | None = None
 
 
 class ChaosStatus(BaseModel):
@@ -85,6 +86,7 @@ class ChaosStatus(BaseModel):
 
 class OutlineRequest(BaseModel):
     system: str
+    run_id: str | None = None
     cache_path: str | None = None
     regenerate: bool = False
     provider: Literal["local", "claude"] | None = None
@@ -105,6 +107,7 @@ class ManuscriptRequest(BaseModel):
 
 class AnalysisRequest(BaseModel):
     source: str | None = None
+    run_id: str | None = None
     max_chars: int = Field(default=12000, ge=500, le=100000)
     min_topic_size: int | None = Field(default=None, ge=2, le=1000)
     embedding_model: str | None = None
@@ -125,11 +128,46 @@ class ConceptsRequest(BaseModel):
     provider: Literal["local", "claude"] | None = None
     extract_model_name: str | None = None
     systems: list[str] | None = None
+    run_id: str | None = None
 
 
 class ConceptsArtifact(BaseModel):
     content: str
     modified_at: datetime | None = None
+
+
+class PipelineStepFiles(BaseModel):
+    step: str
+    label: str
+    done: bool
+    detail: str | None = None
+    files: list[str] = Field(default_factory=list)
+
+
+class PipelineRun(BaseModel):
+    run_id: str
+    created_at: datetime
+    steps: list[PipelineStepFiles]
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatSession(BaseModel):
+    session_id: str
+    updated_at: datetime | None = None
+    messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
+    provider: Literal["local", "claude"] | None = None
+    model_name: str | None = None
+    top_k: int | None = None
+    no_rag: bool = False
 
 
 class JobResponse(BaseModel):

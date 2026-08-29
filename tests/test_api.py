@@ -149,7 +149,9 @@ def test_organize_chaos_status_and_submission_reuses_active_job() -> None:
 
 def test_concepts_artifact_missing_and_submission_reuses_active_job() -> None:
     with TestClient(app) as client:
-        missing = client.get("/api/concepts")
+        no_run = client.get("/api/concepts")
+        assert no_run.status_code == 422
+        missing = client.get("/api/concepts", params={"run_id": "generated202601010000"})
         assert missing.status_code == 404
 
     active = Job(
@@ -167,6 +169,52 @@ def test_concepts_artifact_missing_and_submission_reuses_active_job() -> None:
         assert response.json()["id"] == active.id
     finally:
         manager.jobs.pop(active.id, None)
+
+
+def test_chat_session_lifecycle() -> None:
+    with TestClient(app) as client:
+        empty = client.get("/api/chat/regression-test-session")
+        assert empty.status_code == 200
+        assert empty.json()["messages"] == []
+
+        cleared = client.delete("/api/chat/regression-test-session")
+        assert cleared.status_code == 200
+
+        invalid = client.get("/api/chat/bad.session.id")
+        assert invalid.status_code == 422
+
+
+def test_chat_submission_reuses_active_job_for_same_session() -> None:
+    active = Job(
+        id="existing-chat",
+        kind="chat",
+        command=[],
+        created_at=datetime.now().astimezone(),
+        status="running",
+        system="session-a",
+    )
+    manager.jobs[active.id] = active
+    try:
+        with TestClient(app) as client:
+            same_session = client.post("/api/chat", json={"session_id": "session-a", "message": "hi"})
+            assert same_session.status_code == 202
+            assert same_session.json()["id"] == active.id
+    finally:
+        manager.jobs.pop(active.id, None)
+
+
+def test_pipeline_run_can_be_created_and_listed() -> None:
+    with TestClient(app) as client:
+        created = client.post("/api/pipeline-runs")
+        assert created.status_code == 201
+        body = created.json()
+        assert body["run_id"].startswith("generated")
+        assert isinstance(body["steps"], list)
+        assert {step["step"] for step in body["steps"]} >= {"organize_chaos", "index", "analysis", "concepts"}
+
+        listed = client.get("/api/pipeline-runs")
+        assert listed.status_code == 200
+        assert isinstance(listed.json(), list)
 
 
 def test_active_job_prefers_running_over_queued() -> None:

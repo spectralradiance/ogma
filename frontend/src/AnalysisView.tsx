@@ -10,14 +10,6 @@ import type { AnalysisResult, Job } from './types'
 import { useJobEvents } from './useJobEvents'
 
 const exportMetadataTerm = /(?:^|\s)(?:zim|wiki format|text zim wiki)(?:\s|$)/i
-// Analysis embeds its own working set fresh each run (it never touches the
-// ChromaDB index), so unlike the index's embedding model this one is a free
-// per-run choice with no downstream consistency requirement.
-const ANALYSIS_MODELS = [
-  { value: 'BAAI/bge-large-en-v1.5', label: 'BGE large · best quality' },
-  { value: 'BAAI/bge-base-en-v1.5', label: 'BGE base · faster' },
-  { value: 'all-MiniLM-L6-v2', label: 'MiniLM · fastest' },
-]
 
 function legacyTopicLabel(name: string) {
   const generic = new Set(['self', 'thing', 'things', 'world', 'write', 'writing'])
@@ -30,10 +22,16 @@ function legacyTopicLabel(name: string) {
   }).slice(0, 3).map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' / ')
 }
 
-export function AnalysisView({ jobs, onTrack, onOpenJob }: { jobs: Job[]; onTrack: (job: Job) => void; onOpenJob: (jobId: string) => void }) {
+export function AnalysisView({ jobs, onTrack, onOpenJob, embeddingModels, embeddingModel, onEmbeddingModelChange }: {
+  jobs: Job[]
+  onTrack: (job: Job) => void
+  onOpenJob: (jobId: string) => void
+  embeddingModels: { value: string; label: string }[]
+  embeddingModel: string
+  onEmbeddingModelChange: (value: string) => void
+}) {
   const queryClient = useQueryClient()
   const [selectedRun, setSelectedRun] = useState<string | null>(null)
-  const [embeddingModel, setEmbeddingModel] = useState(ANALYSIS_MODELS[0].value)
   // Defer loading a potentially large graph payload so selecting a history row
   // remains responsive while React transitions to the new visualization.
   const deferredRun = useDeferredValue(selectedRun)
@@ -68,7 +66,7 @@ export function AnalysisView({ jobs, onTrack, onOpenJob }: { jobs: Job[]; onTrac
   return <>
     <section className="analysis-toolbar panel">
       <div><p className="eyebrow">BERTopic + KeyBERT</p><h2>Corpus analysis</h2><span>Analyze every eligible note across the complete directory tree.</span>{start.error && <strong className="request-error">{start.error.message}</strong>}</div>
-      <label>Embeddings<select value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)}>{ANALYSIS_MODELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+      <label>Embeddings<select value={embeddingModel} onChange={(event) => onEmbeddingModelChange(event.target.value)}>{embeddingModels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       <button className="primary-command" onClick={() => start.mutate()} disabled={start.isPending || Boolean(activeJob)}><Play /> {start.isPending ? 'Queueing...' : activeJob ? 'Analysis running' : 'Run analysis'}</button>
     </section>
 

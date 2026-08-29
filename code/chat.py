@@ -116,7 +116,7 @@ def retrieve_context(collection, query: str, k: int) -> str:
 # Generation
 # ---------------------------------------------------------------------------
 
-def build_model_input(history: list[dict], user_query: str, context: str, tokenizer) -> str:
+def build_messages(history: list[dict], user_query: str, context: str) -> list[dict]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(history)
 
@@ -127,7 +127,11 @@ def build_model_input(history: list[dict], user_query: str, context: str, tokeni
             f"---\n\nQuestion: {user_query}"
         )
     messages.append({"role": "user", "content": content})
+    return messages
 
+
+def build_model_input(history: list[dict], user_query: str, context: str, tokenizer) -> str:
+    messages = build_messages(history, user_query, context)
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
@@ -153,6 +157,14 @@ def generate(model, tokenizer, text: str) -> str:
 
     input_len = inputs["input_ids"].shape[1]
     return tokenizer.decode(output[0][input_len:], skip_special_tokens=True).strip()
+
+
+def respond(provider: str, model_name: str, model, tokenizer, history: list[dict], user_query: str, context: str) -> str:
+    messages = build_messages(history, user_query, context)
+    if provider == "claude":
+        return write_book.generate_claude_text(model_name, messages, MAX_NEW_TOKENS, do_sample=True)
+    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    return generate(model, tokenizer, prompt_text)
 
 
 def _load_model(model_name: str, device: str):
@@ -205,12 +217,22 @@ def main():
     parser.add_argument("--history-file", default=HISTORY_FILE)
     parser.add_argument("--output-dir", default=OUTPUT_DIR)
     parser.add_argument("--allow-cpu", action="store_true")
+    parser.add_argument("--provider", choices=("local", "claude"), default="local")
+    parser.add_argument("--model-name", default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument(
+        "--message", default=None,
+        help="If set, answer this one message non-interactively (for the web chat) instead of "
+             "starting the terminal REPL. History is still loaded from/saved to --history-file.",
+    )
     args = parser.parse_args()
 
     HISTORY_FILE = os.path.abspath(args.history_file)
     OUTPUT_DIR = os.path.abspath(args.output_dir)
     os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    provider = "claude" if write_book.is_claude_model(args.model_name) else args.provider
+    model_name = args.model_name
 
     # Load RAG collection
     collection = None
@@ -221,20 +243,34 @@ def main():
         else:
             print("RAG disabled — ChromaDB store not found (run index_notes.py first)")
 
-    # Load model
-    base_name = "Qwen/Qwen2.5-7B-Instruct"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Loading {base_name} on {device}...")
+    # Load model (Claude has no local weights to load)
+    model = tokenizer = None
+    if provider == "claude":
+        write_book.load_project_env()
+        print(f"Using Claude API ({model_name}). Notes stay local; only retrieved excerpts are sent.")
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Loading {model_name} on {device}...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = write_book._load_model(model_name, device, allow_cpu=args.allow_cpu)
+        write_book.ensure_generation_device(model, args.allow_cpu)
+        model.eval()
+    print("Model ready.")
 
-    tokenizer = AutoTokenizer.from_pretrained(base_name, trust_remote_code=True)
-    model = write_book._load_model(base_name, device, allow_cpu=args.allow_cpu)
-    write_book.ensure_generation_device(model, args.allow_cpu)
-
-    model.eval()
-    print("Model ready. Type /quit to exit, /help for commands.\n")
-
-    # Load persistent history
     history = load_history()
+
+    if args.message is not None:
+        context = ""
+        if collection and not args.no_rag:
+            context = retrieve_context(collection, args.message, args.top_k)
+        response = respond(provider, model_name, model, tokenizer, history, args.message, context)
+        history.append({"role": "user", "content": args.message})
+        history.append({"role": "assistant", "content": response})
+        save_history(history)
+        print(json.dumps({"response": response}))
+        return
+
+    print("Type /quit to exit, /help for commands.\n")
     if history:
         print(f"Resuming session — {len(history)} messages in history. "
               "Type /clear to start fresh.\n")
@@ -281,8 +317,7 @@ def main():
             context = retrieve_context(collection, user_input, args.top_k)
 
         # Generate
-        prompt_text = build_model_input(history, user_input, context, tokenizer)
-        response = generate(model, tokenizer, prompt_text)
+        response = respond(provider, model_name, model, tokenizer, history, user_input, context)
 
         print(f"\nAssistant: {response}\n")
 
