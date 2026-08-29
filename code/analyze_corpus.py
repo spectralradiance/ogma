@@ -3,6 +3,7 @@
 import argparse
 import atexit
 from datetime import datetime
+import gc
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import sys
 
 from bertopic import BERTopic
 from bertopic.representation import KeyBERTInspired
+import chromadb
 from keybert import KeyBERT
 import networkx as nx
 import numpy as np
@@ -21,11 +23,14 @@ from sentence_transformers import SentenceTransformer
 # Tests may load this file via importlib rather than running it directly,
 # which doesn't add code/ to sys.path automatically.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import index_notes
 import paths
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = Path(paths.NOTES_ROOT)
 DEFAULT_OUTPUT_ROOT = ROOT / "data" / "output"
+DB_DIR = ROOT / "data" / "intermediary" / "chroma_db"
+INDEXED_ROOTS = [Path(paths.NOTES_ROOT), Path(paths.NOTION_ROOT)]
 TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text", ""}
 ANALYSIS_VERSION = 3
 ZIM_METADATA = re.compile(
@@ -34,10 +39,62 @@ ZIM_METADATA = re.compile(
     re.IGNORECASE,
 )
 GENERIC_TOPIC_TERMS = {"thing", "things", "world", "write", "writing", "self"}
-# Analysis embeds its own working set fresh every run and never touches the
-# ChromaDB store, so unlike index_notes.py's model this one is safe to pick
-# per run without invalidating anything else.
+# When this matches index_notes.py's model, a document's embedding is reused
+# (pooled from its chunks) from the shared ChromaDB store instead of being
+# recomputed. Picking a different embedding model here still works — it just
+# means every document gets freshly encoded instead of reusing the index.
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+
+
+def indexed_chunk_key(abs_path: Path) -> tuple[str, str] | None:
+    """Map a file to the ``(source, rel_path)`` key index_notes.py stored its
+    chunks under, or None if the file isn't under a root the shared index covers.
+    """
+    for root in INDEXED_ROOTS:
+        try:
+            rel = abs_path.relative_to(root)
+        except ValueError:
+            continue
+        return index_notes.source_key(str(root), paths.INPUT_DIR), rel.as_posix()
+    return None
+
+
+def fetch_pooled_embeddings(
+    db_dir: Path, wanted: set[tuple[str, str]]
+) -> dict[tuple[str, str], np.ndarray]:
+    """Mean-pool each file's already-embedded chunks from the shared ChromaDB
+    index, keyed the way index_notes.py stores them.
+
+    index_notes.py stores raw (unnormalized) chunk vectors, so each chunk is
+    normalized before pooling and the pooled result is normalized again —
+    matching this script's own normalize_embeddings=True fresh-encoding
+    convention so the two sources are never mixed at different scales.
+    """
+    if not wanted or not db_dir.is_dir():
+        return {}
+    client = chromadb.PersistentClient(path=str(db_dir))
+    try:
+        collection = client.get_collection(index_notes.COLLECTION_NAME)
+    except Exception:
+        return {}
+    if not collection.count():
+        return {}
+    stored = collection.get(include=["embeddings", "metadatas"])
+    buckets: dict[tuple[str, str], list[np.ndarray]] = {}
+    for embedding, meta in zip(stored["embeddings"], stored["metadatas"]):
+        key = (meta.get("source"), meta.get("rel_path"))
+        if key not in wanted:
+            continue
+        vector = np.asarray(embedding, dtype=np.float32)
+        norm = np.linalg.norm(vector)
+        if norm > 0:
+            buckets.setdefault(key, []).append(vector / norm)
+    pooled: dict[tuple[str, str], np.ndarray] = {}
+    for key, vectors in buckets.items():
+        mean_vector = np.mean(vectors, axis=0)
+        norm = np.linalg.norm(mean_vector)
+        pooled[key] = mean_vector / norm if norm > 0 else mean_vector
+    return pooled
 
 
 class ProgressReporter:
@@ -281,14 +338,39 @@ def main() -> None:
     progress.update(f"Embedding model: {args.embedding_model}")
     model = SentenceTransformer(args.embedding_model)
     documents = [record["text"] for record in records]
-    embedding_batches = []
-    for start in range(0, len(documents), 64):
-        end = min(start + 64, len(documents))
-        embedding_batches.append(
-            model.encode(documents[start:end], show_progress_bar=False, normalize_embeddings=True)
+
+    # Reuse the shared index's already-computed chunk embeddings when this run
+    # picked the same model the index was built with — mixing vectors from two
+    # different models would silently corrupt topic modeling, so anything that
+    # isn't a match (different model, or a file the index hasn't seen) still
+    # gets freshly encoded below.
+    reused: dict[tuple[str, str], np.ndarray] = {}
+    record_keys: list[tuple[str, str] | None] = [None] * len(records)
+    if args.embedding_model == index_notes.EMBEDDING_MODEL:
+        record_keys = [indexed_chunk_key(source / record["path"]) for record in records]
+        wanted = {key for key in record_keys if key is not None}
+        if wanted:
+            progress.update("Phase 2/6: Reusing document embeddings from the shared index")
+            reused = fetch_pooled_embeddings(DB_DIR, wanted)
+
+    embedding_slots: list[np.ndarray | None] = [
+        reused.get(key) if key is not None else None for key in record_keys
+    ]
+    pending = [i for i, vector in enumerate(embedding_slots) if vector is None]
+    if reused:
+        progress.update(
+            f"Phase 2/6: Reused {len(records) - len(pending)}/{len(records)} embeddings from the "
+            f"index; encoding {len(pending)} remaining document(s)"
         )
-        progress.update(f"Phase 2/6: Embedded {end}/{len(documents)} documents")
-    embeddings = np.vstack(embedding_batches)
+    for start in range(0, len(pending), 64):
+        batch_indices = pending[start:start + 64]
+        batch_vectors = model.encode(
+            [documents[i] for i in batch_indices], show_progress_bar=False, normalize_embeddings=True
+        )
+        for index, vector in zip(batch_indices, batch_vectors):
+            embedding_slots[index] = vector
+        progress.update(f"Phase 2/6: Embedded {start + len(batch_indices)}/{len(pending)} remaining documents")
+    embeddings = np.vstack(embedding_slots)
 
     keyword_model = KeyBERT(model=model)
     # Average a term's relevance over documents in which it appears instead of
@@ -348,11 +430,30 @@ def main() -> None:
     # Directory paths act as classes, preserving the source hierarchy in a form
     # suitable for frequency-over-directory charts in the React client.
     hierarchy = safe_records(topic_model.topics_per_class(documents, classes=[record["directory"] for record in records]))
+
+    # The embedding/topic/keyword models and the raw embedding matrix are done
+    # contributing once topic assignment and frequency tables exist above.
+    # Freeing them before the graph + payload assembly keeps their memory from
+    # stacking on top of the full-corpus payload for the largest runs.
+    del model, keyword_model, topic_model, embeddings, embedding_slots, documents
+    del keyword_scores, ranked_keywords, reused
+    gc.collect()
+
     progress.update("Phase 6/6: Building the document-topic-keyword graph")
     graph = build_graph(records, keywords)
     documents_by_level, topics_by_level, keywords_by_level = level_frequencies(
         records, keywords
     )
+
+    # Mutate records into their payload shape in place instead of building a
+    # second list of dicts — for a large corpus that duplication was the
+    # biggest source of peak memory right before writing out.
+    for record in records:
+        text = record.pop("text")
+        record["character_count"] = len(text)
+        record["excerpt"] = text[:600]
+        record["keywords"] = record.pop("keyword_terms", [])
+
     payload = {
         "analysis_version": ANALYSIS_VERSION,
         "run_id": run_id,
@@ -366,23 +467,13 @@ def main() -> None:
         "documents_by_level": documents_by_level,
         "topics_by_level": topics_by_level,
         "keywords_by_level": keywords_by_level,
-        "documents": [
-            {
-                **{
-                    key: value
-                    for key, value in record.items()
-                    if key not in {"text", "keyword_terms"}
-                },
-                "keywords": record.get("keyword_terms", []),
-                "character_count": len(record["text"]),
-                "excerpt": record["text"][:600],
-            }
-            for record in records
-        ],
+        "documents": records,
         "graph": graph,
     }
     output = output_dir / "analysis.json"
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    progress.update("Writing analysis.json")
+    with output.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
     progress.update(f"Complete: Analysis written to {output}")
     progress.close()
 

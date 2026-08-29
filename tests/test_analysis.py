@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import numpy as np
+
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "code" / "analyze_corpus.py"
 SPEC = importlib.util.spec_from_file_location("ogma_analyze_corpus", MODULE_PATH)
@@ -62,3 +64,46 @@ def test_level_frequencies_normalize_by_documents_at_each_level() -> None:
     ecology = [row for row in topics if row["topic"] == 0]
     assert [row["prevalence"] for row in ecology] == [0.5, 1.0]
     assert [row["prevalence"] for row in keywords] == [0.5, 1.0]
+
+
+def test_indexed_chunk_key_maps_files_under_indexed_roots_only(tmp_path: Path) -> None:
+    notes_root = tmp_path / "input" / "writing-desktop"
+    other_root = tmp_path / "elsewhere"
+    notes_root.mkdir(parents=True)
+    other_root.mkdir(parents=True)
+    original_roots, original_input_dir = analysis.INDEXED_ROOTS, analysis.paths.INPUT_DIR
+    try:
+        analysis.INDEXED_ROOTS = [notes_root]
+        analysis.paths.INPUT_DIR = str(tmp_path / "input")
+
+        assert analysis.indexed_chunk_key(notes_root / "sub" / "note.md") == ("writing-desktop", "sub/note.md")
+        assert analysis.indexed_chunk_key(other_root / "note.md") is None
+    finally:
+        analysis.INDEXED_ROOTS, analysis.paths.INPUT_DIR = original_roots, original_input_dir
+
+
+def test_fetch_pooled_embeddings_normalizes_before_and_after_pooling(tmp_path: Path) -> None:
+    db_dir = tmp_path / "chroma_db"
+    client = analysis.chromadb.PersistentClient(path=str(db_dir))
+    collection = client.get_or_create_collection(name=analysis.index_notes.COLLECTION_NAME)
+    collection.add(
+        ids=["writing-desktop/note.md::0", "writing-desktop/note.md::1", "writing-desktop/other.md::0"],
+        embeddings=[[3.0, 4.0], [0.0, 5.0], [1.0, 0.0]],
+        metadatas=[
+            {"source": "writing-desktop", "rel_path": "note.md"},
+            {"source": "writing-desktop", "rel_path": "note.md"},
+            {"source": "writing-desktop", "rel_path": "other.md"},
+        ],
+        documents=["chunk one", "chunk two", "unrelated chunk"],
+    )
+
+    pooled = analysis.fetch_pooled_embeddings(db_dir, {("writing-desktop", "note.md")})
+
+    assert set(pooled) == {("writing-desktop", "note.md")}
+    vector = pooled[("writing-desktop", "note.md")]
+    assert abs(float(np.linalg.norm(vector)) - 1.0) < 1e-6
+    # [3, 4] and [0, 5] each normalize to unit length first ([0.6, 0.8] and
+    # [0, 1]), average to [0.3, 0.9], then that mean is renormalized.
+    expected = np.array([0.3, 0.9])
+    expected = expected / np.linalg.norm(expected)
+    assert np.allclose(vector, expected, atol=1e-5)
