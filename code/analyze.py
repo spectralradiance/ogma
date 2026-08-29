@@ -7,6 +7,11 @@ import sys
 
 from charset_normalizer import from_path
 
+# Tests may load this file via importlib rather than running it directly,
+# which doesn't add code/ to sys.path automatically.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
 SANITIZATION_MAP = str.maketrans({
     '\u201c': '"',  # "
     '\u201d': '"',  # "
@@ -193,7 +198,7 @@ if __name__ == "__main__":
         start_path = sys.argv[1]
     else:
         # Default path if no argument is given
-        start_path = str(Path(__file__).resolve().parent.parent / 'data' / 'input' / 'writing-desktop')
+        start_path = paths.NOTES_ROOT
 
     if not os.path.isdir(start_path):
         print(f"Error: The path '{start_path}' is not a valid directory.")

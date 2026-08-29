@@ -9,7 +9,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance.json")
+GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance", "guidance.json")
 DATASET_FILE = os.path.join(os.path.dirname(__file__), "qwen_dataset.jsonl")
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "qwen_dataset_filled.jsonl")
 MAX_SEQ_LENGTH = 2048

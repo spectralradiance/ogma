@@ -4,9 +4,11 @@ import argparse
 import atexit
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 from threading import Event, Lock, Thread
 import re
+import sys
 
 from bertopic import BERTopic
 from bertopic.representation import KeyBERTInspired
@@ -16,9 +18,13 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
+# Tests may load this file via importlib rather than running it directly,
+# which doesn't add code/ to sys.path automatically.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SOURCE = ROOT / "data" / "input" / "writing-desktop"
+DEFAULT_SOURCE = Path(paths.NOTES_ROOT)
 DEFAULT_OUTPUT_ROOT = ROOT / "data" / "output"
 TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text", ""}
 ANALYSIS_VERSION = 3

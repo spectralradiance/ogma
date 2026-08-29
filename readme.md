@@ -76,10 +76,17 @@ requirements.txt         Python runtime and test dependencies
 
 ## Editing AI Guidance
 
-Model-facing editorial instructions live in `data/input/guidance.json`. This file controls the
-outline and manuscript prompts, manuscript style progression, concept extraction, chat behavior,
+Model-facing editorial instructions live in `data/input/guidance/guidance.json`. This file controls
+the outline and manuscript prompts, manuscript style progression, concept extraction, chat behavior,
 and legacy training prompts. Runtime values such as section metadata, retrieved note excerpts,
 and output schemas are still assembled by the Python code.
+
+Where `data/input/guidance/chapter-profiles.md` profiles a chapter (currently Invocation,
+Evocation, and the Universal Metaphysics introduction), its Description/Belongs-here/Keywords text
+is added to that chapter's outline and manuscript prompts as authoritative guidance, alongside
+retrieved note excerpts. This is optional enrichment on top of `chapter_structure.csv`, not a
+replacement for it — the CSV still determines which sections exist at all; chapters the profile
+document doesn't cover generate exactly as before.
 
 Restart a running API or command after changing the guidance file so it is loaded again. Keep the
 template fields in braces unchanged because the generation code fills them at runtime.
@@ -149,18 +156,26 @@ workspace (Analysis, Workspace, Run Library) also link out to it for deeper conf
 Pipeline view itself is where you see how the stages connect and trigger any of them without
 leaving the browser.
 
-Organize chaos semantically routes raw, unstructured notes under `data/input/writing-desktop/chaos`
-into the organized `notes/` tree used everywhere else. It embeds each chaos file's outline-style
-sections and each existing notes file (enriched with matching `chapter_structure.csv` rows) with
-`BAAI/bge-large-en-v1.5`, then appends every section to the closest-matching notes file as a
-`<name> (chaos import).md` sibling, tagged with its source path so it stays traceable and is never
-imported twice. Chaos files themselves are never modified or deleted. Sections with no confident
-match are grouped by chaos top-level range folder under `notes/_unsorted/` for manual review. Because
-this corpus is a stream-of-consciousness outline where most headings introduce only a line or two,
-adjacent raw sections are merged until they carry enough context to embed meaningfully, and the
-default similarity threshold (`--threshold 0.65`, calibrated for `BAAI/bge-large-en-v1.5`'s higher
-score range) is tuned to require a reasonably confident match before an assignment is made rather
-than accepting the closest available guess.
+Organize chaos routes raw, unstructured notes under `data/input/random/writing-desktop/chaos` into
+the destinations profiled in `data/input/guidance/chapter-profiles.md` — the sole source of routing
+structure; nothing under `data/input/random/` (including its own `outlines/` folder) is treated as
+guiding structure, only as content. Each profile's Description, Belongs-here text, and Keywords are
+embedded once as a fixed target, so matching doesn't drift as content accumulates the way matching
+against ever-growing notes-file content would.
+
+Two passes classify each chaos file. First, any markdown heading that names a destination directly
+(`## 1 protasis`, `## sacrifice`, ...) is routed there immediately — no embedding needed, the title
+already says where it goes. Whatever isn't captured that way (preamble text, and any heading that
+doesn't name a destination) falls through to embedding-based matching with `BAAI/bge-large-en-v1.5`:
+outline-style sections are merged until they carry enough context to embed meaningfully (most
+headings in this stream-of-consciousness corpus introduce only a line or two on their own), then
+matched against the nearest destination by cosine similarity, requiring `--threshold 0.65` (calibrated
+for this model's higher, more compressed score range than MiniLM's) before accepting a match.
+
+Either way, matches are appended to a `<name> (chaos import).md` sibling next to the destination,
+tagged with their chaos source path so they stay traceable and are never imported twice. Chaos files
+themselves are never modified or deleted. Sections with no confident match are grouped by chaos
+top-level range folder under `notes/_unsorted/` for manual review.
 
 ### Manuscript Operations
 
@@ -168,7 +183,7 @@ The main workspace displays index health, available texts, generated runs, compa
 
 A new manuscript run performs these stages:
 
-1. Read `data/input/chapter_structure.csv`.
+1. Read `data/input/guidance/chapter_structure.csv`.
 2. Select rows whose `Generate Text` value is `Yes`.
 3. Retrieve relevant indexed excerpts for every selected section.
 4. Generate or reuse the complete machine writing plan.
@@ -221,9 +236,11 @@ Cancelling a Windows worker sends `CTRL_BREAK_EVENT`, allowing Python code to fl
 Manuscript metadata and source files remain under `data/input`. Corpus Intelligence analyzes only `writing-desktop`:
 
 ```text
-data/input/chapter_structure.csv
-data/input/writing-desktop/
-data/input/notion/Writing/
+data/input/guidance/chapter_structure.csv
+data/input/guidance/guidance.json
+data/input/guidance/chapter-profiles.md
+data/input/random/writing-desktop/
+data/input/random/notion/Writing/
 ```
 
 The shared vector store is:
@@ -267,6 +284,7 @@ python code/organize_chaos.py
 anything. Useful controls:
 
 - `--threshold` sets the minimum cosine similarity required for a confident match (default `0.65`).
+- `--profiles` points at the chapter-profiles document (default `data/input/guidance/chapter-profiles.md`).
 - `--limit-files N` processes only the first N chaos files, for quick prototyping.
 
 ### Index notes

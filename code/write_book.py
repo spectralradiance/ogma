@@ -23,17 +23,25 @@ import json
 import os
 import re
 import shutil
+import sys
 
 import chromadb
 import torch
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+# Tests load this file via importlib.util.spec_from_file_location rather than
+# a normal import, which doesn't add code/ to sys.path the way running the
+# script directly would — so paths.py has to be found explicitly here.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
-CSV_FILE = os.path.join(DATA_DIR, "input", "chapter_structure.csv")
-GUIDANCE_FILE = os.path.join(DATA_DIR, "input", "guidance.json")
+CSV_FILE = paths.CSV_FILE
+GUIDANCE_FILE = paths.GUIDANCE_FILE
+CHAPTER_PROFILES_FILE = paths.CHAPTER_PROFILES_FILE
 INTERMEDIARY_DIR = os.path.join(DATA_DIR, "intermediary")
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 PROGRESS_FILE = os.path.join(INTERMEDIARY_DIR, "write_book_progress.json")
@@ -257,6 +265,64 @@ def guidance_for(kind: str, system: str | None = None) -> dict:
 def load_csv(path: str) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+PROFILE_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+
+
+def _profile_subsection(body: str, name: str) -> str:
+    match = re.search(rf"### {re.escape(name)}\n(.*?)(?=\n### |\n---|\Z)", body, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def load_chapter_profiles(path: str = CHAPTER_PROFILES_FILE) -> dict[tuple[str, str], str]:
+    """Parse chapter-profiles.md into {(System, chapter name lowercased): guidance text}.
+
+    Optional enrichment, not a structural source: chapter_structure.csv still
+    drives which sections exist. Only chapters this document actually
+    profiles (a curated subset, not the whole book) get matched; everything
+    else generates exactly as before. Missing the file is not an error —
+    most systems have no profile at all.
+    """
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    headers = list(PROFILE_SECTION_RE.finditer(text))
+    profiles: dict[tuple[str, str], str] = {}
+    for i, match in enumerate(headers):
+        title = match.group(1).strip()
+        if "·" not in title:
+            continue
+        system_label, _, rest = title.partition("·")
+        rest = rest.strip()
+        paren = re.search(r"\(([^)]*)\)\s*$", rest)
+        system = paren.group(1).strip() if paren else system_label.strip()
+        short_name = re.sub(r"\s*\([^)]*\)\s*$", "", rest).strip().lower()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        body = text[match.end():end]
+        pieces = [
+            _profile_subsection(body, "Description"),
+            _profile_subsection(body, "Belongs here"),
+            _profile_subsection(body, "Keywords"),
+        ]
+        profile_text = "\n\n".join(piece for piece in pieces if piece)
+        if profile_text:
+            profiles[(system, short_name)] = profile_text
+    return profiles
+
+
+def profile_context_for(row: dict, rows_by_key: dict, profiles: dict[tuple[str, str], str]) -> str:
+    """The profiled guidance for this row's chapter, if chapter-profiles.md covers it."""
+    if not profiles:
+        return ""
+    chapter_row = find_chapter_row(row, rows_by_key)
+    if not chapter_row:
+        return ""
+    return profiles.get((row["System"], chapter_row["Name"].strip().lower()), "")
+
+
+CHAPTER_PROFILES = load_chapter_profiles()
 
 
 def row_key(row: dict) -> tuple[str, str, str, str]:
@@ -630,8 +696,10 @@ def chapter_structure(row: dict, section_rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_outline_messages(row: dict, section_rows: list[dict], context: str) -> list[dict]:
+def build_outline_messages(row: dict, section_rows: list[dict], context: str, rows_by_key: dict | None = None) -> list[dict]:
     outline = guidance_for("outline", row["System"])
+    profile = profile_context_for(row, rows_by_key, CHAPTER_PROFILES) if rows_by_key else ""
+    profile_block = f"\n\nChapter guidance (authoritative — follow this over the CSV name/description):\n{profile}" if profile else ""
     return [
         {
             "role": "system",
@@ -642,7 +710,8 @@ def build_outline_messages(row: dict, section_rows: list[dict], context: str) ->
             "content": with_core_theme_instruction(
                 f"Create a note-grounded writing plan for section {section_number(row)}.\n"
                 f"{display_name_hint(row)}\n\n"
-                f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}\n\n"
+                f"Chapter sequence and boundaries:\n{chapter_structure(row, section_rows)}"
+                f"{profile_block}\n\n"
                 f"Relevant excerpts from the author's notes:\n{context}\n\n"
                 f"{outline['instructions']}"
             ),
@@ -867,6 +936,8 @@ def build_messages(
     context_block = (
         f"\n\nRelevant source excerpts from the author's notes:\n\n{context}"
     ) if context else ""
+    profile = profile_context_for(row, rows_by_key, CHAPTER_PROFILES)
+    profile_block = f"\n\nChapter guidance (authoritative — follow this over the CSV name/description):\n{profile}" if profile else ""
 
     # Runtime evidence frames the section; guidance.json supplies authorial policy and voice.
     manuscript = guidance_for("manuscript", system)
@@ -878,6 +949,7 @@ def build_messages(
         f"in chapter \"{row['Chapter']}: {chapter_name}\". "
         "The numbering is authoritative. Names from the CSV are provisional retrieval hints; "
         "the note-grounded writing plan determines the subject and title."
+        f"{profile_block}"
         f"{context_block}\n\n"
         f"Required section plan:\n\n{plan}\n\n"
         + manuscript["instructions"].format(
@@ -1568,7 +1640,7 @@ def main():
             for row in missing_plans:
                 query = build_query(row, rows_by_key)
                 context = retrieve_context(collection, query, args.notes_top_k, lexical_hint(row))
-                messages = build_outline_messages(row, section_rows, context)
+                messages = build_outline_messages(row, section_rows, context, rows_by_key)
                 plan = generate_plan_text(extract_model, extract_tokenizer, messages)
                 append_outline(book_outline_path, row, plan)
                 plans[section_key(row)] = plan

@@ -6,18 +6,24 @@ Usage:
     python index_notes.py [--notes-dirs PATH [PATH ...]] [--db-dir PATH]
 
 Defaults (two source dirs):
-    ../data/input/writing-desktop
-    ../data/input/notion/Writing
+    ../data/input/random/writing-desktop
+    ../data/input/random/notion/Writing
 """
 
 import argparse
 from datetime import datetime
 import json
 import os
+import sys
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from tqdm import tqdm
+
+# Tests may load this file via importlib rather than running it directly,
+# which doesn't add code/ to sys.path automatically.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 
 
 CHUNK_SIZE = 1400        # characters
@@ -100,10 +106,7 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(os.path.dirname(script_dir), "data")
     input_dir = os.path.join(data_dir, "input")
-    default_dirs = [
-        os.path.join(data_dir, "input", "writing-desktop"),
-        os.path.join(data_dir, "input", "notion", "Writing"),
-    ]
+    default_dirs = [paths.NOTES_ROOT, paths.NOTION_ROOT]
     default_db = os.path.join(data_dir, "intermediary", "chroma_db")
     default_metadata = os.path.join(data_dir, "intermediary", "index_metadata.json")
 

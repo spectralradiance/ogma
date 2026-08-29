@@ -6,7 +6,7 @@ import os
 
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance.json")
+GUIDANCE_FILE = os.path.join(PROJECT_DIR, "data", "input", "guidance", "guidance.json")
 CSV_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "Chapter Structure - metaphysics_detailed_breakdown.csv",
