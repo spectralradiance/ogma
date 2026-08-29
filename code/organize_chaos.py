@@ -1,20 +1,19 @@
 """
-Semantically route raw notes from data/input/writing-desktop/chaos into the
-organized chapter/topic structure under data/input/writing-desktop/notes.
+Semantically route raw notes from data/input/random/writing-desktop/chaos
+into the destinations profiled in data/input/guidance/chapter-profiles.md.
 
-For every existing file under notes/, a match profile is built from that
-file's own content plus, where its path corresponds to a System/Chapter/
-Sub-Chapter row in chapter_structure.csv (matched by folder name against the
-row's Name / Alternative Names), the Name/Description text of that row and
-its descendants. Every chaos file is split into outline sections, each
-section is embedded (EMBEDDING_MODEL below) and matched against the nearest
-notes chunk by cosine similarity.
+Each profiled destination (its Description, Belongs-here text, and Keywords)
+is embedded once as a fixed target — a human-authored ground truth that does
+not drift as matches accumulate, unlike matching against existing notes-file
+content would. Every chaos file is split into outline sections, each section
+is embedded (EMBEDDING_MODEL below) and matched against the nearest
+destination by cosine similarity.
 
 Chaos is never modified or deleted. Matches are appended to a sibling
-"<name> (chaos import).md" file next to the best-matching notes file, each
-entry tagged with its chaos source path so it stays traceable. Sections with
-no confident match are grouped by chaos top-level range folder under
-notes/_unsorted/ for manual review, tagged with their closest guess.
+"<name> (chaos import).md" file next to the destination, each entry tagged
+with its chaos source path so it stays traceable. Sections with no confident
+match are grouped by chaos top-level range folder under notes/_unsorted/ for
+manual review, tagged with their closest guess.
 
 Usage:
     python code/organize_chaos.py --dry-run
@@ -22,21 +21,28 @@ Usage:
 """
 
 import argparse
-import csv
+import json
 import os
 import re
+import sys
 import time
 from collections import defaultdict
+from datetime import datetime
 
 import numpy as np
 import torch
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from tqdm import tqdm
 
+# Tests may load this file via importlib rather than running it directly,
+# which doesn't add code/ to sys.path automatically.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
 CHUNK_SIZE = 1400
 CHUNK_OVERLAP = 250
 MIN_SECTION_CHARS = 120
-# Matching happens entirely in-memory each run (chaos and notes/ are both
+# Matching happens entirely in-memory each run (chaos and profiles are both
 # embedded fresh here), so this doesn't need to match index_notes.py's model
 # the way retrieval does — but it's kept the same for consistent match quality.
 EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -45,13 +51,6 @@ _BINARY_SIGNALS = (b"\x00", b"\xff\xfe", b"\xfe\xff", b"\x89PNG", b"PK\x03")
 UNSORTED_DIRNAME = "_unsorted"
 IMPORT_SUFFIX = " (chaos import).md"
 EMBED_BATCH = 1024
-
-SYSTEM_FOLDER_MAP = {
-    "universal metaphysics": "Universal Metaphysics",
-    "the tree of life": "Tree of Life",
-    "invocation": "Invocation",
-    "evocation": "Evocation",
-}
 
 
 def _is_text_file(path: str) -> bool:
@@ -132,85 +131,121 @@ def split_sections(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# chapter_structure.csv matching
+# Heading-based direct extraction
+#
+# Some chaos files already carry the destination in a markdown heading, e.g.
+#   ## 1 protasis
+#   notes about protasis blah blah
+#   ## 2 epitasis
+#   notes about epitasis blah blah
+# When a heading names a known destination, that block is routed directly —
+# no embedding needed, the title already says where it goes. Only the text
+# NOT covered by a matching heading (the preamble, and any non-matching
+# headings' bodies) falls through to embedding-based matching.
 # ---------------------------------------------------------------------------
 
-def load_chapter_rows(csv_path: str) -> list[dict]:
-    with open(csv_path, encoding="utf-8") as f:
-        return [row for row in csv.DictReader(f) if row.get("System")]
+MARKDOWN_HEADING_RE = re.compile(r"^#{1,3}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+HEADING_LEADING_NUMBER_RE = re.compile(r"^[\d.\s]+")
+HEADING_TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
 
-def row_path(row: dict) -> str:
-    return row["Sub-Sub-Chapter"] or row["Sub-Chapter"] or row["Chapter"]
-
-
-def row_depth(path: str) -> int:
-    return path.count(".")
-
-
-def strip_numeric_prefix(name: str) -> str:
-    m = re.match(r"^\d+\s+(.*)$", name)
-    return m.group(1) if m else name
-
-
-def _normalize_name(name: str) -> str:
-    return re.sub(r"\[.*?\]", "", name).strip().lower()
-
-
-def find_child_row_path(system: str, rows: list[dict], parent_path, name: str):
-    name_norm = _normalize_name(name)
-    if not name_norm:
-        return None
-    parent_depth = row_depth(parent_path) if parent_path is not None else -1
-    for r in rows:
-        if r["System"] != system:
-            continue
-        p = row_path(r)
-        if not p:
-            continue
-        if parent_path is None:
-            if row_depth(p) != 0:
-                continue
-        else:
-            if not (p == parent_path or p.startswith(parent_path + ".")):
-                continue
-            if row_depth(p) != parent_depth + 1:
-                continue
-        candidates = [r["Name"]] + [a for a in r.get("Alternative Names", "").split(";")]
-        if any(_normalize_name(c) == name_norm for c in candidates if c.strip()):
-            return p
+def match_heading_to_profile(heading_text: str, short_names: dict[str, str]) -> str | None:
+    """Map a heading like '1 protasis' or 'Protasis (verse)' to a profile title."""
+    normalized = HEADING_LEADING_NUMBER_RE.sub("", heading_text).strip().lower()
+    normalized = HEADING_TRAILING_PAREN_RE.sub("", normalized).strip()
+    for short_name, profile_title in short_names.items():
+        if re.search(rf"\b{re.escape(short_name)}\b", normalized):
+            return profile_title
     return None
 
 
-def map_path_to_csv(system: str, rows: list[dict], path_parts: list[str]):
-    parent_path = None
-    for part in path_parts:
-        name = strip_numeric_prefix(part)
-        child = find_child_row_path(system, rows, parent_path, name)
-        if child is None:
-            break
-        parent_path = child
-    return parent_path
+def split_by_heading(text: str, short_names: dict[str, str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Split text at markdown headings into (profile_title, block) direct
+    matches and a list of leftover segments (preamble plus any section under
+    a heading that didn't name a known destination) to embed as normal."""
+    headings = list(MARKDOWN_HEADING_RE.finditer(text))
+    if not headings:
+        return [], [text]
+
+    direct: list[tuple[str, str]] = []
+    leftover: list[str] = []
+    preamble = text[:headings[0].start()].strip()
+    if preamble:
+        leftover.append(preamble)
+
+    for i, match in enumerate(headings):
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
+        block = text[match.end():end].strip()
+        if not block:
+            continue
+        profile_title = match_heading_to_profile(match.group(1), short_names)
+        if profile_title:
+            direct.append((profile_title, block))
+        else:
+            leftover.append(block)
+
+    return direct, leftover
 
 
-def csv_enrichment_text(system: str, rows: list[dict], matched_path: str) -> str:
-    pieces = []
-    for r in rows:
-        if r["System"] != system:
+# ---------------------------------------------------------------------------
+# chapter-profiles.md matching
+# ---------------------------------------------------------------------------
+
+# Only eight destinations are profiled (plus an explicit "doesn't fit any of
+# these" note); each maps to a concrete, verified notes/ file. Evocation's
+# four don't exist on disk yet, so this is also where they get their names —
+# numbered the same way as Invocation's three, in the order the profile doc
+# itself lists them (Substance, Sentience, Sapience, Sacrifice).
+PROFILE_DESTINATIONS = {
+    "Invocation · Protasis": "poetry/invocation/1 protasis",
+    "Invocation · Epitasis": "poetry/invocation/2 epitasis",
+    "Invocation · Catastrophe": "poetry/invocation/3 catastrophe",
+    "Evocation · Substance": "poetry/evocation/1 substance",
+    "Evocation · Sentience": "poetry/evocation/2 sentience",
+    "Evocation · Sapience": "poetry/evocation/3 sapience",
+    "Evocation · Sacrifice": "poetry/evocation/4 sacrifice",
+    "Eudaimonia · Introduction (Universal Metaphysics)": "mysticism/universal metaphysics/0 introduction",
+}
+# Derived once: "Invocation · Protasis" -> {"protasis": "Invocation · Protasis"}.
+# Used to recognize a destination named directly in a chaos file's heading.
+PROFILE_SHORT_NAMES = {
+    re.sub(r"\s*\([^)]*\)\s*$", "", title.rsplit("·", 1)[-1]).strip().lower(): title
+    for title in PROFILE_DESTINATIONS
+}
+PROFILE_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+
+
+def _profile_subsection(body: str, name: str) -> str:
+    match = re.search(rf"### {re.escape(name)}\n(.*?)(?=\n### |\n---|\Z)", body, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def load_chapter_profiles(path: str) -> list[dict]:
+    """Parse chapter-profiles.md into routing targets.
+
+    Only headers matching a known destination in PROFILE_DESTINATIONS become
+    targets — "Notes that route nowhere" and any other commentary sections
+    are informational and intentionally skipped.
+    """
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    headers = list(PROFILE_SECTION_RE.finditer(text))
+    profiles = []
+    for i, match in enumerate(headers):
+        title = match.group(1).strip()
+        if title not in PROFILE_DESTINATIONS:
             continue
-        p = row_path(r)
-        if not p:
-            continue
-        if p == matched_path or p.startswith(matched_path + "."):
-            alt = r.get("Alternative Names", "").strip()
-            desc = r.get("Description", "").strip()
-            piece = r["Name"]
-            if alt:
-                piece += f" ({alt})"
-            if desc:
-                piece += f": {desc}"
-            pieces.append(piece)
-    return "\n".join(pieces)
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        body = text[match.end():end]
+        pieces = [
+            _profile_subsection(body, "Description"),
+            _profile_subsection(body, "Belongs here"),
+            _profile_subsection(body, "Keywords"),
+        ]
+        profile_text = "\n\n".join(p for p in pieces if p)
+        if profile_text:
+            profiles.append({"title": title, "relpath": PROFILE_DESTINATIONS[title], "text": profile_text})
+    return profiles
 
 
 # ---------------------------------------------------------------------------
@@ -230,45 +265,12 @@ class Target:
         self.chunks: list[str] = []
 
 
-def build_targets(notes_dir: str, rows: list[dict]) -> list[Target]:
+def build_targets(notes_dir: str, profiles: list[dict]) -> list[Target]:
     targets = []
-    for fpath in iter_text_files(notes_dir):
-        relpath = os.path.relpath(fpath, notes_dir)
-        parts = relpath.replace(os.sep, "/").split("/")
-        if UNSORTED_DIRNAME in parts:
-            continue
-        if os.path.basename(fpath).endswith("(chaos import).md"):
-            continue
-
-        try:
-            with open(fpath, encoding="utf-8", errors="ignore") as f:
-                content = f.read().strip()
-        except OSError:
-            content = ""
-
-        system = None
-        system_idx = None
-        for i, part in enumerate(parts[:-1]):
-            mapped = SYSTEM_FOLDER_MAP.get(part.lower())
-            if mapped:
-                system, system_idx = mapped, i
-                break
-
-        enrichment = ""
-        if system is not None:
-            remaining = parts[system_idx + 1:]
-            matched = map_path_to_csv(system, rows, remaining)
-            if matched:
-                enrichment = csv_enrichment_text(system, rows, matched)
-
-        combined = content
-        if enrichment:
-            combined = f"{content}\n\n{enrichment}" if content else enrichment
-        if not combined.strip():
-            continue
-
+    for profile in profiles:
+        relpath = profile["relpath"].replace("/", os.sep)
         t = Target(relpath, notes_dir)
-        t.chunks = chunk_text(combined, CHUNK_SIZE, CHUNK_OVERLAP)
+        t.chunks = chunk_text(profile["text"], CHUNK_SIZE, CHUNK_OVERLAP)
         if t.chunks:
             targets.append(t)
     return targets
@@ -307,16 +309,15 @@ def _read_sources(fpath: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(os.path.dirname(script_dir), "data")
-    default_chaos = os.path.join(data_dir, "input", "writing-desktop", "chaos")
-    default_notes = os.path.join(data_dir, "input", "writing-desktop", "notes")
-    default_csv = os.path.join(data_dir, "input", "chapter_structure.csv")
+    default_chaos = os.path.join(paths.NOTES_ROOT, "chaos")
+    default_notes = os.path.join(paths.NOTES_ROOT, "notes")
+    default_profiles = paths.CHAPTER_PROFILES_FILE
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--chaos-dir", default=default_chaos)
     parser.add_argument("--notes-dir", default=default_notes)
-    parser.add_argument("--csv", default=default_csv)
+    parser.add_argument("--profiles", default=default_profiles,
+                         help="chapter-profiles.md describing each routing destination")
     # BAAI/bge-large-en-v1.5 produces a much higher, more compressed cosine
     # similarity range than MiniLM did (empirically ~0.55-0.80 rather than
     # ~0.25-0.65), so this threshold was recalibrated against that
@@ -325,16 +326,23 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit-files", type=int, default=None,
                          help="only process the first N chaos files (for prototyping)")
+    parser.add_argument("--run-id", default=None,
+                         help="pipeline run this invocation belongs to, for the output manifest")
+    parser.add_argument("--manifest-out", default=None,
+                         help="path to write a JSON manifest of touched notes files")
+    parser.add_argument("--embedding-model", default=EMBEDDING_MODEL,
+                         help="matching happens entirely in-memory each run, so this is a free per-run choice")
     args = parser.parse_args()
 
-    rows = load_chapter_rows(args.csv)
-    print("Building target profiles from notes/ ...")
-    targets = build_targets(args.notes_dir, rows)
-    print(f"  {len(targets)} target files with content/enrichment")
+    profiles = load_chapter_profiles(args.profiles)
+    print(f"Loaded {len(profiles)} routing destinations from {args.profiles}")
+    targets = build_targets(args.notes_dir, profiles)
+    print(f"  {len(targets)} destination targets")
+    title_for_relpath = {relpath: title for title, relpath in PROFILE_DESTINATIONS.items()}
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Embedding device: {device}")
-    ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL, device=device)
+    ef = SentenceTransformerEmbeddingFunction(model_name=args.embedding_model, device=device)
 
     target_vecs = []
     target_id_for_chunk = []
@@ -350,8 +358,15 @@ def main():
     already = load_already_imported(args.notes_dir)
     print(f"Already-imported sources to skip: {len(already)}")
 
+    target_index_by_title = {}
+    for ti, t in enumerate(targets):
+        title = title_for_relpath.get(t.relpath.replace(os.sep, "/"))
+        if title:
+            target_index_by_title[title] = ti
+
     print("Scanning chaos/ for sections ...")
-    sections = []  # (range_bucket, relpath, section_idx, text)
+    sections = []  # (range_bucket, relpath, section_idx, text, source_key)
+    heading_matches = []  # (range_bucket, relpath, profile_title, text, source_key)
     chaos_files = list(iter_text_files(args.chaos_dir))
     if args.limit_files:
         chaos_files = chaos_files[: args.limit_files]
@@ -367,18 +382,31 @@ def main():
         if not text.strip():
             continue
         bucket = relpath.split("/", 1)[0]
-        for i, sec in enumerate(split_sections(text)):
+
+        direct, leftover_segments = split_by_heading(text, PROFILE_SHORT_NAMES)
+        for h_i, (profile_title, block) in enumerate(direct):
+            source_key = f"chaos/{relpath}#h{h_i}"
+            if source_key in already:
+                continue
+            heading_matches.append((bucket, relpath, profile_title, block, source_key))
+
+        leftover_sections = [sec for seg in leftover_segments for sec in split_sections(seg)]
+        for i, sec in enumerate(leftover_sections):
             source_key = f"chaos/{relpath}#{i}"
             if source_key in already:
                 continue
             sections.append((bucket, relpath, i, sec, source_key))
 
-    print(f"  {len(sections)} new sections to classify")
+    print(f"  {len(heading_matches)} sections matched directly by heading, {len(sections)} new sections to classify by embedding")
 
     matched_by_target = defaultdict(list)   # target_idx -> [(source_key, text)]
     unsorted_by_bucket = defaultdict(list)  # bucket -> [(source_key, text, guess, score)]
     matched_scores = []
     borderline = []  # (score, target_relpath, text) near the threshold, for dry-run inspection
+
+    n_heading = len(heading_matches)
+    for _bucket, _relpath, profile_title, block, source_key in heading_matches:
+        matched_by_target[target_index_by_title[profile_title]].append((source_key, block))
 
     n_matched = n_unsorted = 0
     t0 = time.time()
@@ -406,7 +434,7 @@ def main():
                 borderline.append((score, targets[ti].relpath, sec))
 
     elapsed = time.time() - t0
-    print(f"\nMatched {n_matched}, unsorted {n_unsorted} in {elapsed:.1f}s")
+    print(f"\nMatched {n_heading} by heading, {n_matched} by embedding, {n_unsorted} unsorted, in {elapsed:.1f}s")
 
     if args.dry_run:
         unsorted_scores = np.array(
@@ -434,12 +462,14 @@ def main():
         return
 
     print("\nWriting import files ...")
+    touched_files = []
     for ti, entries in matched_by_target.items():
         t = targets[ti]
         os.makedirs(t.dirpath, exist_ok=True)
         with open(t.import_path, "a", encoding="utf-8") as f:
             for source_key, sec in entries:
                 f.write(f"## Source: {source_key}\n\n{sec}\n\n---\n\n")
+        touched_files.append(t.import_path)
 
     unsorted_dir = os.path.join(args.notes_dir, UNSORTED_DIRNAME)
     for bucket, entries in unsorted_by_bucket.items():
@@ -448,6 +478,19 @@ def main():
         with open(fpath, "a", encoding="utf-8") as f:
             for source_key, sec, guess, score in entries:
                 f.write(f"## Source: {source_key} (closest: {guess} @ {score:.2f})\n\n{sec}\n\n---\n\n")
+        touched_files.append(fpath)
+
+    if args.manifest_out:
+        os.makedirs(os.path.dirname(args.manifest_out), exist_ok=True)
+        with open(args.manifest_out, "w", encoding="utf-8") as f:
+            json.dump({
+                "run_id": args.run_id,
+                "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "matched_by_heading": n_heading,
+                "matched": n_matched,
+                "unsorted": n_unsorted,
+                "files": sorted(set(touched_files)),
+            }, f, indent=2)
 
     print("Done.")
 
