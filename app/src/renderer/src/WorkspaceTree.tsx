@@ -3,17 +3,14 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useS
 import { folderName } from '../../shared/format'
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
 import { joinPath, samePath } from '../../shared/paths'
-import type { Heading } from '../../shared/text'
 import { onDiskChange, touchesFolder } from './changes'
 import { type ActivePane, errorMessage, type OpenTarget } from './target'
 
 export interface TreeActions {
   target: OpenTarget | null
-  /** The editor last typed in; its section is highlighted and its headings listed. */
+  /** The editor last typed in; its section is highlighted. */
   active: ActivePane | null
-  outline: Heading[]
   open: (target: OpenTarget) => void
-  reveal: (line: number) => void
   /** Runs a rename/move/trash, saving the open section first if it is affected. */
   runSectionOperation: (folder: string, stem: string, operation: () => Promise<SectionInfo | null>) => Promise<void>
 }
@@ -145,22 +142,6 @@ function SectionRow({ folder: identity, section, depth, index, count, onChanged 
           </button>
         </span>
       </div>
-      {active && tree.outline.length > 0 && (
-        <ul className="tree tree-outline" aria-label="Headings">
-          {tree.outline.map((heading) => (
-            <li key={`${heading.line}:${heading.text}`}>
-              <button
-                type="button"
-                className="tree-row tree-heading"
-                style={indent(depth, 30 + (heading.level - 1) * 10)}
-                onClick={() => tree.reveal(heading.line)}
-              >
-                <span className="tree-label">{heading.text}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </li>
   )
 }
@@ -311,7 +292,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   )
 }
 
-export type SidebarTab = 'files' | 'search'
+export type SidebarTab = 'files' | 'outline' | 'search'
 
 interface WorkspaceTreeProps extends TreeActions {
   roots: string[]
@@ -319,22 +300,24 @@ interface WorkspaceTreeProps extends TreeActions {
   onRemoveRoot: (path: string) => void
   tab: SidebarTab
   onTab: (tab: SidebarTab) => void
-  /** Rendered in place of the tree on the Search tab. */
+  /** Rendered in place of the tree on the Outline and Search tabs. */
+  outline: ReactNode
   search: ReactNode
 }
 
-export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, tab, onTab, search, ...actions }: WorkspaceTreeProps) {
+export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, tab, onTab, outline, search, ...actions }: WorkspaceTreeProps) {
   return (
     <TreeContext.Provider value={actions}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <nav className="sidebar-tabs" role="tablist">
             <button type="button" role="tab" aria-selected={tab === 'files'} onClick={() => onTab('files')}>Files</button>
+            <button type="button" role="tab" aria-selected={tab === 'outline'} onClick={() => onTab('outline')} title="Every section and heading in the open document">Outline</button>
             <button type="button" role="tab" aria-selected={tab === 'search'} onClick={() => onTab('search')} title="Search all folders (Ctrl+Shift+F)">Search</button>
           </nav>
           <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder">+</button>
         </header>
-        {tab === 'search' ? search : roots.length === 0 ? (
+        {tab === 'search' ? search : tab === 'outline' ? outline : roots.length === 0 ? (
           <>
             <p className="sidebar-empty">No folders yet. Folders are edited in place; nothing is copied.</p>
             <button type="button" className="add-folder" onClick={onAddRoot}>Add folder…</button>

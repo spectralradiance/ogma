@@ -8,6 +8,8 @@ const api: OisinApi = {
     getStatus: () => ipcRenderer.invoke(IPC.sidecarStatus),
     getLogs: () => ipcRenderer.invoke(IPC.sidecarLogs),
     restart: () => ipcRenderer.invoke(IPC.sidecarRestart),
+    stop: () => ipcRenderer.invoke(IPC.sidecarStop),
+    installTorch: (index) => ipcRenderer.invoke(IPC.sidecarInstallTorch, index),
     onStatus: (listener) => {
       const handler = (_event: IpcRendererEvent, status: SidecarStatus): void => listener(status)
       ipcRenderer.on(IPC.sidecarStatusChanged, handler)

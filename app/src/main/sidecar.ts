@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
 
 import type { SidecarHealth, SidecarStatus } from '../shared/ipc'
-import { LogRing, lineSplitter, restartDelayMs, type SidecarPaths } from './sidecarUtil'
+import { LogRing, lineSplitter, restartDelayMs, type SidecarPaths, torchInstallCommands } from './sidecarUtil'
 
 const STARTUP_TIMEOUT_MS = 90_000
 const STARTUP_POLL_MS = 300
@@ -44,6 +44,7 @@ function freePort(): Promise<number> {
  */
 export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   private child: ChildProcessWithoutNullStreams | null = null
+  private installer: ChildProcessWithoutNullStreams | null = null
   private baseUrl = ''
   private token = ''
   private generation = 0
@@ -79,7 +80,7 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   }
 
   async start(): Promise<void> {
-    if (this.child) return
+    if (this.child || this.installer) return
     this.stopping = false
     this.clearTimers()
     const generation = ++this.generation
@@ -136,6 +137,7 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   async stop(): Promise<void> {
     this.stopping = true
     this.clearTimers()
+    this.killTree(this.installer?.pid)
     const child = this.child
     if (!child || child.exitCode !== null || child.signalCode !== null) {
       this.setStatus({ state: 'stopped', health: null, error: null })
@@ -154,6 +156,56 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
     await this.stop()
     this.restarts = 0
     await this.start()
+  }
+
+  /**
+   * Stops the server, installs PyTorch (from the given CUDA wheel index) and the
+   * local-model libraries into its environment, then starts it again. Output
+   * goes to the server log. Rejects if an install step fails; the server is
+   * restarted either way.
+   */
+  async installTorch(index: string): Promise<void> {
+    if (this.installer) throw new Error('PyTorch is already being installed.')
+    const commands = torchInstallCommands(this.paths.sidecarDir, index)
+    if (!existsSync(this.paths.python)) throw new Error(`Python environment not found at ${this.paths.python}. Run scripts/setup-sidecar.ps1.`)
+    await this.stop()
+    this.setStatus({ state: 'installing', health: null, error: null })
+    let failure: Error | null = null
+    for (const args of commands) {
+      this.logs.add(`[oisin] python ${args.join(' ')}`)
+      const result = await this.runInstallStep(args)
+      if (result !== 0) {
+        failure = new Error(`Installing PyTorch failed (${result}). The log has pip's output.`)
+        break
+      }
+    }
+    this.logs.add(failure ? `[oisin] ${failure.message}` : '[oisin] PyTorch installed')
+    if (this.stopping && this.status.state !== 'installing') return // the app is quitting
+    this.restarts = 0
+    await this.start()
+    if (failure) throw failure
+  }
+
+  private runInstallStep(args: string[]): Promise<number | string> {
+    return new Promise((resolve) => {
+      const child = spawn(this.paths.python, args, {
+        cwd: this.paths.sidecarDir,
+        env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        windowsHide: true,
+      })
+      this.installer = child
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', lineSplitter((line) => this.logs.add(line)))
+      child.stderr.on('data', lineSplitter((line) => this.logs.add(line)))
+      child.stdin.end()
+      const finish = (result: number | string) => {
+        this.installer = null
+        resolve(result)
+      }
+      child.once('error', (error) => finish(error.message))
+      child.once('exit', (code, signal) => finish(code ?? `killed by ${signal}`))
+    })
   }
 
   private async waitForStartup(generation: number): Promise<SidecarHealth | null> {
@@ -227,12 +279,15 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   }
 
   private killChild(): void {
-    const pid = this.child?.pid
+    this.killTree(this.child?.pid)
+  }
+
+  private killTree(pid: number | undefined): void {
     if (!pid) return
     if (process.platform === 'win32') {
       execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => {})
     } else {
-      this.child?.kill('SIGKILL')
+      process.kill(pid, 'SIGKILL')
     }
   }
 

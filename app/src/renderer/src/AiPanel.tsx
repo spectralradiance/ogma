@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AiEvent, AiMode, AiSettingsState, AiTask } from '../../shared/ai'
 import { PROVIDERS } from '../../shared/ai'
-import type { ProviderStatus } from '../../shared/ipc'
+import type { SidecarStatus } from '../../shared/ipc'
 import { describeMetrics, measureText, type TextMetrics } from '../../shared/readability'
 import type { WordInContext } from './editor/MarkdownEditor'
+import { AiServer } from './AiServer'
 import { SynthesisReview } from './SynthesisReview'
 import { errorMessage } from './target'
 
@@ -25,6 +26,8 @@ export interface AiWorkspace {
   currentWord(): WordInContext | null
   applyOutput(text: string): boolean
   replaceWord(word: string): boolean
+  /** The open double document's outline, for structure analysis. */
+  outline: { title: string; sections: number; markdown(): string } | null
 }
 
 interface RunState {
@@ -85,11 +88,12 @@ const MODES: { id: AiMode; label: string; title: string }[] = [
 
 interface AiPanelProps {
   workspace: AiWorkspace
-  providers: ProviderStatus[]
+  status: SidecarStatus | null
   onOpenSettings: () => void
 }
 
-export function AiPanel({ workspace, providers, onOpenSettings }: AiPanelProps) {
+export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
+  const providers = status?.health?.providers ?? []
   const [settings, setSettings] = useState<AiSettingsState | null>(null)
   const [profileId, setProfileId] = useState('')
   const [instruction, setInstruction] = useState<(typeof WORD_INSTRUCTIONS)[number]['id']>('vary')
@@ -159,6 +163,15 @@ export function AiPanel({ workspace, providers, onOpenSettings }: AiPanelProps) 
     }, { metrics })
   }
 
+  const analyzeStructure = () => {
+    const outline = workspace.outline
+    if (!outline) {
+      setMessage('Open a document of sections to analyze its structure.')
+      return
+    }
+    void start('structure', { document: outline.title, outline: outline.markdown() }, {})
+  }
+
   const suggestWords = () => {
     const found = workspace.currentWord()
     if (!found) {
@@ -199,6 +212,7 @@ export function AiPanel({ workspace, providers, onOpenSettings }: AiPanelProps) 
       </header>
 
       <div className="lexical-body">
+        <AiServer status={status} />
         <label className="ai-field">
           Model
           <select value={profileId} onChange={(event) => setProfileId(event.target.value)}>
@@ -219,6 +233,10 @@ export function AiPanel({ workspace, providers, onOpenSettings }: AiPanelProps) 
           </button>
           <button type="button" onClick={analyze} disabled={running} title="Selection, or the whole focused file">
             Analyze
+          </button>
+          <button type="button" onClick={analyzeStructure} disabled={running || !workspace.outline}
+            title="Order, balance and gaps across every section, from the document’s outline, sizes and opening lines">
+            Analyze structure
           </button>
           <div className="ai-word-row">
             <button type="button" onClick={suggestWords} disabled={running} title="For the word at the cursor">Word choice</button>

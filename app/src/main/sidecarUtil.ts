@@ -1,5 +1,7 @@
 import { join, resolve } from 'node:path'
 
+import { CUDA_INDEXES } from '../shared/torch'
+
 export interface SidecarPaths {
   sidecarDir: string
   python: string
@@ -54,4 +56,13 @@ export function lineSplitter(onLine: (line: string) => void): (chunk: string) =>
       if (line) onLine(line)
     }
   }
+}
+
+/** The pip commands (arguments after the venv's python) that install PyTorch and the local-model libraries. */
+export function torchInstallCommands(sidecarDir: string, index: string): string[][] {
+  if (!(CUDA_INDEXES as readonly string[]).includes(index)) throw new Error(`Unknown PyTorch index "${index}".`)
+  return [
+    ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'torch', '--index-url', `https://download.pytorch.org/whl/${index}`],
+    ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '-r', join(sidecarDir, 'requirements-local.txt')],
+  ]
 }

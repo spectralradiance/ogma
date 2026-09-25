@@ -222,6 +222,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sidecarStatus, () => sidecar.getStatus())
   ipcMain.handle(IPC.sidecarLogs, () => sidecar.getLogs())
   ipcMain.handle(IPC.sidecarRestart, () => sidecar.restart())
+  ipcMain.handle(IPC.sidecarStop, () => sidecar.stop())
+  ipcMain.handle(IPC.sidecarInstallTorch, (_event, index: unknown) => sidecar.installTorch(text(index)))
 
   ipcMain.handle(IPC.workspaceGet, () => workspaceState())
   ipcMain.handle(IPC.workspaceAddRoot, async (event) => {

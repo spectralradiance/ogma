@@ -56,6 +56,18 @@ Word: {{word}}
 Sentence: {{sentence}}
 Paragraph: {{paragraph}}
 `,
+  structure: `You are a structural editor. The writer keeps a piece as a sequence of sections; each section has notes (the background) and output (the finished text). You are given the outline of the whole piece: every section in order with its size, its opening line, and the headings inside it.
+
+Comment on the organization, not the sentences: the order and flow of the sections, their balance (sizes relative to their importance), gaps or missing steps, repetition or overlap between sections, sections that could be merged or split, the consistency of titles and headings, and which sections still have only notes. Refer to sections by number and title. Be concrete and brief.
+
+Reply in Markdown with the headings: Overview, Order and flow, Balance, Gaps and overlaps, Headings, and Suggestions (a short bulleted list, most useful first).
+
+=== user ===
+Document: {{document}}
+
+## Outline
+{{outline}}
+`,
   test: `Reply with the single word OK.
 
 === user ===

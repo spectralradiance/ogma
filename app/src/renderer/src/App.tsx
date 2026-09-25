@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { folderName } from '../../shared/format'
-import type { SearchHit, SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import { outlineMarkdown } from '../../shared/outline'
 import { dirname, joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
@@ -16,6 +17,8 @@ import {
   type ActivePane, errorMessage, isOpenDocument, type OpenTarget, parseTarget, parseViewMode, sameTarget, type ViewMode,
 } from './target'
 import { SearchPanel } from './SearchPanel'
+import { OutlinePanel } from './OutlinePanel'
+import { useOutline } from './useOutline'
 import { type SidebarTab, WorkspaceTree } from './WorkspaceTree'
 
 export function App() {
@@ -222,8 +225,8 @@ export function App() {
     },
   }), [])
 
-  /** Opens a search hit: its double document scrolled to the section, or the file itself, at the hit's line. */
-  const openHit = useCallback(async (hit: SearchHit) => {
+  /** Opens a file at a line: its double document scrolled to the section, or the file itself. */
+  const openAt = useCallback(async (hit: { path: string; line: number }) => {
     const folder = dirname(hit.path)
     const model = await window.oisin.folders.read(folder).catch(() => null)
     const section = model?.sections.find((candidate) =>
@@ -254,6 +257,11 @@ export function App() {
   const removeRoot = (path: string) => void window.oisin.workspace.removeRoot(path).then(setWorkspace)
 
   const activePath = active?.path ?? null
+  const liveWords = useMemo(
+    () => Object.fromEntries(Object.entries(infos).map(([path, info]) => [path, info?.words])),
+    [infos],
+  )
+  const outline = useOutline(target, { headings, words: liveWords }, reloadToken)
   const activeInfo = activePath ? infos[activePath] ?? null : null
   const activeLabel = active?.stem && activePath
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
@@ -295,6 +303,9 @@ export function App() {
       return true
     },
     replaceWord: (word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false),
+    outline: outline?.kind === 'document'
+      ? { title: outline.title, sections: outline.sections.length, markdown: () => outlineMarkdown(outline.title, outline.sections, { notes: true, leads: true }) }
+      : null,
   }
 
   return (
@@ -306,18 +317,26 @@ export function App() {
           onRemoveRoot={removeRoot}
           target={target}
           active={active}
-          outline={activePath ? headings[activePath] ?? [] : []}
           open={(next) => void open(next)}
-          reveal={(line) => (activePath ? panes.current.get(activePath)?.revealLine(line) : undefined)}
           runSectionOperation={runSectionOperation}
           tab={sidebarTab}
           onTab={setSidebarTab}
+          outline={(
+            <OutlinePanel
+              outline={outline}
+              activePath={activePath}
+              onOpenSection={(stem) => {
+                if (target?.kind === 'document') void open({ ...target, focusStem: stem, nonce: Date.now() })
+              }}
+              onReveal={(path, line) => void openAt({ path, line })}
+            />
+          )}
           search={(
             <SearchPanel
               roots={workspace.roots}
               autoFocus={searchFocus > 0}
               key={searchFocus}
-              onOpen={(hit) => void openHit(hit)}
+              onOpen={(hit) => void openAt(hit)}
               relatedSource={() => {
                 const handle = active ? panes.current.get(active.path) : undefined
                 if (!active || !handle) return null
@@ -368,7 +387,7 @@ export function App() {
         )}
       </main>
       {!focusMode && (
-        <SidePanel open={shownDrawer} onSelect={showDrawer} onClose={() => showDrawer(null)}>
+        <SidePanel open={shownDrawer} onSelect={showDrawer} onClose={() => showDrawer(null)} aiState={status?.state ?? 'starting'}>
           {shownDrawer === 'words' && (
             <LexicalPanel
               query={lexicalQuery}
@@ -379,7 +398,7 @@ export function App() {
           {shownDrawer === 'ai' && (
             <AiPanel
               workspace={aiWorkspace}
-              providers={status?.health?.providers ?? []}
+              status={status}
               onOpenSettings={() => setSettingsOpen(true)}
             />
           )}
@@ -387,7 +406,6 @@ export function App() {
       )}
       {settingsOpen && <AiSettings providers={status?.health?.providers ?? []} onClose={() => setSettingsOpen(false)} />}
       <StatusBar
-        status={status}
         documentInfo={activeInfo}
         documentLabel={activeLabel}
         todayWords={todayWords}

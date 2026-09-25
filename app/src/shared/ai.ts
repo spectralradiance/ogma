@@ -2,7 +2,7 @@
 
 export type AiMode = 'local' | 'cloud' | 'hybrid'
 export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'openai_compat' | 'local_hf'
-export type AiTask = 'analyze' | 'synthesize' | 'lexical'
+export type AiTask = 'analyze' | 'synthesize' | 'lexical' | 'structure'
 
 export interface AiProfile {
   id: string
@@ -29,6 +29,7 @@ export const AI_TASKS: { id: AiTask; label: string; description: string }[] = [
   { id: 'synthesize', label: 'Draft output', description: 'Turn a section’s notes into finished output' },
   { id: 'analyze', label: 'Analyze', description: 'Tone, structure, readability and style' },
   { id: 'lexical', label: 'Word choice', description: 'Alternatives for a word in context' },
+  { id: 'structure', label: 'Structure', description: 'Order, balance and gaps across the whole document’s outline' },
 ]
 
 export const PROVIDERS: { id: AiProviderId; label: string; kind: 'cloud' | 'local'; keyName: string | null }[] = [
@@ -56,6 +57,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     synthesize: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
     analyze: ['local-qwen', 'claude', 'gemini', 'openai', 'open-host'],
     lexical: ['local-qwen', 'claude', 'gemini', 'openai', 'open-host'],
+    structure: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
     default: ['claude', 'local-qwen'],
   },
 }

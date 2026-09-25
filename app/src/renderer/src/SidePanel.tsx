@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 
+import type { SidecarState } from '../../shared/ipc'
 import type { Drawer } from './DocumentView'
+import { SERVER_STATE_LABEL } from './AiServer'
 
 const ICON_PROPS = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
 
@@ -32,17 +34,24 @@ interface SidePanelProps {
   open: Drawer | null
   onSelect: (drawer: Drawer) => void
   onClose: () => void
+  /** Shown as a dot on the AI tab when the server is not online. */
+  aiState: SidecarState
   children: ReactNode
 }
 
 /** The right-hand pane: icon tabs above the open panel, or a slim rail of tabs when closed. */
-export function SidePanel({ open, onSelect, onClose, children }: SidePanelProps) {
+export function SidePanel({ open, onSelect, onClose, aiState, children }: SidePanelProps) {
+  const badge = (id: Drawer) => (id === 'ai' && aiState !== 'online'
+    ? <span className={`dot dot-${aiState} side-tab-badge`} aria-hidden="true" />
+    : null)
+  const hint = (id: Drawer) => (id === 'ai' && aiState !== 'online' ? ` — ${SERVER_STATE_LABEL[aiState]}` : '')
   if (!open) {
     return (
       <nav className="side-rail" aria-label="Side panels">
         {SIDE_TABS.map((tab) => (
-          <button key={tab.id} type="button" className="side-rail-tab" onClick={() => onSelect(tab.id)} title={`${tab.label} (${tab.shortcut})`} aria-label={tab.label}>
+          <button key={tab.id} type="button" className="side-rail-tab" onClick={() => onSelect(tab.id)} title={`${tab.label} (${tab.shortcut})${hint(tab.id)}`} aria-label={tab.label}>
             <tab.icon />
+            {badge(tab.id)}
           </button>
         ))}
       </nav>
@@ -52,9 +61,10 @@ export function SidePanel({ open, onSelect, onClose, children }: SidePanelProps)
     <aside className="side-panel">
       <nav className="side-tabs" role="tablist" aria-label="Side panels">
         {SIDE_TABS.map((tab) => (
-          <button key={tab.id} type="button" role="tab" aria-selected={open === tab.id} onClick={() => onSelect(tab.id)} title={`${tab.label} (${tab.shortcut})`}>
+          <button key={tab.id} type="button" role="tab" aria-selected={open === tab.id} onClick={() => onSelect(tab.id)} title={`${tab.label} (${tab.shortcut})${hint(tab.id)}`}>
             <tab.icon />
             <span>{tab.label}</span>
+            {badge(tab.id)}
           </button>
         ))}
         <button type="button" className="icon-button side-close" onClick={onClose} title="Close panel" aria-label="Close panel">×</button>

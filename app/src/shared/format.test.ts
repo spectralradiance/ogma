@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { describeGpu, describeProviders, describeTorch, folderName } from './format'
-import type { ProviderStatus, TorchStatus } from './ipc'
+import { describeGpu, describeTorch, folderName } from './format'
+import type { TorchStatus } from './ipc'
 
 const torch: TorchStatus = {
   state: 'ready',
@@ -41,16 +41,6 @@ describe('describeTorch', () => {
     expect(describeTorch({ ...torch, installed: false })).toBe('PyTorch: not installed')
     expect(describeTorch({ ...torch, cuda_available: false })).toBe('PyTorch 2.14.0 · CPU only')
     expect(describeTorch(torch)).toBe('PyTorch 2.14.0 · CUDA 12.6')
-  })
-})
-
-describe('describeProviders', () => {
-  const provider = (id: string, configured: boolean): ProviderStatus =>
-    ({ id, label: id, kind: 'cloud', configured, detail: null })
-
-  it('lists configured providers only', () => {
-    expect(describeProviders([provider('anthropic', true), provider('openai', false)])).toBe('AI: anthropic')
-    expect(describeProviders([provider('openai', false)])).toBe('AI: no providers configured')
   })
 })
 

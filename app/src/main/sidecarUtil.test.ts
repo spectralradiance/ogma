@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { LogRing, lineSplitter, resolveSidecarPaths, restartDelayMs } from './sidecarUtil'
+import { LogRing, lineSplitter, resolveSidecarPaths, restartDelayMs, torchInstallCommands } from './sidecarUtil'
+import { suggestCudaIndex } from '../shared/torch'
 
 describe('resolveSidecarPaths', () => {
   it('uses the sibling sidecar venv on Windows', () => {
@@ -45,5 +46,24 @@ describe('lineSplitter', () => {
     push('ted\r\n\r\nsecond')
     push(' line\n')
     expect(lines).toEqual(['INFO: started', 'second line'])
+  })
+})
+
+describe('suggestCudaIndex', () => {
+  it('picks the newest index the driver supports', () => {
+    expect(suggestCudaIndex('581.15')).toBe('cu130')
+    expect(suggestCudaIndex('576.02')).toBe('cu128')
+    expect(suggestCudaIndex('561.09')).toBe('cu126')
+    expect(suggestCudaIndex('531.2')).toBe('cu126')
+    expect(suggestCudaIndex(undefined)).toBe('cu126')
+  })
+})
+
+describe('torchInstallCommands', () => {
+  it('installs torch from the chosen index, then the local-model libraries', () => {
+    const [torch, local] = torchInstallCommands('C:\\oisin\\sidecar', 'cu128')
+    expect(torch.slice(-3)).toEqual(['torch', '--index-url', 'https://download.pytorch.org/whl/cu128'])
+    expect(local.at(-1)).toMatch(/requirements-local\.txt$/)
+    expect(() => torchInstallCommands('x', 'cu999; rm -rf')).toThrow(/Unknown/)
   })
 })

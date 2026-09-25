@@ -1,4 +1,4 @@
-import type { GpuStatus, ProviderStatus, TorchStatus } from './ipc'
+import type { GpuStatus, TorchStatus } from './ipc'
 
 export function formatMegabytes(megabytes: number): string {
   return `${(megabytes / 1024).toFixed(1)} GB`
@@ -17,11 +17,6 @@ export function describeTorch(torch: TorchStatus): string {
   if (!torch.installed) return 'PyTorch: not installed'
   if (!torch.cuda_available) return `PyTorch ${torch.version} · CPU only`
   return `PyTorch ${torch.version} · CUDA ${torch.cuda_version}`
-}
-
-export function describeProviders(providers: ProviderStatus[]): string {
-  const ready = providers.filter((provider) => provider.configured).map((provider) => provider.id)
-  return ready.length > 0 ? `AI: ${ready.join(', ')}` : 'AI: no providers configured'
 }
 
 export function folderName(path: string): string {

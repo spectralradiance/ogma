@@ -47,7 +47,7 @@ export interface SidecarHealth {
   models_loaded: string[]
 }
 
-export type SidecarState = 'stopped' | 'starting' | 'online' | 'error'
+export type SidecarState = 'stopped' | 'starting' | 'online' | 'error' | 'installing'
 
 export interface SidecarStatus {
   state: SidecarState
@@ -244,6 +244,9 @@ export interface OisinApi {
     getStatus(): Promise<SidecarStatus>
     getLogs(): Promise<string[]>
     restart(): Promise<void>
+    stop(): Promise<void>
+    /** Installs PyTorch from a CUDA wheel index (see shared/torch.ts), restarting the server around it. */
+    installTorch(index: string): Promise<void>
     onStatus(listener: (status: SidecarStatus) => void): () => void
   }
   workspace: {
@@ -329,6 +332,8 @@ export const IPC = {
   sidecarStatus: 'sidecar:status',
   sidecarLogs: 'sidecar:logs',
   sidecarRestart: 'sidecar:restart',
+  sidecarStop: 'sidecar:stop',
+  sidecarInstallTorch: 'sidecar:install-torch',
   sidecarStatusChanged: 'sidecar:status-changed',
   workspaceGet: 'workspace:get',
   workspaceAddRoot: 'workspace:add-root',
