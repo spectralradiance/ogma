@@ -1,20 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { readPref, writePref } from './prefs'
-import { Sidebar } from './Sidebar'
+import { ModeToggles, type PaneCallbacks, SectionView } from './SectionView'
 import { StatusBar } from './StatusBar'
+import { errorMessage, isOpenSection, type OpenTarget, type PaneId, parseTarget, sameTarget, sectionTarget } from './target'
+import { WorkspaceTree } from './WorkspaceTree'
+
+const PANE_LABEL: Record<PaneId, string> = { notes: 'Notes', output: 'Output', file: '' }
 
 export function App() {
   const [status, setStatus] = useState<SidecarStatus | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceState>({ roots: [] })
-  const [openPath, setOpenPath] = useState<string | null>(() => readPref('openPath'))
+  const [target, setTarget] = useState<OpenTarget | null>(() => parseTarget(readPref('openTarget')))
   const [live, setLive] = useState(() => readPref('live') !== 'false')
   const [focusMode, setFocusMode] = useState(false)
-  const [documentInfo, setDocumentInfo] = useState<DocumentInfo | null>(null)
-  const pane = useRef<DocumentPaneHandle>(null)
-  const dirty = useRef(false)
+  const [activePane, setActivePane] = useState<PaneId>(() => (target?.kind === 'file' ? 'file' : 'notes'))
+  const [infos, setInfos] = useState<Partial<Record<PaneId, DocumentInfo | null>>>({})
+  const [headings, setHeadings] = useState<Partial<Record<PaneId, Heading[]>>>({})
+  const panes = useRef<Partial<Record<PaneId, DocumentPaneHandle | null>>>({})
+  const dirtyPanes = useRef(new Set<PaneId>())
   const closing = useRef(false)
 
   useEffect(() => {
@@ -37,20 +44,43 @@ export function App() {
     }
   }, [])
 
-  const changeOpenPath = useCallback((path: string | null) => {
-    setOpenPath(path)
-    writePref('openPath', path)
-    if (!path) setDocumentInfo(null)
+  const flushAll = useCallback(async () => {
+    const handles = Object.values(panes.current).filter((handle): handle is DocumentPaneHandle => Boolean(handle))
+    return (await Promise.all(handles.map((handle) => handle.flush()))).every(Boolean)
   }, [])
 
-  const openFile = async (path: string) => {
-    if (path === openPath) return
-    const saved = (await pane.current?.flush()) ?? true
-    if (!saved && !window.confirm('The current file could not be saved. Open the other file anyway and lose those changes?')) {
+  const changeTarget = useCallback((next: OpenTarget | null) => {
+    setTarget(next)
+    writePref('openTarget', next ? JSON.stringify(next) : null)
+    setInfos({})
+    setHeadings({})
+    setActivePane(next?.kind === 'file' ? 'file' : 'notes')
+  }, [])
+
+  const open = useCallback(async (next: OpenTarget) => {
+    if (sameTarget(target, next)) return
+    const saved = await flushAll()
+    if (!saved && !window.confirm('Some changes could not be saved. Open the other file anyway and lose them?')) return
+    changeTarget(next)
+  }, [target, flushAll, changeTarget])
+
+  const runSectionOperation = useCallback(async (
+    folder: string,
+    stem: string,
+    operation: () => Promise<SectionInfo | null>,
+  ) => {
+    const affectsOpen = isOpenSection(target, folder, stem)
+    if (affectsOpen && !(await flushAll())) {
+      window.alert('The open section has unsaved changes that could not be saved. Resolve that first.')
       return
     }
-    changeOpenPath(path)
-  }
+    try {
+      const result = await operation()
+      if (affectsOpen) changeTarget(result ? sectionTarget(folder, result) : null)
+    } catch (error) {
+      window.alert(errorMessage(error))
+    }
+  }, [target, flushAll, changeTarget])
 
   const toggleLive = useCallback(() => {
     setLive((value) => {
@@ -81,9 +111,9 @@ export function App() {
   useEffect(() => {
     // Hold the window open until pending edits are on disk.
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty.current || closing.current) return
+      if (dirtyPanes.current.size === 0 || closing.current) return
       event.preventDefault()
-      void (pane.current?.flush() ?? Promise.resolve(true)).then((saved) => {
+      void flushAll().then((saved) => {
         if (saved || window.confirm('Some changes could not be saved. Close anyway and lose them?')) {
           closing.current = true
           window.close()
@@ -92,42 +122,73 @@ export function App() {
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [])
+  }, [flushAll])
 
-  const onDirtyChange = useCallback((value: boolean) => {
-    dirty.current = value
-  }, [])
+  const callbacks = useMemo<PaneCallbacks>(() => ({
+    bindPane: (pane, handle) => {
+      panes.current[pane] = handle
+    },
+    onInfo: (pane, info) => setInfos((current) => ({ ...current, [pane]: info })),
+    onHeadings: (pane, list) => setHeadings((current) => ({ ...current, [pane]: list })),
+    onDirtyChange: (pane, dirty) => {
+      if (dirty) dirtyPanes.current.add(pane)
+      else dirtyPanes.current.delete(pane)
+    },
+    onActivePane: setActivePane,
+  }), [])
 
   const addRoot = () => void window.oisin.workspace.addRoot().then(setWorkspace)
   const removeRoot = (path: string) => void window.oisin.workspace.removeRoot(path).then(setWorkspace)
 
+  const outlinePane: PaneId = target?.kind === 'file' ? 'file' : activePane
+  const outline = target ? { pane: outlinePane, headings: headings[outlinePane] ?? [] } : null
+  const info = infos[target?.kind === 'file' ? 'file' : activePane] ?? null
+  const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
+
   return (
     <div className={`shell${focusMode ? ' shell-focus' : ''}`}>
       {!focusMode && (
-        <Sidebar roots={workspace.roots} openPath={openPath} onAdd={addRoot} onRemove={removeRoot} onOpen={(path) => void openFile(path)} />
+        <WorkspaceTree
+          roots={workspace.roots}
+          onAddRoot={addRoot}
+          onRemoveRoot={removeRoot}
+          target={target}
+          outline={outline}
+          open={(next) => void open(next)}
+          reveal={(line) => panes.current[outlinePane]?.revealLine(line)}
+          runSectionOperation={runSectionOperation}
+        />
       )}
       <main className="stage">
-        {openPath ? (
+        {target?.kind === 'section' && (
+          <SectionView key={`${target.notesPath}|${target.outputPath}`} target={target} callbacks={callbacks} {...mode} />
+        )}
+        {target?.kind === 'file' && (
           <DocumentPane
-            key={openPath}
-            ref={pane}
-            path={openPath}
+            key={target.path}
+            ref={(handle) => callbacks.bindPane('file', handle)}
+            path={target.path}
             live={live}
             focusMode={focusMode}
-            onToggleLive={toggleLive}
-            onToggleFocus={toggleFocus}
-            onInfo={setDocumentInfo}
-            onDirtyChange={onDirtyChange}
-            onClose={() => changeOpenPath(null)}
+            headerActions={<ModeToggles {...mode} />}
+            onInfo={(next) => callbacks.onInfo('file', next)}
+            onHeadings={(list) => callbacks.onHeadings('file', list)}
+            onDirtyChange={(dirty) => callbacks.onDirtyChange('file', dirty)}
+            onClose={() => changeTarget(null)}
           />
-        ) : (
+        )}
+        {!target && (
           <div className="placeholder">
             <h1 className="wordmark">Oisín</h1>
-            <p>{workspace.roots.length > 0 ? 'Choose a file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
+            <p>{workspace.roots.length > 0 ? 'Choose a section or file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
           </div>
         )}
       </main>
-      <StatusBar status={status} documentInfo={openPath ? documentInfo : null} />
+      <StatusBar
+        status={status}
+        documentInfo={info}
+        documentLabel={target?.kind === 'section' ? PANE_LABEL[activePane] : ''}
+      />
     </div>
   )
 }

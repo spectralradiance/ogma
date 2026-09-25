@@ -21,9 +21,25 @@ const api: OisinApi = {
     removeRoot: (path) => ipcRenderer.invoke(IPC.workspaceRemoveRoot, path),
   },
   files: {
-    listDir: (path) => ipcRenderer.invoke(IPC.filesListDir, path),
-    read: (path) => ipcRenderer.invoke(IPC.filesRead, path),
+    read: (path, options) => ipcRenderer.invoke(IPC.filesRead, path, options),
     write: (request) => ipcRenderer.invoke(IPC.filesWrite, request),
+    onChanged: (listener) => {
+      const handler = (_event: IpcRendererEvent, paths: string[]): void => listener(paths)
+      ipcRenderer.on(IPC.filesChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.filesChanged, handler)
+      }
+    },
+  },
+  folders: {
+    read: (path) => ipcRenderer.invoke(IPC.foldersRead, path),
+    create: (parent, name) => ipcRenderer.invoke(IPC.foldersCreate, parent, name),
+  },
+  sections: {
+    create: (folder, title) => ipcRenderer.invoke(IPC.sectionsCreate, folder, title),
+    rename: (folder, stem, title) => ipcRenderer.invoke(IPC.sectionsRename, folder, stem, title),
+    move: (folder, stem, direction) => ipcRenderer.invoke(IPC.sectionsMove, folder, stem, direction),
+    trash: (folder, stem) => ipcRenderer.invoke(IPC.sectionsTrash, folder, stem),
   },
 }
 

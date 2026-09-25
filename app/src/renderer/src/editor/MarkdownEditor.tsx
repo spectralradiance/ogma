@@ -3,7 +3,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Compartment, EditorState } from '@codemirror/state'
-import { drawSelection, dropCursor, EditorView, keymap } from '@codemirror/view'
+import { drawSelection, dropCursor, EditorView, keymap, placeholder as placeholderText } from '@codemirror/view'
 import { type Ref, useEffectEvent, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
 import { toggleWrap } from './commands'
@@ -14,34 +14,53 @@ import { editorTheme } from './theme'
 export interface MarkdownEditorHandle {
   getText(): string
   focus(): void
+  /** Puts the cursor at the start of a 1-based line and scrolls it to the top. */
+  revealLine(line: number): void
 }
 
 interface MarkdownEditorProps {
   ref?: Ref<MarkdownEditorHandle>
   path: string
   initialText: string
+  placeholder?: string
   live: boolean
   focusMode: boolean
   onDocChanged: () => void
   onSave: () => void
   onBlur: () => void
+  onFocus?: () => void
 }
+
+const noop = () => {}
 
 /**
  * Uncontrolled CodeMirror editor. The parent reads the text through the handle
  * instead of receiving it on every keystroke, which keeps large notes fast.
  */
-export function MarkdownEditor({ ref, path, initialText, live, focusMode, onDocChanged, onSave, onBlur }: MarkdownEditorProps) {
+export function MarkdownEditor({
+  ref, path, initialText, placeholder, live, focusMode, onDocChanged, onSave, onBlur, onFocus,
+}: MarkdownEditorProps) {
   const container = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const [compartments] = useState(() => ({ live: new Compartment(), focus: new Compartment() }))
   const handleDocChanged = useEffectEvent(onDocChanged)
   const handleSave = useEffectEvent(onSave)
   const handleBlur = useEffectEvent(onBlur)
+  const handleFocus = useEffectEvent(onFocus ?? noop)
 
   useImperativeHandle(ref, () => ({
     getText: () => view.current?.state.doc.toString() ?? initialText,
     focus: () => view.current?.focus(),
+    revealLine: (number) => {
+      const editor = view.current
+      if (!editor) return
+      const line = editor.state.doc.line(Math.max(1, Math.min(number, editor.state.doc.lines)))
+      editor.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 24 }),
+      })
+      editor.focus()
+    },
   }), [initialText])
 
   useLayoutEffect(() => {
@@ -61,6 +80,7 @@ export function MarkdownEditor({ ref, path, initialText, live, focusMode, onDocC
         compartments.focus.of([]),
         editorTheme,
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off' }),
+        placeholder ? placeholderText(placeholder) : [],
         keymap.of([
           { key: 'Mod-s', preventDefault: true, run: () => { handleSave(); return true } },
           { key: 'Mod-b', run: toggleWrap('**') },
@@ -73,7 +93,10 @@ export function MarkdownEditor({ ref, path, initialText, live, focusMode, onDocC
         ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) handleDocChanged()
-          if (update.focusChanged && !update.view.hasFocus) handleBlur()
+          if (update.focusChanged) {
+            if (update.view.hasFocus) handleFocus()
+            else handleBlur()
+          }
         }),
       ],
     })
@@ -83,7 +106,7 @@ export function MarkdownEditor({ ref, path, initialText, live, focusMode, onDocC
       editor.destroy()
       view.current = null
     }
-  }, [path, initialText, compartments])
+  }, [path, initialText, placeholder, compartments])
 
   useLayoutEffect(() => {
     view.current?.dispatch({ effects: compartments.live.reconfigure(live ? livePreview : []) })

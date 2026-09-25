@@ -68,18 +68,13 @@ export interface TextFormat {
   mixedEol: boolean
 }
 
-export interface DirEntry {
-  name: string
-  path: string
-  kind: 'dir' | 'file'
-}
-
 export interface TextDocument {
   path: string
   /** Always uses "\n" line breaks; `format` records what the file really uses. */
   text: string
   format: TextFormat
-  mtimeMs: number
+  /** null when the file does not exist yet (read with `allowMissing`). */
+  mtimeMs: number | null
   size: number
 }
 
@@ -87,9 +82,39 @@ export interface WriteRequest {
   path: string
   text: string
   format: TextFormat
-  /** The mtime the document was loaded or last saved with; a mismatch means someone else changed the file. */
-  expectedMtimeMs: number
+  /**
+   * The mtime the document was loaded or last saved with; a mismatch means someone
+   * else changed the file. null means the file is expected not to exist yet.
+   */
+  expectedMtimeMs: number | null
   force?: boolean
+}
+
+export interface SectionInfo {
+  /** File name without the -notes/-output suffix and extension, e.g. "1 the first era". */
+  stem: string
+  ordinal: string | null
+  separator: string
+  title: string
+  /** Existing file names (in the document folder), or null when not created yet. */
+  notes: string | null
+  output: string | null
+  /** The names to use, whether or not the files exist yet. */
+  notesName: string
+  outputName: string
+}
+
+export interface SubdocumentInfo {
+  name: string
+  ordinal: string | null
+  title: string
+}
+
+/** One document folder: its sub-documents, ordered sections, and document-wide notes. */
+export interface FolderModel {
+  subdocuments: SubdocumentInfo[]
+  sections: SectionInfo[]
+  documentNotes: string[]
 }
 
 export type WriteResult =
@@ -110,9 +135,20 @@ export interface OisinApi {
     removeRoot(path: string): Promise<WorkspaceState>
   }
   files: {
-    listDir(path: string): Promise<DirEntry[]>
-    read(path: string): Promise<TextDocument>
+    read(path: string, options?: { allowMissing?: boolean }): Promise<TextDocument>
     write(request: WriteRequest): Promise<WriteResult>
+    /** Paths changed on disk under any workspace root (debounced). */
+    onChanged(listener: (paths: string[]) => void): () => void
+  }
+  folders: {
+    read(path: string): Promise<FolderModel>
+    create(parent: string, name: string): Promise<string>
+  }
+  sections: {
+    create(folder: string, title: string): Promise<SectionInfo>
+    rename(folder: string, stem: string, title: string): Promise<SectionInfo>
+    move(folder: string, stem: string, direction: 'up' | 'down'): Promise<SectionInfo>
+    trash(folder: string, stem: string): Promise<void>
   }
 }
 
@@ -124,9 +160,15 @@ export const IPC = {
   workspaceGet: 'workspace:get',
   workspaceAddRoot: 'workspace:add-root',
   workspaceRemoveRoot: 'workspace:remove-root',
-  filesListDir: 'files:list-dir',
   filesRead: 'files:read',
   filesWrite: 'files:write',
+  filesChanged: 'files:changed',
+  foldersRead: 'folders:read',
+  foldersCreate: 'folders:create',
+  sectionsCreate: 'sections:create',
+  sectionsRename: 'sections:rename',
+  sectionsMove: 'sections:move',
+  sectionsTrash: 'sections:trash',
 } as const
 
 /** Custom protocol that serves images from inside workspace roots to the editor. */

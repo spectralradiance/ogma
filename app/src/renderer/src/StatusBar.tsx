@@ -15,9 +15,11 @@ const STATE_LABEL: Record<SidecarState, string> = {
 interface StatusBarProps {
   status: SidecarStatus | null
   documentInfo: DocumentInfo | null
+  /** Which pane the document info describes, e.g. "Notes". */
+  documentLabel?: string
 }
 
-export function StatusBar({ status, documentInfo }: StatusBarProps) {
+export function StatusBar({ status, documentInfo, documentLabel }: StatusBarProps) {
   const [open, setOpen] = useState(false)
   const state = status?.state ?? 'starting'
   const health = status?.health
@@ -44,6 +46,7 @@ export function StatusBar({ status, documentInfo }: StatusBarProps) {
       {!health && status?.error && <span className="status-item status-error">{status.error}</span>}
       {documentInfo && (
         <span className="status-document">
+          {documentLabel && <span className="status-pane">{documentLabel}</span>}
           <span>{documentInfo.words.toLocaleString()} {documentInfo.words === 1 ? 'word' : 'words'}</span>
           <span title="File encoding">{encodingLabel(documentInfo.format.encoding)}</span>
           <span title="Line endings">

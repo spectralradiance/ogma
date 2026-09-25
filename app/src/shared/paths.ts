@@ -42,3 +42,18 @@ export function pathFromLocalFileUrl(url: string): string | null {
     return null
   }
 }
+
+export function joinPath(directory: string, name: string): string {
+  const separator = directory.includes('\\') || /^[a-zA-Z]:/.test(directory) ? '\\' : '/'
+  return directory.endsWith(separator) ? directory + name : directory + separator + name
+}
+
+/** Path equality as the OS sees it: case-insensitive for Windows paths, ignoring trailing separators. */
+export function samePath(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const trimmed = value.replace(/[\\/]+$/, '')
+    const windows = /^[a-zA-Z]:/.test(trimmed) || trimmed.includes('\\')
+    return windows ? trimmed.replace(/\//g, '\\').toLowerCase() : trimmed
+  }
+  return normalize(left) === normalize(right)
+}

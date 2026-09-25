@@ -182,7 +182,13 @@ Also landed early from Phase 2 because in-place editing needed them: a lazy file
 - Ctrl+S, autosave with a debounce, an unsaved-changes indicator, and encoding and line-ending preservation.
 - **Done when:** any file from your notes opens, edits and saves back byte-identical except for your changes, and looks rendered everywhere except where the cursor is.
 
-### Phase 2 — Workspace, documents & sections (~1 week)
+### Phase 2 — Workspace, documents & sections (~1 week) ✅ done 2026-09-25
+What shipped differs from the spec below in four places:
+- Roots live in the app's settings; the separate `.oisin-workspace` file (several named workspaces) is deferred until it is needed.
+- Reordering is ↑/↓ (swapping ordinals, both files renamed together) rather than drag and drop.
+- Scroll sync between panes is deferred.
+- The watcher uses Node's recursive `fs.watch`; on folders it cannot watch (possibly some cloud-drive mounts) the tree only refreshes when a folder is reopened, but edits still never overwrite outside changes, because every save checks the file's mtime.
+
 - Workspace file: create or open it, and add or remove roots (folder picker). The last workspace reopens on launch.
 - Section discovery as in §3, with a watcher on every root. Create, rename, reorder and delete sections. Renaming renames the notes and output files together. Reordering changes the number prefix, or only the metadata if you prefer that.
 - Sidebar: roots → documents (nested) → a Document notes group + ordered sections, plus headings inside each file as sub-entries.

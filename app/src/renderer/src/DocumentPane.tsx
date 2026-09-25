@@ -1,13 +1,15 @@
-import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
 import { folderName } from '../../shared/format'
 import type { TextDocument, TextFormat } from '../../shared/ipc'
 import { dirname } from '../../shared/paths'
-import { countWords } from '../../shared/text'
+import { countWords, extractHeadings, type Heading } from '../../shared/text'
+import { onDiskChange, touchesFile } from './changes'
 import { MarkdownEditor, type MarkdownEditorHandle } from './editor/MarkdownEditor'
+import { errorMessage } from './target'
 
 const AUTOSAVE_DELAY_MS = 1200
-const WORD_COUNT_DELAY_MS = 400
+const STATS_DELAY_MS = 400
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'
 
@@ -27,80 +29,116 @@ export interface DocumentInfo {
 export interface DocumentPaneHandle {
   /** Saves pending edits. Resolves false if they could not be saved. */
   flush(): Promise<boolean>
+  revealLine(line: number): void
 }
 
 interface DocumentPaneProps {
   ref?: Ref<DocumentPaneHandle>
   path: string
+  /** Shown in the header, e.g. "Notes" or "Output". */
+  label?: string
+  /** Open an empty editor when the file does not exist; the first save creates it. */
+  allowMissing?: boolean
+  placeholder?: string
   live: boolean
   focusMode: boolean
-  onToggleLive: () => void
-  onToggleFocus: () => void
+  headerActions?: ReactNode
   onInfo: (info: DocumentInfo | null) => void
+  onHeadings?: (headings: Heading[]) => void
   onDirtyChange: (dirty: boolean) => void
-  onClose: () => void
+  onFocus?: () => void
+  onClose?: () => void
 }
 
-function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  // Strip Electron's "Error invoking remote method 'files:read': Error: " prefix.
-  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '')
+interface DiskState {
+  mtimeMs: number | null
+  format: TextFormat
 }
 
 export function DocumentPane({
-  ref, path, live, focusMode, onToggleLive, onToggleFocus, onInfo, onDirtyChange, onClose,
+  ref, path, label, allowMissing = false, placeholder, live, focusMode, headerActions,
+  onInfo, onHeadings, onDirtyChange, onFocus, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [exists, setExists] = useState(true)
 
   const editor = useRef<MarkdownEditorHandle>(null)
-  const disk = useRef<{ mtimeMs: number; format: TextFormat } | null>(null)
+  const disk = useRef<DiskState | null>(null)
   const state = useRef<SaveState>('saved')
   const version = useRef(0)
   const savedVersion = useRef(0)
   const inFlight = useRef<Promise<boolean> | null>(null)
   const autosaveTimer = useRef<number | undefined>(undefined)
-  const wordTimer = useRef<number | undefined>(undefined)
+  const statsTimer = useRef<number | undefined>(undefined)
   // Lets save() reschedule itself for edits made while it was writing.
   const saveLater = useRef<() => void>(() => {})
+
+  // The parent's latest callbacks, read through a ref so that their identity
+  // changing on every parent render does not re-run the file load.
+  const parent = useRef({ onInfo, onHeadings, onDirtyChange })
+  useLayoutEffect(() => {
+    parent.current = { onInfo, onHeadings, onDirtyChange }
+  })
 
   const updateState = useCallback((next: SaveState) => {
     state.current = next
     setSaveState(next)
   }, [])
 
-  const load = useCallback(() => window.oisin.files.read(path).then(
-    (document) => {
-      disk.current = { mtimeMs: document.mtimeMs, format: document.format }
-      version.current = 0
-      savedVersion.current = 0
-      setLoadError(null)
-      setSaveError(null)
-      updateState('saved')
-      setLoaded((previous) => ({ document, generation: (previous?.generation ?? 0) + 1 }))
-      onInfo({ words: countWords(document.text), format: document.format })
-    },
+  const reportStats = useCallback((text: string, format: TextFormat) => {
+    parent.current.onInfo({ words: countWords(text), format })
+    parent.current.onHeadings?.(extractHeadings(text))
+  }, [])
+
+  const applyDocument = useCallback((document: TextDocument) => {
+    disk.current = { mtimeMs: document.mtimeMs, format: document.format }
+    version.current = 0
+    savedVersion.current = 0
+    setExists(document.mtimeMs !== null)
+    setLoadError(null)
+    setSaveError(null)
+    updateState('saved')
+    setLoaded((previous) => ({ document, generation: (previous?.generation ?? 0) + 1 }))
+    reportStats(document.text, document.format)
+  }, [reportStats, updateState])
+
+  const load = useCallback(() => window.oisin.files.read(path, { allowMissing }).then(
+    applyDocument,
     (error: unknown) => {
       setLoadError(errorMessage(error))
-      onInfo(null)
+      parent.current.onInfo(null)
     },
-  ), [path, onInfo, updateState])
+  ), [path, allowMissing, applyDocument])
 
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
-    onDirtyChange(saveState !== 'saved')
-  }, [saveState, onDirtyChange])
+    parent.current.onDirtyChange(saveState !== 'saved')
+  }, [saveState])
 
   useEffect(() => () => {
     window.clearTimeout(autosaveTimer.current)
-    window.clearTimeout(wordTimer.current)
+    window.clearTimeout(statsTimer.current)
   }, [])
+
+  // Outside edits: reload silently when there is nothing unsaved, otherwise ask.
+  useEffect(() => onDiskChange((paths) => {
+    if (!touchesFile(paths, path)) return
+    void (async () => {
+      if (inFlight.current) await inFlight.current
+      const document = await window.oisin.files.read(path, { allowMissing: true }).catch(() => null)
+      const known = disk.current
+      if (!document || !known || document.mtimeMs === known.mtimeMs) return // our own save, or no change
+      if (state.current === 'saved') applyDocument(document)
+      else updateState('conflict')
+    })()
+  }), [path, applyDocument, updateState])
 
   const save = useCallback(async (force = false): Promise<boolean> => {
     window.clearTimeout(autosaveTimer.current)
@@ -125,9 +163,10 @@ export function DocumentPane({
         }
         disk.current = { mtimeMs: result.mtimeMs, format: result.format }
         savedVersion.current = target
+        setExists(true)
         setSaveError(null)
         if (result.notice) setNotice(result.notice)
-        onInfo({ words: countWords(text), format: result.format })
+        parent.current.onInfo({ words: countWords(text), format: result.format })
         if (version.current === target) {
           updateState('saved')
         } else {
@@ -147,9 +186,12 @@ export function DocumentPane({
     } finally {
       inFlight.current = null
     }
-  }, [path, onInfo, updateState])
+  }, [path, updateState])
 
-  useImperativeHandle(ref, () => ({ flush: () => save() }), [save])
+  useImperativeHandle(ref, () => ({
+    flush: () => save(),
+    revealLine: (line) => editor.current?.revealLine(line),
+  }), [save])
 
   useEffect(() => {
     saveLater.current = () => {
@@ -166,19 +208,18 @@ export function DocumentPane({
     } else {
       saveLater.current()
     }
-    window.clearTimeout(wordTimer.current)
-    wordTimer.current = window.setTimeout(() => {
+    window.clearTimeout(statsTimer.current)
+    statsTimer.current = window.setTimeout(() => {
       const format = disk.current?.format
-      if (editor.current && format) onInfo({ words: countWords(editor.current.getText()), format })
-    }, WORD_COUNT_DELAY_MS)
-  }, [onInfo, updateState])
+      if (editor.current && format) reportStats(editor.current.getText(), format)
+    }, STATS_DELAY_MS)
+  }, [reportStats, updateState])
 
   const reloadFromDisk = () => {
     if (window.confirm('Discard your unsaved changes and load the version on disk?')) void load()
   }
 
   const fileName = folderName(path)
-  const folder = folderName(dirname(path))
 
   if (loadError) {
     return (
@@ -186,7 +227,7 @@ export function DocumentPane({
         <div className="document-message">
           <h2>Couldn’t open {fileName}</h2>
           <p>{loadError}</p>
-          <button type="button" onClick={onClose}>Close</button>
+          {onClose && <button type="button" onClick={onClose}>Close</button>}
         </div>
       </section>
     )
@@ -196,30 +237,20 @@ export function DocumentPane({
     <section className="document">
       <header className="document-header">
         <div className="document-title" title={path}>
+          {label && <span className="document-label">{label}</span>}
           <span className="document-name">{fileName}</span>
-          <span className="document-folder">{folder}</span>
+          {!label && <span className="document-folder">{folderName(dirname(path))}</span>}
+          {!exists && <span className="document-new" title="Created when you start typing">new</span>}
         </div>
         <span className={`save-state save-${saveState}`} title={saveError ?? undefined}>
-          {SAVE_LABEL[saveState]}
+          {exists || saveState !== 'saved' ? SAVE_LABEL[saveState] : ''}
         </span>
-        <div className="document-actions">
-          <div className="segmented" role="group" aria-label="Editing mode">
-            <button type="button" aria-pressed={live} onClick={live ? undefined : onToggleLive} title="Live rendering (Ctrl+/)">
-              Live
-            </button>
-            <button type="button" aria-pressed={!live} onClick={live ? onToggleLive : undefined} title="Markdown source (Ctrl+/)">
-              Source
-            </button>
-          </div>
-          <button type="button" aria-pressed={focusMode} onClick={onToggleFocus} title="Focus mode (F8)">
-            Focus
-          </button>
-        </div>
+        {headerActions}
       </header>
 
       {saveState === 'conflict' && (
         <div className="banner banner-warn" role="alert">
-          <span>This file was changed outside Oisín since you opened it.</span>
+          <span>This file was changed outside Oisín while you had unsaved edits.</span>
           <button type="button" onClick={reloadFromDisk}>Load disk version</button>
           <button type="button" onClick={() => void save(true)}>Keep mine</button>
         </div>
@@ -243,11 +274,13 @@ export function DocumentPane({
           ref={editor}
           path={path}
           initialText={loaded.document.text}
+          placeholder={placeholder}
           live={live}
           focusMode={focusMode}
           onDocChanged={onDocChanged}
           onSave={() => void save()}
           onBlur={() => void save()}
+          onFocus={onFocus}
         />
       ) : (
         <div className="document-message">Opening…</div>

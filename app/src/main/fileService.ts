@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { DirEntry, TextDocument, WriteRequest, WriteResult } from '../shared/ipc'
+import type { TextDocument, WriteRequest, WriteResult } from '../shared/ipc'
+import type { FolderEntryName } from './sections'
 import { decodeText, encodeText } from './textFile'
 
 type PathApi = typeof path.win32
@@ -103,23 +104,30 @@ export class BackupStore {
   }
 }
 
-export async function listDirectory(directory: string): Promise<DirEntry[]> {
+/** Folders and text files directly inside `directory` (hidden and tool folders skipped). */
+export async function listDirectory(directory: string): Promise<FolderEntryName[]> {
   const entries = await readdir(directory, { withFileTypes: true })
-  const result: DirEntry[] = []
+  const result: FolderEntryName[] = []
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
     if (entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name)) {
-      result.push({ name: entry.name, path: path.join(directory, entry.name), kind: 'dir' })
+      result.push({ name: entry.name, kind: 'dir' })
     } else if (entry.isFile() && isTextFileName(entry.name)) {
-      result.push({ name: entry.name, path: path.join(directory, entry.name), kind: 'file' })
+      result.push({ name: entry.name, kind: 'file' })
     }
   }
   return result.sort((left, right) =>
     left.kind === right.kind ? compareNames(left.name, right.name) : left.kind === 'dir' ? -1 : 1)
 }
 
-export async function readTextDocument(target: string): Promise<TextDocument> {
-  const info = await stat(target)
+const NEW_FILE_FORMAT = { encoding: 'utf-8', eol: '\n', mixedEol: false } as const
+
+export async function readTextDocument(target: string, allowMissing = false): Promise<TextDocument> {
+  const info = await stat(target).catch((error: NodeJS.ErrnoException) => {
+    if (allowMissing && error.code === 'ENOENT') return null
+    throw error
+  })
+  if (!info) return { path: target, text: '', format: { ...NEW_FILE_FORMAT }, mtimeMs: null, size: 0 }
   if (info.size > MAX_TEXT_BYTES) throw new Error('This file is too large to open as text.')
   const { text, format } = decodeText(await readFile(target))
   return { path: target, text, format, mtimeMs: info.mtimeMs, size: info.size }
@@ -146,7 +154,8 @@ export async function writeTextDocument(
   backups: BackupStore,
 ): Promise<WriteResult> {
   const current = await stat(target).catch(() => null)
-  if (!request.force && (!current || current.mtimeMs !== request.expectedMtimeMs)) {
+  const unchanged = current ? current.mtimeMs === request.expectedMtimeMs : request.expectedMtimeMs === null
+  if (!request.force && !unchanged) {
     return { ok: false, reason: 'conflict', diskMtimeMs: current?.mtimeMs ?? 0 }
   }
   if (current) await backups.ensureBackup(target)

@@ -4,11 +4,13 @@ import { pathToFileURL } from 'node:url'
 
 import { IPC, LOCAL_FILE_SCHEME, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
-import { BackupStore, PathGuard, listDirectory, readTextDocument, writeTextDocument } from './fileService'
+import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
+import { WorkspaceWatcher } from './watcher'
 import { addRoot, removeRoot } from './workspaceRoots'
+import { createFolder, createSection, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
 if (process.env.OISIN_USER_DATA) {
@@ -30,6 +32,7 @@ const backupsDir = join(app.getPath('userData'), 'backups')
 const backups = new BackupStore(backupsDir, guard)
 const BACKUP_RETENTION_DAYS = 30
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'])
+const watcher = new WorkspaceWatcher((paths) => mainWindow?.webContents.send(IPC.filesChanged, paths))
 let mainWindow: BrowserWindow | null = null
 let quitting = false
 
@@ -115,19 +118,40 @@ function registerIpc(): void {
         settings.get().workspaceRoots,
       )
       settings.update({ workspaceRoots: roots })
+      watcher.setRoots(roots)
     }
     return workspaceState()
   })
   ipcMain.handle(IPC.workspaceRemoveRoot, (_event, path: unknown) => {
     if (typeof path !== 'string') throw new TypeError('path must be a string')
     settings.update({ workspaceRoots: removeRoot(settings.get().workspaceRoots, path, process.platform) })
+    watcher.setRoots(settings.get().workspaceRoots)
     return workspaceState()
   })
 
-  ipcMain.handle(IPC.filesListDir, (_event, path: unknown) => listDirectory(guard.resolve(path)))
-  ipcMain.handle(IPC.filesRead, (_event, path: unknown) => readTextDocument(guard.resolve(path)))
+  ipcMain.handle(IPC.filesRead, (_event, path: unknown, options?: { allowMissing?: boolean }) =>
+    readTextDocument(guard.resolve(path), options?.allowMissing === true))
   ipcMain.handle(IPC.filesWrite, (_event, request: WriteRequest) =>
     writeTextDocument(guard.resolve(request?.path), request, backups))
+
+  ipcMain.handle(IPC.foldersRead, (_event, folder: unknown) => readFolder(guard.resolve(folder)))
+  ipcMain.handle(IPC.foldersCreate, (_event, parent: unknown, name: unknown) =>
+    createFolder(guard.resolve(parent), text(name)))
+  ipcMain.handle(IPC.sectionsCreate, (_event, folder: unknown, title: unknown) =>
+    createSection(guard.resolve(folder), text(title)))
+  ipcMain.handle(IPC.sectionsRename, (_event, folder: unknown, stem: unknown, title: unknown) =>
+    renameSection(guard.resolve(folder), text(stem), text(title)))
+  ipcMain.handle(IPC.sectionsMove, (_event, folder: unknown, stem: unknown, direction: unknown) => {
+    if (direction !== 'up' && direction !== 'down') throw new TypeError('direction must be up or down')
+    return moveSection(guard.resolve(folder), text(stem), direction)
+  })
+  ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
+    trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
+}
+
+function text(value: unknown): string {
+  if (typeof value !== 'string') throw new TypeError('Expected a string.')
+  return value
 }
 
 sidecar.on('status', (status) => {
@@ -150,6 +174,7 @@ app.on('will-quit', (event) => {
   if (quitting) return
   event.preventDefault()
   quitting = true
+  watcher.close()
   void sidecar.stop().finally(() => app.quit())
 })
 
@@ -158,6 +183,7 @@ void app.whenReady().then(() => {
   registerIpc()
   void BackupStore.prune(backupsDir, BACKUP_RETENTION_DAYS)
   createWindow()
+  watcher.setRoots(settings.get().workspaceRoots)
   void sidecar.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

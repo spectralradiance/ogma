@@ -92,6 +92,20 @@ describe('writeTextDocument', () => {
     expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 
+  it('creates a missing file only when it is still missing', async () => {
+    const { root, store } = await workspace()
+    const file = path.join(root, '1 intro-output.md')
+    const missing = await readTextDocument(file, true)
+    expect(missing).toMatchObject({ text: '', mtimeMs: null })
+    await expect(readTextDocument(file)).rejects.toThrow()
+
+    const request = { path: file, text: 'draft\n', format: missing.format, expectedMtimeMs: null }
+    expect((await writeTextDocument(file, request, store)).ok).toBe(true)
+    expect(await readFile(file, 'utf8')).toBe('draft\n')
+    // A second "create" means someone else made the file in the meantime.
+    expect(await writeTextDocument(file, request, store)).toMatchObject({ ok: false, reason: 'conflict' })
+  })
+
   it('reports a conflict when the file changed on disk, and overwrites only when forced', async () => {
     const { root, store } = await workspace()
     const file = path.join(root, 'a.md')

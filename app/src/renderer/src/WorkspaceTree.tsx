@@ -1,0 +1,309 @@
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+
+import { folderName } from '../../shared/format'
+import type { FolderModel, SectionInfo } from '../../shared/ipc'
+import { joinPath, samePath } from '../../shared/paths'
+import type { Heading } from '../../shared/text'
+import { onDiskChange, touchesFolder } from './changes'
+import { errorMessage, isOpenSection, type OpenTarget, type PaneId, sectionTarget } from './target'
+
+export interface TreeActions {
+  target: OpenTarget | null
+  outline: { pane: PaneId; headings: Heading[] } | null
+  open: (target: OpenTarget) => void
+  reveal: (line: number) => void
+  /** Runs a rename/move/trash, saving the open section first if it is affected. */
+  runSectionOperation: (folder: string, stem: string, operation: () => Promise<SectionInfo | null>) => Promise<void>
+}
+
+const TreeContext = createContext<TreeActions | null>(null)
+
+function useTree(): TreeActions {
+  const context = useContext(TreeContext)
+  if (!context) throw new Error('WorkspaceTree context missing')
+  return context
+}
+
+const indent = (depth: number, extra = 0) => ({ paddingLeft: `${8 + depth * 14 + extra}px` })
+
+function NameInput({ initial, placeholder, depth, onSubmit, onCancel }: {
+  initial: string
+  placeholder: string
+  depth: number
+  onSubmit: (value: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(initial)
+  return (
+    <li className="tree-input-row" style={indent(depth, 18)}>
+      <input
+        className="tree-input"
+        autoFocus
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => setValue(event.target.value)}
+        onFocus={(event) => event.target.select()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && value.trim()) onSubmit(value.trim())
+          if (event.key === 'Escape') onCancel()
+        }}
+        onBlur={onCancel}
+      />
+    </li>
+  )
+}
+
+function SectionRow({ folder, section, depth, index, count, onChanged }: {
+  folder: string
+  section: SectionInfo
+  depth: number
+  index: number
+  count: number
+  onChanged: () => void
+}) {
+  const tree = useTree()
+  const [renaming, setRenaming] = useState(false)
+  const active = isOpenSection(tree.target, folder, section.stem)
+
+  const run = (operation: () => Promise<SectionInfo | null>) => {
+    void tree.runSectionOperation(folder, section.stem, operation).then(onChanged)
+  }
+
+  if (renaming) {
+    return (
+      <NameInput
+        initial={section.title}
+        placeholder="Section name"
+        depth={depth}
+        onCancel={() => setRenaming(false)}
+        onSubmit={(title) => {
+          setRenaming(false)
+          if (title !== section.title) run(() => window.oisin.sections.rename(folder, section.stem, title))
+        }}
+      />
+    )
+  }
+
+  const numbered = section.ordinal !== null
+  return (
+    <li>
+      <div className={`tree-row-wrap${active ? ' active' : ''}`}>
+        <button
+          type="button"
+          className="tree-row tree-section"
+          style={indent(depth, 18)}
+          onClick={() => tree.open(sectionTarget(folder, section))}
+          title={section.notes ?? section.notesName}
+        >
+          {section.ordinal && <span className="tree-ordinal">{section.ordinal}</span>}
+          <span className="tree-label">{section.title}</span>
+          <span
+            className={`output-mark${section.output ? ' has-output' : ''}`}
+            title={section.output ? 'Has output' : 'No output yet'}
+            aria-label={section.output ? 'Has output' : 'No output yet'}
+          />
+        </button>
+        <span className="tree-actions">
+          {numbered && (
+            <>
+              <button type="button" className="icon-button" disabled={index === 0} title="Move up"
+                onClick={() => run(() => window.oisin.sections.move(folder, section.stem, 'up'))}>↑</button>
+              <button type="button" className="icon-button" disabled={index === count - 1} title="Move down"
+                onClick={() => run(() => window.oisin.sections.move(folder, section.stem, 'down'))}>↓</button>
+            </>
+          )}
+          <button type="button" className="icon-button" title="Rename" onClick={() => setRenaming(true)}>✎</button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Move to Recycle Bin"
+            onClick={() => {
+              const files = [section.notes, section.output].filter(Boolean).join('” and “')
+              if (window.confirm(`Move “${files}” to the Recycle Bin?`)) {
+                run(async () => {
+                  await window.oisin.sections.trash(folder, section.stem)
+                  return null
+                })
+              }
+            }}
+          >
+            ×
+          </button>
+        </span>
+      </div>
+      {active && tree.outline && tree.outline.headings.length > 0 && (
+        <ul className="tree tree-outline" aria-label={`${tree.outline.pane} headings`}>
+          {tree.outline.headings.map((heading) => (
+            <li key={`${heading.line}:${heading.text}`}>
+              <button
+                type="button"
+                className="tree-row tree-heading"
+                style={indent(depth, 30 + (heading.level - 1) * 10)}
+                onClick={() => tree.reveal(heading.line)}
+              >
+                <span className="tree-label">{heading.text}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+type Editing = 'section' | 'folder' | null
+
+function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemoveRoot }: {
+  path: string
+  title: string
+  ordinal?: string | null
+  depth: number
+  initiallyOpen?: boolean
+  onRemoveRoot?: () => void
+}) {
+  const tree = useTree()
+  const [open, setOpen] = useState(initiallyOpen)
+  const [model, setModel] = useState<FolderModel | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Editing>(null)
+
+  const load = useCallback(() => window.oisin.folders.read(path).then(
+    (next) => {
+      setModel(next)
+      setError(null)
+    },
+    (reason: unknown) => setError(errorMessage(reason)),
+  ), [path])
+
+  useEffect(() => {
+    if (open) void load()
+  }, [open, load])
+
+  useEffect(() => {
+    if (!open) return
+    return onDiskChange((paths) => {
+      if (touchesFolder(paths, path)) void load()
+    })
+  }, [open, path, load])
+
+  const expand = () => setOpen(true)
+  const createSection = (name: string) => {
+    setEditing(null)
+    window.oisin.sections.create(path, name).then(
+      (section) => {
+        void load()
+        tree.open(sectionTarget(path, section))
+      },
+      (reason: unknown) => window.alert(errorMessage(reason)),
+    )
+  }
+  const createFolder = (name: string) => {
+    setEditing(null)
+    window.oisin.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
+  }
+
+  const fileActive = (name: string) => tree.target?.kind === 'file' && samePath(tree.target.path, joinPath(path, name))
+  const empty = model && model.sections.length === 0 && model.subdocuments.length === 0 && model.documentNotes.length === 0
+
+  return (
+    <li>
+      <div className={`tree-row-wrap${depth === 0 ? ' tree-root' : ''}`}>
+        <button type="button" className="tree-row tree-dir" style={indent(depth)} onClick={() => setOpen(!open)} aria-expanded={open} title={path}>
+          <span className="tree-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+          {ordinal && <span className="tree-ordinal">{ordinal}</span>}
+          <span className="tree-label">{title}</span>
+        </button>
+        <span className="tree-actions">
+          <button type="button" className="icon-button" title="New section" onClick={() => { expand(); setEditing('section') }}>+</button>
+          <button type="button" className="icon-button" title="New folder" onClick={() => { expand(); setEditing('folder') }}>⊞</button>
+          {onRemoveRoot && (
+            <button type="button" className="icon-button" title="Remove from workspace (files are not touched)" onClick={onRemoveRoot}>×</button>
+          )}
+        </span>
+      </div>
+      {open && (
+        <ul className="tree">
+          {error && <li className="tree-note" style={indent(depth, 18)}>{error}</li>}
+          {editing === 'folder' && (
+            <NameInput initial="" placeholder="Folder name" depth={depth + 1} onSubmit={createFolder} onCancel={() => setEditing(null)} />
+          )}
+          {model?.documentNotes.map((name) => (
+            <li key={name}>
+              <button
+                type="button"
+                className={`tree-row tree-docnote${fileActive(name) ? ' selected' : ''}`}
+                style={indent(depth + 1, 18)}
+                onClick={() => tree.open({ kind: 'file', path: joinPath(path, name) })}
+                title="Notes for this whole document"
+              >
+                <span className="tree-label">{name}</span>
+              </button>
+            </li>
+          ))}
+          {model?.subdocuments.map((subdocument) => (
+            <FolderNode
+              key={subdocument.name}
+              path={joinPath(path, subdocument.name)}
+              title={subdocument.title}
+              ordinal={subdocument.ordinal}
+              depth={depth + 1}
+            />
+          ))}
+          {model?.sections.map((section) => (
+            <SectionRow
+              key={section.stem}
+              folder={path}
+              section={section}
+              depth={depth + 1}
+              index={model.sections.filter((s) => s.ordinal !== null).indexOf(section)}
+              count={model.sections.filter((s) => s.ordinal !== null).length}
+              onChanged={() => void load()}
+            />
+          ))}
+          {editing === 'section' && (
+            <NameInput initial="" placeholder="Section name" depth={depth + 1} onSubmit={createSection} onCancel={() => setEditing(null)} />
+          )}
+          {empty && !editing && <li className="tree-note" style={indent(depth + 1, 18)}>Empty folder</li>}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+interface WorkspaceTreeProps extends TreeActions {
+  roots: string[]
+  onAddRoot: () => void
+  onRemoveRoot: (path: string) => void
+}
+
+export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, ...actions }: WorkspaceTreeProps) {
+  return (
+    <TreeContext.Provider value={actions}>
+      <aside className="sidebar">
+        <header className="sidebar-header">
+          <span>Workspace</span>
+          <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder">+</button>
+        </header>
+        {roots.length === 0 ? (
+          <>
+            <p className="sidebar-empty">No folders yet. Folders are edited in place; nothing is copied.</p>
+            <button type="button" className="add-folder" onClick={onAddRoot}>Add folder…</button>
+          </>
+        ) : (
+          <ul className="tree tree-top">
+            {roots.map((root) => (
+              <FolderNode
+                key={root}
+                path={root}
+                title={folderName(root)}
+                depth={0}
+                initiallyOpen={roots.length === 1}
+                onRemoveRoot={() => onRemoveRoot(root)}
+              />
+            ))}
+          </ul>
+        )}
+      </aside>
+    </TreeContext.Provider>
+  )
+}
