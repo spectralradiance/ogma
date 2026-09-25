@@ -1,0 +1,1 @@
+Notes kept the old way: extensionless files named "1 first snow", with outputs added beside them as "-output.md" files.

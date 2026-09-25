@@ -1,0 +1,6 @@
+- light takes time: ~8 min 20 s from the Sun
+- so every star we see is the star as it *was*
+- Andromeda: ~2.5 million light-years — light that left before there were people
+- some stars we see may no longer exist (careful: most are fine, don't overclaim)
+- looking up = looking back
+- close on: the night sky is the oldest thing most of us will ever see
