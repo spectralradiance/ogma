@@ -1,0 +1,43 @@
+# Oisín
+
+A section-based Markdown editor for writing, vocabulary and linguistic research. See [PLAN.md](PLAN.md) for the design and roadmap.
+
+- `app/`: Electron + React + TypeScript desktop app
+- `sidecar/`: Python FastAPI server for AI and GPU work, launched by the app
+- `scripts/`: setup and dev helpers
+
+## Setup (Windows, PowerShell)
+
+Requires Node.js 22+ and Python 3.11+.
+
+```powershell
+.\scripts\setup-sidecar.ps1           # venv + FastAPI + CUDA PyTorch (cu126)
+.\scripts\setup-sidecar.ps1 -NoTorch  # skip the ~2.5 GB PyTorch download for now
+cd app; npm install                   # also downloads the Electron binary
+```
+
+## Run
+
+```powershell
+.\scripts\dev.ps1               # the app; it starts and stops the sidecar itself
+.\scripts\dev.ps1 -SidecarOnly  # just the sidecar on :8765, printing its token
+```
+
+The status bar shows the sidecar state, GPU memory, PyTorch/CUDA and which AI providers have keys. Click it for details, logs and a restart button.
+
+Until the keychain-backed settings page arrives in Phase 4, providers read their keys from the environment the app was started from: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), and `OISIN_COMPAT_BASE_URL` for an OpenAI-compatible host.
+
+## Checks
+
+```powershell
+cd app; npm run lint; npm run typecheck; npm test; npm run build
+cd sidecar; .\.venv\Scripts\python.exe -m pytest -q
+```
+
+## How the app and sidecar connect
+
+- The app spawns `sidecar/.venv` Python on a free `127.0.0.1` port with a random per-launch bearer token (passed by environment variable, never on the command line).
+- Every sidecar route requires the token. The renderer never talks to the sidecar directly; it goes through the main process over IPC.
+- The sidecar exits when its stdin closes, so it cannot outlive the app, even after a crash.
+- If the sidecar dies or fails three health checks, the app restarts it with backoff, up to three attempts, then shows the error and logs.
+- `OISIN_PYTHON` and `OISIN_SIDECAR_DIR` override the Python and sidecar locations.

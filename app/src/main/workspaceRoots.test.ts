@@ -1,0 +1,39 @@
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+import { SettingsStore, parseSettings } from './settings'
+import { addRoot, removeRoot } from './workspaceRoots'
+
+describe('workspace roots', () => {
+  it('ignores case and trailing separators on Windows', () => {
+    const roots = addRoot(['C:\\Notes\\Poetry'], 'c:\\notes\\poetry\\', 'win32')
+    expect(roots).toEqual(['C:\\Notes\\Poetry'])
+    expect(removeRoot(roots, 'c:/notes/poetry', 'win32')).toEqual([])
+  })
+
+  it('is case-sensitive on POSIX', () => {
+    expect(addRoot(['/notes/Poetry'], '/notes/poetry', 'linux')).toEqual(['/notes/Poetry', '/notes/poetry'])
+  })
+})
+
+describe('settings', () => {
+  it('drops malformed values', () => {
+    expect(parseSettings({ workspaceRoots: ['a', 3, '', null] })).toEqual({ workspaceRoots: ['a'] })
+    expect(parseSettings('nonsense')).toEqual({ workspaceRoots: [] })
+  })
+
+  it('persists updates and preserves a corrupt file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oisin-settings-'))
+    const path = join(dir, 'settings.json')
+
+    new SettingsStore(path).update({ workspaceRoots: ['D:\\writing'] })
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ workspaceRoots: ['D:\\writing'] })
+    expect(new SettingsStore(path).get().workspaceRoots).toEqual(['D:\\writing'])
+
+    writeFileSync(path, '{ not json')
+    expect(new SettingsStore(path).get().workspaceRoots).toEqual([])
+    expect(readdirSync(dir).some((name) => name.startsWith('settings.json.corrupt-'))).toBe(true)
+  })
+})
