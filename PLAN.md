@@ -171,7 +171,9 @@ oisin/
 - `scripts/dev.ps1` runs both pieces for development.
 - **Done when:** the app launches and the status bar shows the sidecar and GPU status.
 
-### Phase 1 — Live Markdown editor (the core, ~1 week)
+### Phase 1 — Live Markdown editor (the core, ~1 week) ✅ done 2026-09-25
+Also landed early from Phase 2 because in-place editing needed them: a lazy file tree per root, atomic saves, conflict detection (mtime), and backup-on-first-write. The folder watcher and section model remain Phase 2.
+
 - Port `MarkdownEditor.tsx` and rewrite `liveMarkdown.ts` to walk the **Lezer syntax tree** instead of using regexes:
   - Headings, bold, italic, strike, inline code, links (show the text and hide the URL), images (render inline), blockquotes, lists and task checkboxes, horizontal rules, fenced code (with highlighting), tables (render as a widget, show the source when the cursor is inside).
   - Syntax is revealed only for the **node** under the cursor, not the whole line, which is how Typora behaves.

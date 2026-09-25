@@ -1,12 +1,15 @@
 import { folderName } from '../../shared/format'
+import { TreeNode } from './FileTree'
 
 interface SidebarProps {
   roots: string[]
+  openPath: string | null
   onAdd: () => void
   onRemove: (path: string) => void
+  onOpen: (path: string) => void
 }
 
-export function Sidebar({ roots, onAdd, onRemove }: SidebarProps) {
+export function Sidebar({ roots, openPath, onAdd, onRemove, onOpen }: SidebarProps) {
   return (
     <aside className="sidebar">
       <header className="sidebar-header">
@@ -16,31 +19,27 @@ export function Sidebar({ roots, onAdd, onRemove }: SidebarProps) {
         </button>
       </header>
       {roots.length === 0 ? (
-        <p className="sidebar-empty">No folders yet. Folders are edited in place; nothing is copied.</p>
+        <>
+          <p className="sidebar-empty">No folders yet. Folders are edited in place; nothing is copied.</p>
+          <button type="button" className="add-folder" onClick={onAdd}>
+            Add folder…
+          </button>
+        </>
       ) : (
-        <ul className="root-list">
+        <ul className="tree tree-top">
           {roots.map((root) => (
-            <li key={root} className="root-item" title={root}>
-              <div className="root-text">
-                <span className="root-name">{folderName(root)}</span>
-                <span className="root-path">{root}</span>
-              </div>
-              <button
-                type="button"
-                className="icon-button root-remove"
-                onClick={() => onRemove(root)}
-                title="Remove from workspace (files are not touched)"
-                aria-label={`Remove ${folderName(root)} from workspace`}
-              >
-                ×
-              </button>
-            </li>
+            <TreeNode
+              key={root}
+              entry={{ name: folderName(root), path: root, kind: 'dir' }}
+              depth={0}
+              openPath={openPath}
+              onOpen={onOpen}
+              initiallyOpen={roots.length === 1}
+              onRemove={() => onRemove(root)}
+            />
           ))}
         </ul>
       )}
-      <button type="button" className="add-folder" onClick={onAdd}>
-        Add folder…
-      </button>
     </aside>
   )
 }

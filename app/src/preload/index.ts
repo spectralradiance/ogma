@@ -20,6 +20,11 @@ const api: OisinApi = {
     addRoot: () => ipcRenderer.invoke(IPC.workspaceAddRoot),
     removeRoot: (path) => ipcRenderer.invoke(IPC.workspaceRemoveRoot, path),
   },
+  files: {
+    listDir: (path) => ipcRenderer.invoke(IPC.filesListDir, path),
+    read: (path) => ipcRenderer.invoke(IPC.filesRead, path),
+    write: (request) => ipcRenderer.invoke(IPC.filesWrite, request),
+  },
 }
 
 contextBridge.exposeInMainWorld('oisin', api)

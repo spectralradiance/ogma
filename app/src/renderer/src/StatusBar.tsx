@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { describeGpu, describeProviders, describeTorch, formatMegabytes } from '../../shared/format'
 import type { SidecarState, SidecarStatus } from '../../shared/ipc'
+import { encodingLabel, lineEndingLabel } from '../../shared/text'
+import type { DocumentInfo } from './DocumentPane'
 
 const STATE_LABEL: Record<SidecarState, string> = {
   starting: 'AI server starting…',
@@ -10,7 +12,12 @@ const STATE_LABEL: Record<SidecarState, string> = {
   stopped: 'AI server stopped',
 }
 
-export function StatusBar({ status }: { status: SidecarStatus | null }) {
+interface StatusBarProps {
+  status: SidecarStatus | null
+  documentInfo: DocumentInfo | null
+}
+
+export function StatusBar({ status, documentInfo }: StatusBarProps) {
   const [open, setOpen] = useState(false)
   const state = status?.state ?? 'starting'
   const health = status?.health
@@ -35,7 +42,16 @@ export function StatusBar({ status }: { status: SidecarStatus | null }) {
         </>
       )}
       {!health && status?.error && <span className="status-item status-error">{status.error}</span>}
-      {open && <SidecarDetails status={status} onClose={() => setOpen(false)} />}
+      {documentInfo && (
+        <span className="status-document">
+          <span>{documentInfo.words.toLocaleString()} {documentInfo.words === 1 ? 'word' : 'words'}</span>
+          <span title="File encoding">{encodingLabel(documentInfo.format.encoding)}</span>
+          <span title="Line endings">
+            {lineEndingLabel(documentInfo.format.eol)}{documentInfo.format.mixedEol ? ' (mixed)' : ''}
+          </span>
+        </span>
+      )}
+      {open &&<SidecarDetails status={status} onClose={() => setOpen(false)} />}
     </footer>
   )
 }

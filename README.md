@@ -27,6 +27,17 @@ The status bar shows the sidecar state, GPU memory, PyTorch/CUDA and which AI pr
 
 Until the keychain-backed settings page arrives in Phase 4, providers read their keys from the environment the app was started from: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), and `OISIN_COMPAT_BASE_URL` for an OpenAI-compatible host.
 
+## Editing safety
+
+Files are edited in place, so saving is careful:
+
+- The encoding (UTF-8, UTF-8 BOM, UTF-16, Windows-1252) and line endings are detected on open and restored on save. Unchanged files round-trip byte for byte. If you type a character Windows-1252 can't store, the file is saved as UTF-8 and a notice says so.
+- Saves are atomic (temp file + rename) and autosave runs 1.2 s after you stop typing, on blur, when switching files and on close.
+- Before Oisín first overwrites a file in a session, it copies the original to `%APPDATA%\Oisín\backups\<session>\`. Backups older than 30 days are pruned.
+- If the file changed on disk since it was opened, Oisín stops and asks: load the disk version, or keep yours.
+
+Set `OISIN_USER_DATA` to a folder to run against a throwaway profile (settings, backups) instead of your real one.
+
 ## Checks
 
 ```powershell
