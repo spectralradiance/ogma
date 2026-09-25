@@ -56,10 +56,18 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   private status: SidecarStatus = { state: 'stopped', health: null, error: null, restarts: 0 }
 
   private readonly paths: SidecarPaths
+  private readonly extraEnv: () => Record<string, string>
 
-  constructor(paths: SidecarPaths) {
+  /** `extraEnv` supplies stored API keys and provider settings at every launch. */
+  constructor(paths: SidecarPaths, extraEnv: () => Record<string, string> = () => ({})) {
     super()
     this.paths = paths
+    this.extraEnv = extraEnv
+  }
+
+  /** Where to reach the sidecar while it is online. */
+  connection(): { baseUrl: string; token: string } | null {
+    return this.status.state === 'online' ? { baseUrl: this.baseUrl, token: this.token } : null
   }
 
   getStatus(): SidecarStatus {
@@ -97,7 +105,7 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
       ['-m', 'oisin_ai', '--host', '127.0.0.1', '--port', String(port), '--watch-stdin'],
       {
         cwd: this.paths.sidecarDir,
-        env: { ...process.env, OISIN_SIDECAR_TOKEN: this.token, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, ...this.extraEnv(), OISIN_SIDECAR_TOKEN: this.token, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         windowsHide: true,
       },
     )

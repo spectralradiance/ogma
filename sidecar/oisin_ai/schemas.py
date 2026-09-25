@@ -75,5 +75,7 @@ class RunRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0, le=2)
     mode: Literal["local", "cloud", "hybrid"] = "hybrid"
     profile_id: str | None = None
+    # Use only profile_id, with no fallback (connection tests).
+    profile_only: bool = False
     profiles: list[RunProfile]
     routing: dict[str, list[str]]

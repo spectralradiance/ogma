@@ -169,6 +169,8 @@ export interface LexiconEntry {
   note: string
 }
 
+import type { AiConfig, AiEvent, AiRunRequest, AiSettingsState, SecretName } from './ai'
+
 /** Exposed to the renderer as `window.oisin` by the preload script. */
 export interface OisinApi {
   sidecar: {
@@ -207,6 +209,19 @@ export interface OisinApi {
     /** Imports an Aisling Vocabulary folder chosen by the user; null if cancelled. */
     importAisling(): Promise<{ imported: number; skipped: number } | null>
   }
+  ai: {
+    settings(): Promise<AiSettingsState>
+    saveConfig(config: AiConfig): Promise<AiSettingsState>
+    /** Stores (or with null, clears) an API key; the AI server restarts to pick it up. */
+    setKey(name: SecretName, value: string | null): Promise<AiSettingsState>
+    setCompatBaseUrl(url: string): Promise<AiSettingsState>
+    openPrompts(): Promise<void>
+    /** Starts a run and returns its id; events arrive through onEvent. */
+    run(request: AiRunRequest): Promise<string>
+    cancel(runId: string): Promise<void>
+    onEvent(listener: (runId: string, event: AiEvent) => void): () => void
+    unloadLocal(): Promise<void>
+  }
   sections: {
     create(folder: string, title: string): Promise<SectionInfo>
     rename(folder: string, stem: string, title: string): Promise<SectionInfo>
@@ -241,6 +256,15 @@ export const IPC = {
   lexiconSave: 'lexicon:save',
   lexiconRemove: 'lexicon:remove',
   lexiconImportAisling: 'lexicon:import-aisling',
+  aiSettings: 'ai:settings',
+  aiSaveConfig: 'ai:save-config',
+  aiSetKey: 'ai:set-key',
+  aiSetCompatBaseUrl: 'ai:set-compat-base-url',
+  aiOpenPrompts: 'ai:open-prompts',
+  aiRun: 'ai:run',
+  aiCancel: 'ai:cancel',
+  aiEvent: 'ai:event',
+  aiUnloadLocal: 'ai:unload-local',
 } as const
 
 /** Custom protocol that serves images from inside workspace roots to the editor. */

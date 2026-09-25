@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
+import type { AiEvent } from '../shared/ai'
 import { IPC, type OisinApi, type SidecarStatus } from '../shared/ipc'
 
 const api: OisinApi = {
@@ -47,6 +48,23 @@ const api: OisinApi = {
     save: (entry) => ipcRenderer.invoke(IPC.lexiconSave, entry),
     remove: (word) => ipcRenderer.invoke(IPC.lexiconRemove, word),
     importAisling: () => ipcRenderer.invoke(IPC.lexiconImportAisling),
+  },
+  ai: {
+    settings: () => ipcRenderer.invoke(IPC.aiSettings),
+    saveConfig: (config) => ipcRenderer.invoke(IPC.aiSaveConfig, config),
+    setKey: (name, value) => ipcRenderer.invoke(IPC.aiSetKey, name, value),
+    setCompatBaseUrl: (url) => ipcRenderer.invoke(IPC.aiSetCompatBaseUrl, url),
+    openPrompts: () => ipcRenderer.invoke(IPC.aiOpenPrompts),
+    run: (request) => ipcRenderer.invoke(IPC.aiRun, request),
+    cancel: (runId) => ipcRenderer.invoke(IPC.aiCancel, runId),
+    onEvent: (listener) => {
+      const handler = (_event: IpcRendererEvent, runId: string, event: AiEvent): void => listener(runId, event)
+      ipcRenderer.on(IPC.aiEvent, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.aiEvent, handler)
+      }
+    },
+    unloadLocal: () => ipcRenderer.invoke(IPC.aiUnloadLocal),
   },
   sections: {
     create: (folder, title) => ipcRenderer.invoke(IPC.sectionsCreate, folder, title),

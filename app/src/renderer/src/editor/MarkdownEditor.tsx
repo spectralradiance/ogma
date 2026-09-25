@@ -22,6 +22,9 @@ export interface MarkdownEditorHandle {
   currentWord(): WordInContext | null
   /** Replaces the selection, or the word at the cursor, matching its capitalization. */
   replaceWord(replacement: string): boolean
+  getSelection(): string
+  /** Replaces the whole document as one undoable change. */
+  replaceAll(text: string): void
 }
 
 export interface WordInContext {
@@ -108,6 +111,16 @@ export function MarkdownEditor({
       })
       editor.focus()
       return true
+    },
+    getSelection: () => {
+      const editor = view.current
+      if (!editor) return ''
+      return editor.state.selection.ranges.map((range) => editor.state.sliceDoc(range.from, range.to)).join('\n')
+    },
+    replaceAll: (text) => {
+      const editor = view.current
+      if (!editor) return
+      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, userEvent: 'input.replace', scrollIntoView: true })
     },
   }), [initialText])
 

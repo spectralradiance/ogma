@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { folderName } from '../../shared/format'
 import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import { joinPath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
-import { DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
+import { type AiWorkspace, AiPanel } from './AiPanel'
+import { AiSettings } from './AiSettings'
+import { type Drawer, DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
 import { type LexicalQuery, LexicalPanel } from './LexicalPanel'
 import { readPref, writePref } from './prefs'
 import { StatusBar } from './StatusBar'
@@ -23,9 +27,13 @@ export function App() {
   const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
   const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
   const [reloadToken, setReloadToken] = useState(0)
-  const [panelOpen, setPanelOpen] = useState(() => readPref('lexicalPanel') === 'true')
+  const [drawer, setDrawer] = useState<Drawer | null>(() => {
+    const stored = readPref('drawer')
+    return stored === 'words' || stored === 'ai' ? stored : null
+  })
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [lexicalQuery, setLexicalQuery] = useState<LexicalQuery | null>(null)
-  const panelOpenRef = useRef(panelOpen)
+  const drawerRef = useRef(drawer)
   const panes = useRef(new Map<string, DocumentPaneHandle>())
   const dirtyPanes = useRef(new Set<string>())
   const closing = useRef(false)
@@ -108,12 +116,12 @@ export function App() {
   }, [])
   const toggleFocus = useCallback(() => setFocusMode((value) => !value), [])
 
-  const showPanel = useCallback((open: boolean) => {
-    setPanelOpen(open)
-    panelOpenRef.current = open
-    writePref('lexicalPanel', String(open))
+  const showDrawer = useCallback((next: Drawer | null) => {
+    setDrawer(next)
+    drawerRef.current = next
+    writePref('drawer', next)
   }, [])
-  const togglePanel = useCallback(() => showPanel(!panelOpenRef.current), [showPanel])
+  const toggleDrawer = useCallback((kind: Drawer) => showDrawer(drawerRef.current === kind ? null : kind), [showDrawer])
 
   /** Ctrl+D: look up the word at the cursor (opening the panel), or toggle the panel when there is none. */
   const lookUpCurrentWord = useCallback(() => {
@@ -121,11 +129,11 @@ export function App() {
     const found = path ? panes.current.get(path)?.currentWord() : null
     if (found) {
       setLexicalQuery({ ...found, source: path ?? null })
-      showPanel(true)
+      showDrawer('words')
     } else {
-      showPanel(!panelOpenRef.current)
+      toggleDrawer('words')
     }
-  }, [active, showPanel])
+  }, [active, showDrawer, toggleDrawer])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -137,6 +145,10 @@ export function App() {
         event.preventDefault()
         event.stopPropagation()
         lookUpCurrentWord()
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'j') {
+        event.preventDefault()
+        event.stopPropagation()
+        toggleDrawer('ai')
       } else if (event.key === 'F8') {
         event.preventDefault()
         toggleFocus()
@@ -147,7 +159,7 @@ export function App() {
     // Capture phase so these win over CodeMirror's own bindings (Ctrl+/ toggles comments there).
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggleLive, toggleFocus, focusMode, lookUpCurrentWord])
+  }, [toggleLive, toggleFocus, focusMode, lookUpCurrentWord, toggleDrawer])
 
   useEffect(() => {
     // Hold the window open until pending edits are on disk.
@@ -178,7 +190,7 @@ export function App() {
     },
     onActivePane: setActive,
     onSelectWord: (path, word) => {
-      if (panelOpenRef.current) setLexicalQuery({ ...word, source: path })
+      if (drawerRef.current === 'words') setLexicalQuery({ ...word, source: path })
     },
   }), [])
 
@@ -191,12 +203,48 @@ export function App() {
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
     : ''
   const mode = {
-    live, focusMode, panelOpen, onToggleLive: toggleLive, onToggleFocus: toggleFocus, onTogglePanel: togglePanel,
+    live, focusMode, drawer, onToggleLive: toggleLive, onToggleFocus: toggleFocus, onToggleDrawer: toggleDrawer,
   }
-  const showLexical = panelOpen && !focusMode
+  const shownDrawer = focusMode ? null : drawer
+  const documentTitle = target?.kind === 'document' ? target.title : target?.kind === 'file' ? folderName(target.path) : ''
+
+  const aiWorkspace: AiWorkspace = {
+    focus: active
+      ? { label: active.section ? `${active.section.title} (${activeLabel.toLowerCase()})` : folderName(active.path), inSection: Boolean(active.section) }
+      : null,
+    readActive: () => {
+      const handle = active ? panes.current.get(active.path) : undefined
+      if (!active || !handle) return null
+      return { text: handle.getText(), selection: handle.getSelection(), document: documentTitle, section: active.section?.title ?? '' }
+    },
+    readSection: async () => {
+      const section = active?.section
+      const folder = active?.folder
+      if (!section || !folder) return null
+      const read = async (path: string) => panes.current.get(path)?.getText()
+        ?? window.oisin.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
+      const [notes, output] = await Promise.all([read(section.notesPath), read(section.outputPath)])
+      // Document-wide notes (outline, sources) give the draft its context; capped to keep prompts reasonable.
+      const model = await window.oisin.folders.read(folder).catch(() => null)
+      const documentNotes = await Promise.all((model?.documentNotes ?? []).slice(0, 4).map(async (name) => {
+        const text = await read(joinPath(folder, name))
+        return `### ${name}\n${text.slice(0, 12_000)}`
+      }))
+      return { document: documentTitle, section: section.title, notes, output, documentNotes: documentNotes.join('\n\n') || '(none)' }
+    },
+    currentWord: () => (active ? panes.current.get(active.path)?.currentWord() ?? null : null),
+    applyOutput: (text) => {
+      const path = active?.section?.outputPath
+      const handle = path ? panes.current.get(path) : undefined
+      if (!handle) return false
+      handle.replaceAll(text)
+      return true
+    },
+    replaceWord: (word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false),
+  }
 
   return (
-    <div className={`shell${focusMode ? ' shell-focus' : ''}${showLexical ? ' shell-panel' : ''}`}>
+    <div className={`shell${focusMode ? ' shell-focus' : ''}${shownDrawer ? ' shell-panel' : ''}`}>
       {!focusMode && (
         <WorkspaceTree
           roots={workspace.roots}
@@ -246,14 +294,23 @@ export function App() {
           </div>
         )}
       </main>
-      {showLexical && (
+      {shownDrawer === 'words' && (
         <LexicalPanel
           query={lexicalQuery}
           onLookup={(word) => setLexicalQuery((current) => ({ word, context: '', source: current?.source ?? null }))}
           onReplace={(word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false)}
-          onClose={() => showPanel(false)}
+          onClose={() => showDrawer(null)}
         />
       )}
+      {shownDrawer === 'ai' && (
+        <AiPanel
+          workspace={aiWorkspace}
+          providers={status?.health?.providers ?? []}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onClose={() => showDrawer(null)}
+        />
+      )}
+      {settingsOpen && <AiSettings providers={status?.health?.providers ?? []} onClose={() => setSettingsOpen(false)} />}
       <StatusBar
         status={status}
         documentInfo={activeInfo}

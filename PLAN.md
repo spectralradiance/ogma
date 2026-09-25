@@ -212,7 +212,8 @@ Uses Node's built-in `node:sqlite` (no native module) over ogma's `wiktionary.db
 - **Lexicon:** a "Save word" action stores the word, definition, tags, your own note, and the sentence and section it came from. There is a lexicon browser with Aisling-style prefix search (`tag:`, `syn:`), and an importer for Aisling's `Vocabulary/*.json`.
 - Optional: underline words in the text that are already in your lexicon.
 
-### Phase 4 — AI tools (~2 weeks)
+### Phase 4 — AI tools (~2 weeks) ✅ done 2026-09-25
+Tested end to end against a local mock of an OpenAI-compatible server (no API keys were available); the Claude, OpenAI and Gemini adapters are contract-tested through their real SDKs against mocks of each wire format. Not yet exercised: live cloud calls and the local GPU model (needs `setup-sidecar.ps1` without `-NoTorch` and a model download). Draft output uses the section's notes, current output and document notes; neighbouring sections are not yet included.
 - **4a. Provider layer (sidecar):**
   - The `Provider` protocol, the shared request and event types, and error normalization (§2a).
   - `local_hf` ported from ogma: 4-bit Qwen that loads lazily, frees VRAM after an idle timeout, and keeps the CUDA guardrails.

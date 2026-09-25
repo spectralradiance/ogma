@@ -35,6 +35,8 @@ export interface ActivePane {
   path: string
   folder: string | null
   stem: string | null
+  /** For panes inside a double document: the section's title and both of its files. */
+  section?: { title: string; notesPath: string; outputPath: string }
 }
 
 export function isOpenDocument(target: OpenTarget | null, folder: string): boolean {

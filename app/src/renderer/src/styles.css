@@ -1128,3 +1128,335 @@ button[aria-pressed='true'] {
 .lexical-ipa {
   font-family: Cambria, 'Segoe UI', var(--font-serif);
 }
+
+/* AI panel */
+
+.ai-header {
+  gap: 8px;
+}
+
+.ai-header strong {
+  margin-right: auto;
+  padding-left: 4px;
+}
+
+.ai-header .segmented button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.ai-field {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-field select,
+.ai-word-row select,
+.routing-task select,
+.settings-table select {
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ai-actions {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.ai-actions > button {
+  text-align: left;
+}
+
+.ai-word-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-word-row button {
+  flex: none;
+}
+
+.ai-word-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-result {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-provenance {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-text {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ai-metrics {
+  margin: 0;
+  font-size: 12px;
+}
+
+button.primary {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Modals: draft review and AI settings */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1000px, 100%);
+  max-height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.35);
+}
+
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.modal-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-subtitle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.review-body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow-y: auto;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.review-same {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.review-change {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.review-change-body {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.review-before {
+  color: var(--bad);
+  text-decoration: line-through;
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.review-after {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.review-change.rejected .review-after {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+
+.review-change.rejected .review-before {
+  color: var(--text);
+  text-decoration: none;
+  background: transparent;
+}
+
+.review-toggle {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings {
+  width: min(820px, 100%);
+  height: min(640px, 100%);
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+
+.settings-section {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-section p {
+  margin: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-label {
+  flex: none;
+  width: 230px;
+}
+
+.settings-row input,
+.settings-table input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.settings-table th {
+  padding: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.settings-table td {
+  padding: 4px;
+  vertical-align: top;
+}
+
+.settings-table input {
+  width: 100%;
+}
+
+.settings-cell-actions {
+  white-space: nowrap;
+}
+
+.test-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 220px;
+}
+
+.test-button .lexical-hint {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.routing-task h3 {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.routing-list {
+  margin: 0 0 6px;
+  padding-left: 22px;
+}
+
+.routing-list li {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.routing-list li span {
+  min-width: 200px;
+}
+
+/* Let the document header wrap instead of squeezing the title when side panels are open. */
+.section-header {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.section-title {
+  min-width: 160px;
+}

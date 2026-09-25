@@ -9,21 +9,30 @@ import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './Docu
 import { readPref, writePref } from './prefs'
 import { type ActivePane, errorMessage, type OpenTarget, VIEW_MODES, type ViewMode } from './target'
 
+export type Drawer = 'words' | 'ai'
+
 interface ModeProps {
   live: boolean
   focusMode: boolean
-  panelOpen: boolean
+  drawer: Drawer | null
   onToggleLive: () => void
   onToggleFocus: () => void
-  onTogglePanel: () => void
+  onToggleDrawer: (drawer: Drawer) => void
 }
 
-export function ModeToggles({ live, focusMode, panelOpen, onToggleLive, onToggleFocus, onTogglePanel }: ModeProps) {
+export function ModeToggles({ live, focusMode, drawer, onToggleLive, onToggleFocus, onToggleDrawer }: ModeProps) {
   return (
     <div className="mode-toggles">
-      <button type="button" aria-pressed={panelOpen} onClick={onTogglePanel} title="Dictionary, thesaurus and lexicon (Ctrl+D looks up the word at the cursor)">
-        Words
-      </button>
+      <div className="segmented" role="group" aria-label="Side panel">
+        <button type="button" aria-pressed={drawer === 'words'} onClick={() => onToggleDrawer('words')}
+          title="Dictionary, thesaurus and lexicon (Ctrl+D looks up the word at the cursor)">
+          Words
+        </button>
+        <button type="button" aria-pressed={drawer === 'ai'} onClick={() => onToggleDrawer('ai')}
+          title="Draft output from notes, analyze, word choice (Ctrl+J)">
+          AI
+        </button>
+      </div>
       <div className="segmented" role="group" aria-label="Editing mode">
         <button type="button" aria-pressed={live} onClick={live ? undefined : onToggleLive} title="Live rendering (Ctrl+/)">
           Live
@@ -155,7 +164,16 @@ export function DocumentView({ target, view, onView, reloadToken, callbacks, onO
         onInfo={(info) => callbacks.onInfo(path, info)}
         onHeadings={(list) => callbacks.onHeadings(path, list)}
         onDirtyChange={(dirty) => callbacks.onDirtyChange(path, dirty)}
-        onFocus={() => callbacks.onActivePane({ path, folder, stem: section.stem })}
+        onFocus={() => callbacks.onActivePane({
+          path,
+          folder,
+          stem: section.stem,
+          section: {
+            title: section.title,
+            notesPath: joinPath(folder, section.notesName),
+            outputPath: joinPath(folder, section.outputName),
+          },
+        })}
         onSelectWord={(word) => callbacks.onSelectWord(path, word)}
       />
     )

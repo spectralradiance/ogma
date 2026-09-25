@@ -28,11 +28,18 @@ class RoutingConfig:
     routing: Mapping[str, tuple[str, ...]]
 
 
-def candidates(task: str, config: RoutingConfig, providers: Mapping[str, Provider], override: str | None = None) -> list[Profile]:
+def candidates(
+    task: str,
+    config: RoutingConfig,
+    providers: Mapping[str, Provider],
+    override: str | None = None,
+    only: bool = False,
+) -> list[Profile]:
+    """Profiles to try, in order. With `only`, just the override (used by connection tests)."""
     by_id = {profile.id: profile for profile in config.profiles}
     order = list(config.routing.get(task) or config.routing.get("default") or ())
     if override:
-        order = [override, *[profile_id for profile_id in order if profile_id != override]]
+        order = [override] if only else [override, *[profile_id for profile_id in order if profile_id != override]]
     chosen: list[Profile] = []
     for profile_id in order:
         profile = by_id.get(profile_id)
@@ -53,9 +60,10 @@ def run(
     config: RoutingConfig,
     providers: Mapping[str, Provider],
     override: str | None = None,
+    only: bool = False,
 ) -> Iterator[StreamEvent]:
     """Streams events for one run. Always ends with a "done" or "error" event."""
-    options = candidates(task, config, providers, override)
+    options = candidates(task, config, providers, override, only)
     if not options:
         yield {"type": "error", "kind": "unavailable", "message": f"No profile is set up for “{task}” in {config.mode} mode."}
         return

@@ -114,7 +114,7 @@ def create_app(
             profiles=tuple(Profile(p.id, p.provider, p.model, dict(p.params)) for p in body.profiles),
             routing={task: tuple(ids) for task, ids in body.routing.items()},
         )
-        events = run(body.task, request, config, registry, override=body.profile_id)
+        events = run(body.task, request, config, registry, override=body.profile_id, only=body.profile_only)
         return StreamingResponse(sse(events), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
     @app.post("/ai/local/unload")

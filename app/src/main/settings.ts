@@ -1,12 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import { type AiConfig, normalizeAiConfig } from '../shared/ai'
+
 export interface Settings {
   workspaceRoots: string[]
   /** wiktionary.db chosen by the user or found automatically. */
   dictionaryPath: string | null
   /** Folder of lexicon Markdown files; null means <userData>/lexicon. */
   lexiconDir: string | null
+  ai: AiConfig
+  /** Base URL for the OpenAI-compatible provider (not secret; its key is stored encrypted). */
+  compatBaseUrl: string
 }
 
 export function parseSettings(raw: unknown): Settings {
@@ -15,7 +20,13 @@ export function parseSettings(raw: unknown): Settings {
     ? value.workspaceRoots.filter((root): root is string => typeof root === 'string' && root.length > 0)
     : []
   const optionalPath = (key: string) => (typeof value[key] === 'string' && value[key] ? value[key] as string : null)
-  return { workspaceRoots: roots, dictionaryPath: optionalPath('dictionaryPath'), lexiconDir: optionalPath('lexiconDir') }
+  return {
+    workspaceRoots: roots,
+    dictionaryPath: optionalPath('dictionaryPath'),
+    lexiconDir: optionalPath('lexiconDir'),
+    ai: normalizeAiConfig(value.ai),
+    compatBaseUrl: optionalPath('compatBaseUrl') ?? '',
+  }
 }
 
 /** App settings in <userData>/settings.json, written atomically. */

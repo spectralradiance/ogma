@@ -27,6 +27,29 @@ The status bar shows the sidecar state, GPU memory, PyTorch/CUDA and which AI pr
 
 Until the keychain-backed settings page arrives in Phase 4, providers read their keys from the environment the app was started from: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), and `OISIN_COMPAT_BASE_URL` for an OpenAI-compatible host.
 
+## Samples
+
+`samples/` holds example documents: *The Night Sky* (a double document — each section has a `-notes.md` and an `-output.md`, one section has notes only), a notebook in the older extensionless naming, and a regular single-file document. Add the folder with **+** in the sidebar and try the Column / Side by side / Output / Notes views.
+
+## AI
+
+Open the **AI** panel (button in the document header, or Ctrl+J):
+
+- **Draft output from notes** — for the focused section, drafts the output from its notes, its current output and the document notes (outline, sources). You review each changed paragraph and apply the ones you keep; applying is one undoable edit.
+- **Analyze** — the selection or the focused file: local measurements (reading ease, sentence length and spread, repeated words) plus the model's notes on tone, structure, readability and style.
+- **Word choice** — alternatives for the word at the cursor; ↵ replaces it.
+
+Set up providers under **⚙ AI settings**:
+
+- **Keys** — Anthropic, OpenAI, Gemini, and an optional OpenAI-compatible host (base URL + key; works for OpenRouter-style hosts or a local LM Studio/Ollama server). Keys are encrypted with Windows (DPAPI) and passed only to the local AI server.
+- **Models** — profiles (provider + model id). Claude defaults to `claude-opus-5`; OpenAI/Gemini/compatible profiles need a model id. **Test** checks one profile with no fallback.
+- **Routing** — the order each task tries models in. **Local / Hybrid / Cloud** filters that list; unavailable models are skipped, and a model that fails before writing anything falls back to the next.
+- **Prompts** — each task's prompt is an editable Markdown file.
+
+The local model needs PyTorch and the transformers stack: run `.\scripts\setup-sidecar.ps1` without `-NoTorch`. The first local run downloads the model (Qwen 2.5 7B by default, several GB) and needs an NVIDIA GPU; it loads in 4-bit and unloads after 10 idle minutes.
+
+Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%\Oisíni-history\<month>.jsonl`.
+
 ## Editing safety
 
 Files are edited in place, so saving is careful:

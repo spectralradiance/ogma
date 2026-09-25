@@ -86,6 +86,15 @@ def test_override_goes_first_and_unknown_tasks_use_default() -> None:
     assert [p.id for p in candidates("anything", routed, registry)] == ["gemini-alt"]
 
 
+def test_only_uses_just_the_override_for_connection_tests() -> None:
+    registry = providers(cloud_a=FakeProvider("cloud_a", configured=False))
+    assert [p.id for p in candidates("synthesize", config(), registry, override="claude-main", only=True)] == ["claude-main"]
+    events = list(run("synthesize", REQUEST, config(), registry, override="claude-main", only=True))
+    assert types_of(events) == ["error"]
+    assert "claude-main: no API key" in events[0]["message"]
+    assert registry["cloud_b"].calls == []
+
+
 def test_happy_path_reports_the_profile_that_ran() -> None:
     events = list(run("synthesize", REQUEST, config(), providers()))
     assert types_of(events) == ["start", "text", "done"]

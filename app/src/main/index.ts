@@ -1,13 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell, type OpenDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
 import { type DictionaryStatus, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
+import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
+import { PromptStore } from './prompts'
+import { SecretStore } from './secrets'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
@@ -29,7 +33,23 @@ if (!app.requestSingleInstanceLock()) {
 app.userAgentFallback = app.userAgentFallback.replace(/Ois[^/\s]*\//, 'Oisin/')
 
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
-const sidecar = new SidecarManager(resolveSidecarPaths(app.getAppPath(), process.env, process.platform))
+const secrets = new SecretStore(join(app.getPath('userData'), 'keys.json'), {
+  available: () => safeStorage.isEncryptionAvailable(),
+  encrypt: (plain) => safeStorage.encryptString(plain),
+  decrypt: (encrypted) => safeStorage.decryptString(encrypted),
+})
+const sidecar = new SidecarManager(resolveSidecarPaths(app.getAppPath(), process.env, process.platform), () => ({
+  ...secrets.env(),
+  ...(settings.get().compatBaseUrl ? { OISIN_COMPAT_BASE_URL: settings.get().compatBaseUrl } : {}),
+}))
+const prompts = new PromptStore(join(app.getPath('userData'), 'prompts'))
+const ai = new AiBridge({
+  connection: () => sidecar.connection(),
+  prompts,
+  config: () => settings.get().ai,
+  historyDir: join(app.getPath('userData'), 'ai-history'),
+  send: (runId, event) => mainWindow?.webContents.send(IPC.aiEvent, runId, event),
+})
 const guard = new PathGuard(() => settings.get().workspaceRoots)
 const backupsDir = join(app.getPath('userData'), 'backups')
 const backups = new BackupStore(backupsDir, guard)
@@ -40,6 +60,16 @@ let mainWindow: BrowserWindow | null = null
 let quitting = false
 let dictionary: Dictionary | null = null
 let dictionaryError: string | null = null
+
+function aiSettingsState(): AiSettingsState {
+  return {
+    config: settings.get().ai,
+    keys: secrets.status(),
+    compatBaseUrl: settings.get().compatBaseUrl,
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    promptsDir: prompts.location,
+  }
+}
 
 function lexicon(): LexiconStore {
   return new LexiconStore(settings.get().lexiconDir ?? join(app.getPath('userData'), 'lexicon'))
@@ -220,6 +250,39 @@ function registerIpc(): void {
     return result.canceled ? null : lexicon().importAisling(result.filePaths[0])
   })
 
+  ipcMain.handle(IPC.aiSettings, () => aiSettingsState())
+  ipcMain.handle(IPC.aiSaveConfig, (_event, config: AiConfig) => {
+    settings.update({ ai: normalizeAiConfig(config) })
+    return aiSettingsState()
+  })
+  ipcMain.handle(IPC.aiSetKey, async (_event, name: unknown, value: unknown) => {
+    if (!SECRET_NAMES.includes(name as SecretName)) throw new TypeError('Unknown key name.')
+    secrets.set(name as SecretName, typeof value === 'string' ? value : null)
+    await sidecar.restart()
+    return aiSettingsState()
+  })
+  ipcMain.handle(IPC.aiSetCompatBaseUrl, async (_event, url: unknown) => {
+    const value = text(url).trim()
+    if (value && !/^https?:\/\//i.test(value)) throw new Error('The base URL must start with http:// or https://')
+    settings.update({ compatBaseUrl: value })
+    await sidecar.restart()
+    return aiSettingsState()
+  })
+  ipcMain.handle(IPC.aiOpenPrompts, async () => {
+    await prompts.ensureDefaults()
+    await shell.openPath(prompts.location)
+  })
+  ipcMain.handle(IPC.aiRun, (_event, request: AiRunRequest) => {
+    if (!request || typeof request.task !== 'string' || typeof request.variables !== 'object') throw new TypeError('Expected an AI run request.')
+    return ai.start(request)
+  })
+  ipcMain.handle(IPC.aiCancel, (_event, runId: unknown) => ai.cancel(text(runId)))
+  ipcMain.handle(IPC.aiUnloadLocal, async () => {
+    const connection = sidecar.connection()
+    if (!connection) return
+    await fetch(`${connection.baseUrl}/ai/local/unload`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}` } })
+  })
+
   ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
     trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
 }
@@ -258,6 +321,7 @@ void app.whenReady().then(() => {
   registerLocalFileProtocol()
   registerIpc()
   void BackupStore.prune(backupsDir, BACKUP_RETENTION_DAYS)
+  void prompts.ensureDefaults()
   createWindow()
   watcher.setRoots(settings.get().workspaceRoots)
   void sidecar.start()

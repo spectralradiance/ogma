@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { DEFAULT_AI_CONFIG } from '../shared/ai'
 import { SettingsStore, parseSettings } from './settings'
 import { addRoot, removeRoot } from './workspaceRoots'
 
@@ -20,7 +21,7 @@ describe('workspace roots', () => {
 
 describe('settings', () => {
   it('drops malformed values', () => {
-    const empty = { workspaceRoots: [], dictionaryPath: null, lexiconDir: null }
+    const empty = { workspaceRoots: [], dictionaryPath: null, lexiconDir: null, ai: DEFAULT_AI_CONFIG, compatBaseUrl: '' }
     expect(parseSettings({ workspaceRoots: ['a', 3, '', null], dictionaryPath: 7 })).toEqual({ ...empty, workspaceRoots: ['a'] })
     expect(parseSettings('nonsense')).toEqual(empty)
   })

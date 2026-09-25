@@ -32,6 +32,9 @@ export interface DocumentPaneHandle {
   revealLine(line: number): void
   currentWord(): WordInContext | null
   replaceWord(replacement: string): boolean
+  getText(): string
+  getSelection(): string
+  replaceAll(text: string): void
 }
 
 interface DocumentPaneProps {
@@ -199,6 +202,9 @@ export function DocumentPane({
     revealLine: (line) => editor.current?.revealLine(line),
     currentWord: () => editor.current?.currentWord() ?? null,
     replaceWord: (replacement) => editor.current?.replaceWord(replacement) ?? false,
+    getText: () => editor.current?.getText() ?? '',
+    getSelection: () => editor.current?.getSelection() ?? '',
+    replaceAll: (text) => editor.current?.replaceAll(text),
   }), [save])
 
   useEffect(() => {
