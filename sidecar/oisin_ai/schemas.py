@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GpuDevice(BaseModel):
@@ -51,3 +51,29 @@ class Health(BaseModel):
     torch: TorchStatus
     providers: list[ProviderStatus]
     models_loaded: list[str]
+
+
+class RunMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class RunProfile(BaseModel):
+    id: str
+    provider: str
+    model: str = ""
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunRequest(BaseModel):
+    """One AI run: the rendered prompt plus the routing configuration to use."""
+
+    task: str
+    system: str = ""
+    messages: list[RunMessage] = Field(min_length=1)
+    max_tokens: int = Field(default=4096, ge=1, le=128_000)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    mode: Literal["local", "cloud", "hybrid"] = "hybrid"
+    profile_id: str | None = None
+    profiles: list[RunProfile]
+    routing: dict[str, list[str]]

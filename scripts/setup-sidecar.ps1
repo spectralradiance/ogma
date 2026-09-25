@@ -3,8 +3,9 @@
     Create sidecar/.venv and install the Python AI sidecar's dependencies.
 
 .PARAMETER NoTorch
-    Skip PyTorch. The sidecar still runs and reports the GPU through nvidia-smi,
-    but the local model provider stays unavailable.
+    Skip PyTorch and the local-model libraries (transformers, bitsandbytes). The
+    sidecar still runs, reports the GPU through nvidia-smi and can use cloud
+    providers, but the local model provider stays unavailable.
 
 .PARAMETER CudaIndex
     PyTorch wheel index to install from (cu126, cu128, cu130, ...).
@@ -42,6 +43,7 @@ Invoke-Checked $python -m pip install -r (Join-Path $sidecar 'requirements.txt')
 if (-not $NoTorch) {
     Write-Host "Installing PyTorch from the $CudaIndex wheel index" -ForegroundColor Cyan
     Invoke-Checked $python -m pip install torch --index-url "https://download.pytorch.org/whl/$CudaIndex"
+    Invoke-Checked $python -m pip install -r (Join-Path $sidecar 'requirements-local.txt')
 }
 
 Write-Host ""

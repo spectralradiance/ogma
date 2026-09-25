@@ -8,20 +8,23 @@ to the sidecar directly.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import platform
 import sys
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import __version__
-from .providers import provider_statuses
-from .schemas import Health
+from .ai_types import ChatMessage, GenerateRequest, Profile, Provider
+from .providers import build_providers, provider_statuses
+from .router import RoutingConfig, run
+from .schemas import Health, RunRequest
 from .system import GpuProbe, TorchProbe
 
 
@@ -33,12 +36,18 @@ class StartableProbe(SnapshotProbe, Protocol):
     def start(self) -> None: ...
 
 
+def sse(events: Iterator[dict[str, Any]]) -> Iterator[str]:
+    for event in events:
+        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
 def create_app(
     token: str,
     *,
     gpu_probe: SnapshotProbe | None = None,
     torch_probe: StartableProbe | None = None,
     env: Mapping[str, str] | None = None,
+    providers: Mapping[str, Provider] | None = None,
 ) -> FastAPI:
     if not token:
         raise ValueError("a non-empty token is required")
@@ -46,6 +55,7 @@ def create_app(
     gpu = gpu_probe or GpuProbe()
     torch_status = torch_probe or TorchProbe()
     environment = os.environ if env is None else env
+    registry = providers if providers is not None else build_providers(environment, torch_status.snapshot)
     expected_header = f"Bearer {token}".encode()
     started = time.monotonic()
 
@@ -70,9 +80,12 @@ def create_app(
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
+    def loaded_models() -> list[str]:
+        local = registry.get("local_hf")
+        return list(getattr(local, "loaded_models", lambda: [])())
+
     @app.get("/health", response_model=Health)
     def health() -> dict[str, Any]:
-        torch_snapshot = torch_status.snapshot()
         return {
             "status": "ok",
             "version": __version__,
@@ -82,9 +95,33 @@ def create_app(
             "pid": os.getpid(),
             "uptime_s": round(time.monotonic() - started, 1),
             "gpu": gpu.snapshot(),
-            "torch": torch_snapshot,
-            "providers": provider_statuses(environment, torch_snapshot),
-            "models_loaded": [],
+            "torch": torch_status.snapshot(),
+            "providers": provider_statuses(registry),
+            "models_loaded": loaded_models(),
         }
+
+    @app.post("/ai/run")
+    def ai_run(body: RunRequest) -> StreamingResponse:
+        """Streams one AI run as server-sent events (one JSON event per `data:` line)."""
+        request = GenerateRequest(
+            system=body.system,
+            messages=tuple(ChatMessage(role=message.role, content=message.content) for message in body.messages),
+            max_tokens=body.max_tokens,
+            temperature=body.temperature,
+        )
+        config = RoutingConfig(
+            mode=body.mode,
+            profiles=tuple(Profile(p.id, p.provider, p.model, dict(p.params)) for p in body.profiles),
+            routing={task: tuple(ids) for task, ids in body.routing.items()},
+        )
+        events = run(body.task, request, config, registry, override=body.profile_id)
+        return StreamingResponse(sse(events), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.post("/ai/local/unload")
+    def unload_local() -> dict[str, Any]:
+        local = registry.get("local_hf")
+        if local is not None and hasattr(local, "unload"):
+            local.unload()
+        return {"models_loaded": loaded_models()}
 
     return app

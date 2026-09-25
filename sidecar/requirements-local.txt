@@ -1,0 +1,4 @@
+# Local model provider (local_hf): Hugging Face transformers with 4-bit quantization.
+transformers>=4.45.0
+accelerate>=1.0.0
+bitsandbytes>=0.44.0

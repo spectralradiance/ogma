@@ -2,9 +2,15 @@
 fastapi>=0.115.0
 uvicorn>=0.30.0
 
+# AI providers (official SDKs, behind oisin_ai.ai_types.Provider)
+anthropic>=1.8,<2
+openai>=3.19,<4
+google-genai>=2.25,<3
+
 # Testing
 httpx>=0.27.0
 pytest>=8.0.0
 
-# PyTorch is installed separately by scripts/setup-sidecar.ps1 from the CUDA wheel
-# index, because the PyPI build for Windows is CPU-only.
+# PyTorch and the local-model stack are installed by scripts/setup-sidecar.ps1:
+# torch from the CUDA wheel index (PyPI's Windows build is CPU-only), then
+# requirements-local.txt.
