@@ -20,8 +20,9 @@ describe('workspace roots', () => {
 
 describe('settings', () => {
   it('drops malformed values', () => {
-    expect(parseSettings({ workspaceRoots: ['a', 3, '', null] })).toEqual({ workspaceRoots: ['a'] })
-    expect(parseSettings('nonsense')).toEqual({ workspaceRoots: [] })
+    const empty = { workspaceRoots: [], dictionaryPath: null, lexiconDir: null }
+    expect(parseSettings({ workspaceRoots: ['a', 3, '', null], dictionaryPath: 7 })).toEqual({ ...empty, workspaceRoots: ['a'] })
+    expect(parseSettings('nonsense')).toEqual(empty)
   })
 
   it('persists updates and preserves a corrupt file', () => {
@@ -29,7 +30,7 @@ describe('settings', () => {
     const path = join(dir, 'settings.json')
 
     new SettingsStore(path).update({ workspaceRoots: ['D:\\writing'] })
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ workspaceRoots: ['D:\\writing'] })
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ workspaceRoots: ['D:\\writing'] })
     expect(new SettingsStore(path).get().workspaceRoots).toEqual(['D:\\writing'])
 
     writeFileSync(path, '{ not json')

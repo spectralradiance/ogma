@@ -1,10 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell, type OpenDialogOptions } from 'electron'
-import { extname, join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { IPC, LOCAL_FILE_SCHEME, type WorkspaceState, type WriteRequest } from '../shared/ipc'
+import { type DictionaryStatus, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
+import { Dictionary } from './dictionary'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
+import { LexiconStore } from './lexicon'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
@@ -35,6 +38,49 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.sv
 const watcher = new WorkspaceWatcher((paths) => mainWindow?.webContents.send(IPC.filesChanged, paths))
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+let dictionary: Dictionary | null = null
+let dictionaryError: string | null = null
+
+function lexicon(): LexiconStore {
+  return new LexiconStore(settings.get().lexiconDir ?? join(app.getPath('userData'), 'lexicon'))
+}
+
+/** Where to look for wiktionary.db: the saved choice, an override, then ogma's copy next to this project. */
+function dictionaryCandidates(): string[] {
+  return [
+    settings.get().dictionaryPath,
+    process.env.OISIN_DICTIONARY_DB,
+    resolve(app.getAppPath(), '..', '..', 'ogma', 'data', 'wiktionary.db'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+}
+
+function openDictionary(candidates = dictionaryCandidates()): DictionaryStatus {
+  dictionary?.close()
+  dictionary = null
+  dictionaryError = null
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    try {
+      dictionary = new Dictionary(candidate)
+      if (settings.get().dictionaryPath !== candidate) settings.update({ dictionaryPath: candidate })
+      return dictionaryStatus()
+    } catch (error) {
+      dictionaryError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  dictionaryError ??= 'No wiktionary.db found. Choose one, or build it with ogma’s setup:dict script.'
+  return dictionaryStatus()
+}
+
+function dictionaryStatus(): DictionaryStatus {
+  return { available: dictionary !== null, path: dictionary ? settings.get().dictionaryPath : null, error: dictionary ? null : dictionaryError }
+}
+
+function requireDictionary(): Dictionary {
+  if (!dictionary) openDictionary()
+  if (!dictionary) throw new Error(dictionaryError ?? 'Dictionary unavailable.')
+  return dictionary
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: LOCAL_FILE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -145,6 +191,35 @@ function registerIpc(): void {
     if (direction !== 'up' && direction !== 'down') throw new TypeError('direction must be up or down')
     return moveSection(guard.resolve(folder), text(stem), direction)
   })
+  ipcMain.handle(IPC.dictionaryStatus, () => (dictionary ? dictionaryStatus() : openDictionary()))
+  ipcMain.handle(IPC.dictionaryChoose, async (event) => {
+    const options: OpenDialogOptions = {
+      title: 'Choose wiktionary.db',
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite database', extensions: ['db', 'sqlite', 'sqlite3'] }],
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? dictionaryStatus() : openDictionary([result.filePaths[0]])
+  })
+  ipcMain.handle(IPC.dictionaryLookup, (_event, word: unknown) => requireDictionary().lookup(text(word)))
+  ipcMain.handle(IPC.dictionarySearch, (_event, query: unknown, limit: unknown) =>
+    requireDictionary().search(text(query), typeof limit === 'number' ? limit : 20))
+
+  ipcMain.handle(IPC.lexiconLocation, () => lexicon().location)
+  ipcMain.handle(IPC.lexiconList, () => lexicon().list())
+  ipcMain.handle(IPC.lexiconSave, (_event, entry: LexiconEntry) => {
+    if (!entry || typeof entry.word !== 'string') throw new TypeError('Expected a lexicon entry.')
+    return lexicon().save(entry)
+  })
+  ipcMain.handle(IPC.lexiconRemove, (_event, word: unknown) => lexicon().remove(text(word), (file) => shell.trashItem(file)))
+  ipcMain.handle(IPC.lexiconImportAisling, async (event) => {
+    const options: OpenDialogOptions = { title: 'Choose Aisling’s Vocabulary folder', properties: ['openDirectory'] }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : lexicon().importAisling(result.filePaths[0])
+  })
+
   ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
     trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
 }
@@ -175,6 +250,7 @@ app.on('will-quit', (event) => {
   event.preventDefault()
   quitting = true
   watcher.close()
+  dictionary?.close()
   void sidecar.stop().finally(() => app.quit())
 })
 

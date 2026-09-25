@@ -196,7 +196,12 @@ What shipped differs from the spec below in four places:
 - Backups on first write, and external-change handling.
 - **Done when:** you add `outlines_notes` as a root and work through `universal metaphysics` section by section, with your original files edited in place.
 
-### Phase 3 — Lexical tools (~1 week, mostly reuse)
+### Phase 2b — Whole-document views ✅ done 2026-09-25
+A double document (folder of sections) opens whole, in four views: **Column** (each section's output, then its notes as a background block), **Side by side** (aligned rows), **Output** only and **Notes** only. Single files open as regular documents.
+
+### Phase 3 — Lexical tools (~1 week, mostly reuse) ✅ done 2026-09-25
+Uses Node's built-in `node:sqlite` (no native module) over ogma's `wiktionary.db`, with indexed case-variant lookups (the original `COLLATE NOCASE` query scanned all 1.5M rows, ~10 s). Not done: underlining lexicon words in the text.
+
 - Copy ogma's dictionary module and point it at `wiktionary.db`. The path is configurable, and the setup script can rebuild the database if it is missing.
 - Right-hand drawer with tabs that follow the current selection or the word under the cursor:
   - **Define:** senses, examples, IPA and part of speech.

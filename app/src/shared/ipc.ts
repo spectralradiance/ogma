@@ -123,6 +123,52 @@ export type WriteResult =
   | { ok: true; mtimeMs: number; size: number; format: TextFormat; notice: string | null }
   | { ok: false; reason: 'conflict'; diskMtimeMs: number }
 
+export interface DictionarySense {
+  glosses: string[]
+  examples: { text: string; translation?: string }[]
+}
+
+export interface DictionaryEntry {
+  id: number
+  word: string
+  pos: string | null
+  etymology: string | null
+  senses: DictionarySense[]
+  ipa: string[]
+  synonyms: string[]
+  antonyms: string[]
+  derived: string[]
+  related: string[]
+}
+
+export interface DictionarySearchResult {
+  word: string
+  pos: string | null
+  gloss: string
+}
+
+export interface DictionaryStatus {
+  available: boolean
+  path: string | null
+  error: string | null
+}
+
+/** A word saved to the personal lexicon (one Markdown file per word). */
+export interface LexiconEntry {
+  word: string
+  definition: string
+  tags: string[]
+  synonyms: string[]
+  /** The sentence the word was found in. */
+  context: string
+  /** File the word was saved from, if any. */
+  source: string | null
+  /** ISO date. */
+  added: string
+  /** Free-form notes (the body of the Markdown file). */
+  note: string
+}
+
 /** Exposed to the renderer as `window.oisin` by the preload script. */
 export interface OisinApi {
   sidecar: {
@@ -145,6 +191,21 @@ export interface OisinApi {
   folders: {
     read(path: string): Promise<FolderModel>
     create(parent: string, name: string): Promise<string>
+  }
+  dictionary: {
+    status(): Promise<DictionaryStatus>
+    /** Lets the user pick a wiktionary.db file. */
+    choose(): Promise<DictionaryStatus>
+    lookup(word: string): Promise<DictionaryEntry[]>
+    search(text: string, limit?: number): Promise<DictionarySearchResult[]>
+  }
+  lexicon: {
+    location(): Promise<string>
+    list(): Promise<LexiconEntry[]>
+    save(entry: LexiconEntry): Promise<LexiconEntry>
+    remove(word: string): Promise<void>
+    /** Imports an Aisling Vocabulary folder chosen by the user; null if cancelled. */
+    importAisling(): Promise<{ imported: number; skipped: number } | null>
   }
   sections: {
     create(folder: string, title: string): Promise<SectionInfo>
@@ -171,6 +232,15 @@ export const IPC = {
   sectionsRename: 'sections:rename',
   sectionsMove: 'sections:move',
   sectionsTrash: 'sections:trash',
+  dictionaryStatus: 'dictionary:status',
+  dictionaryChoose: 'dictionary:choose',
+  dictionaryLookup: 'dictionary:lookup',
+  dictionarySearch: 'dictionary:search',
+  lexiconLocation: 'lexicon:location',
+  lexiconList: 'lexicon:list',
+  lexiconSave: 'lexicon:save',
+  lexiconRemove: 'lexicon:remove',
+  lexiconImportAisling: 'lexicon:import-aisling',
 } as const
 
 /** Custom protocol that serves images from inside workspace roots to the editor. */

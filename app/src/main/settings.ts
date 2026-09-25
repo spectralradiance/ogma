@@ -3,6 +3,10 @@ import { dirname } from 'node:path'
 
 export interface Settings {
   workspaceRoots: string[]
+  /** wiktionary.db chosen by the user or found automatically. */
+  dictionaryPath: string | null
+  /** Folder of lexicon Markdown files; null means <userData>/lexicon. */
+  lexiconDir: string | null
 }
 
 export function parseSettings(raw: unknown): Settings {
@@ -10,7 +14,8 @@ export function parseSettings(raw: unknown): Settings {
   const roots = Array.isArray(value.workspaceRoots)
     ? value.workspaceRoots.filter((root): root is string => typeof root === 'string' && root.length > 0)
     : []
-  return { workspaceRoots: roots }
+  const optionalPath = (key: string) => (typeof value[key] === 'string' && value[key] ? value[key] as string : null)
+  return { workspaceRoots: roots, dictionaryPath: optionalPath('dictionaryPath'), lexiconDir: optionalPath('lexiconDir') }
 }
 
 /** App settings in <userData>/settings.json, written atomically. */

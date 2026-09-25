@@ -3,6 +3,7 @@ import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef,
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
 import { joinPath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
+import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { readPref, writePref } from './prefs'
@@ -11,13 +12,18 @@ import { type ActivePane, errorMessage, type OpenTarget, VIEW_MODES, type ViewMo
 interface ModeProps {
   live: boolean
   focusMode: boolean
+  panelOpen: boolean
   onToggleLive: () => void
   onToggleFocus: () => void
+  onTogglePanel: () => void
 }
 
-export function ModeToggles({ live, focusMode, onToggleLive, onToggleFocus }: ModeProps) {
+export function ModeToggles({ live, focusMode, panelOpen, onToggleLive, onToggleFocus, onTogglePanel }: ModeProps) {
   return (
     <div className="mode-toggles">
+      <button type="button" aria-pressed={panelOpen} onClick={onTogglePanel} title="Dictionary, thesaurus and lexicon (Ctrl+D looks up the word at the cursor)">
+        Words
+      </button>
       <div className="segmented" role="group" aria-label="Editing mode">
         <button type="button" aria-pressed={live} onClick={live ? undefined : onToggleLive} title="Live rendering (Ctrl+/)">
           Live
@@ -40,6 +46,7 @@ export interface PaneCallbacks {
   onHeadings: (path: string, headings: Heading[]) => void
   onDirtyChange: (path: string, dirty: boolean) => void
   onActivePane: (active: ActivePane) => void
+  onSelectWord: (path: string, word: WordInContext) => void
 }
 
 type DocumentTarget = Extract<OpenTarget, { kind: 'document' }>
@@ -149,6 +156,7 @@ export function DocumentView({ target, view, onView, reloadToken, callbacks, onO
         onHeadings={(list) => callbacks.onHeadings(path, list)}
         onDirtyChange={(dirty) => callbacks.onDirtyChange(path, dirty)}
         onFocus={() => callbacks.onActivePane({ path, folder, stem: section.stem })}
+        onSelectWord={(word) => callbacks.onSelectWord(path, word)}
       />
     )
   }

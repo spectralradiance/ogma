@@ -4,6 +4,7 @@ import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ip
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
+import { type LexicalQuery, LexicalPanel } from './LexicalPanel'
 import { readPref, writePref } from './prefs'
 import { StatusBar } from './StatusBar'
 import {
@@ -22,6 +23,9 @@ export function App() {
   const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
   const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
   const [reloadToken, setReloadToken] = useState(0)
+  const [panelOpen, setPanelOpen] = useState(() => readPref('lexicalPanel') === 'true')
+  const [lexicalQuery, setLexicalQuery] = useState<LexicalQuery | null>(null)
+  const panelOpenRef = useRef(panelOpen)
   const panes = useRef(new Map<string, DocumentPaneHandle>())
   const dirtyPanes = useRef(new Set<string>())
   const closing = useRef(false)
@@ -104,12 +108,35 @@ export function App() {
   }, [])
   const toggleFocus = useCallback(() => setFocusMode((value) => !value), [])
 
+  const showPanel = useCallback((open: boolean) => {
+    setPanelOpen(open)
+    panelOpenRef.current = open
+    writePref('lexicalPanel', String(open))
+  }, [])
+  const togglePanel = useCallback(() => showPanel(!panelOpenRef.current), [showPanel])
+
+  /** Ctrl+D: look up the word at the cursor (opening the panel), or toggle the panel when there is none. */
+  const lookUpCurrentWord = useCallback(() => {
+    const path = active?.path
+    const found = path ? panes.current.get(path)?.currentWord() : null
+    if (found) {
+      setLexicalQuery({ ...found, source: path ?? null })
+      showPanel(true)
+    } else {
+      showPanel(!panelOpenRef.current)
+    }
+  }, [active, showPanel])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === '/') {
         event.preventDefault()
         event.stopPropagation()
         toggleLive()
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        event.stopPropagation()
+        lookUpCurrentWord()
       } else if (event.key === 'F8') {
         event.preventDefault()
         toggleFocus()
@@ -120,7 +147,7 @@ export function App() {
     // Capture phase so these win over CodeMirror's own bindings (Ctrl+/ toggles comments there).
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggleLive, toggleFocus, focusMode])
+  }, [toggleLive, toggleFocus, focusMode, lookUpCurrentWord])
 
   useEffect(() => {
     // Hold the window open until pending edits are on disk.
@@ -150,6 +177,9 @@ export function App() {
       else dirtyPanes.current.delete(path)
     },
     onActivePane: setActive,
+    onSelectWord: (path, word) => {
+      if (panelOpenRef.current) setLexicalQuery({ ...word, source: path })
+    },
   }), [])
 
   const addRoot = () => void window.oisin.workspace.addRoot().then(setWorkspace)
@@ -160,10 +190,13 @@ export function App() {
   const activeLabel = active?.stem && activePath
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
     : ''
-  const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
+  const mode = {
+    live, focusMode, panelOpen, onToggleLive: toggleLive, onToggleFocus: toggleFocus, onTogglePanel: togglePanel,
+  }
+  const showLexical = panelOpen && !focusMode
 
   return (
-    <div className={`shell${focusMode ? ' shell-focus' : ''}`}>
+    <div className={`shell${focusMode ? ' shell-focus' : ''}${showLexical ? ' shell-panel' : ''}`}>
       {!focusMode && (
         <WorkspaceTree
           roots={workspace.roots}
@@ -202,6 +235,7 @@ export function App() {
             onHeadings={(list) => callbacks.onHeadings(target.path, list)}
             onDirtyChange={(dirty) => callbacks.onDirtyChange(target.path, dirty)}
             onFocus={() => setActive({ path: target.path, folder: null, stem: null })}
+            onSelectWord={(word) => callbacks.onSelectWord(target.path, word)}
             onClose={() => changeTarget(null)}
           />
         )}
@@ -212,6 +246,14 @@ export function App() {
           </div>
         )}
       </main>
+      {showLexical && (
+        <LexicalPanel
+          query={lexicalQuery}
+          onLookup={(word) => setLexicalQuery((current) => ({ word, context: '', source: current?.source ?? null }))}
+          onReplace={(word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false)}
+          onClose={() => showPanel(false)}
+        />
+      )}
       <StatusBar
         status={status}
         documentInfo={activeInfo}

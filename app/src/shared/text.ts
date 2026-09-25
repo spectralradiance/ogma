@@ -49,3 +49,40 @@ export function extractHeadings(text: string): Heading[] {
   })
   return headings
 }
+
+const WORD_AT = /[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*/gu
+
+/** The word touching `offset` in `line`, if any. */
+export function wordAt(line: string, offset: number): { word: string; from: number; to: number } | null {
+  for (const match of line.matchAll(WORD_AT)) {
+    const from = match.index
+    const to = from + match[0].length
+    if (offset >= from && offset <= to) return { word: match[0], from, to }
+  }
+  return null
+}
+
+/** Whether `text` is a single word (possibly with an apostrophe or hyphen). */
+export function isSingleWord(text: string): boolean {
+  return /^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(text)
+}
+
+/** The sentence around [from, to) within a paragraph, trimmed of Markdown markers. */
+export function sentenceAround(paragraph: string, from: number, to: number): string {
+  const before = paragraph.slice(0, from)
+  const after = paragraph.slice(to)
+  const start = Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? ')) + 1
+  const endMatch = /[.!?](\s|$)/.exec(after)
+  const end = endMatch ? to + endMatch.index + 1 : paragraph.length
+  return paragraph.slice(start, end).replace(/^[\s>#*-]+/, '').replace(/[*_`]+/g, '').trim()
+}
+
+/** Gives `replacement` the capitalization pattern of `original` (Word → Word, WORD → WORD). */
+export function matchCase(original: string, replacement: string): string {
+  if (original.length > 1 && original === original.toLocaleUpperCase()) return replacement.toLocaleUpperCase()
+  const first = original.charAt(0)
+  if (first && first === first.toLocaleUpperCase() && first !== first.toLocaleLowerCase()) {
+    return replacement.charAt(0).toLocaleUpperCase() + replacement.slice(1)
+  }
+  return replacement
+}

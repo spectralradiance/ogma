@@ -35,6 +35,19 @@ const api: OisinApi = {
     read: (path) => ipcRenderer.invoke(IPC.foldersRead, path),
     create: (parent, name) => ipcRenderer.invoke(IPC.foldersCreate, parent, name),
   },
+  dictionary: {
+    status: () => ipcRenderer.invoke(IPC.dictionaryStatus),
+    choose: () => ipcRenderer.invoke(IPC.dictionaryChoose),
+    lookup: (word) => ipcRenderer.invoke(IPC.dictionaryLookup, word),
+    search: (text, limit) => ipcRenderer.invoke(IPC.dictionarySearch, text, limit),
+  },
+  lexicon: {
+    location: () => ipcRenderer.invoke(IPC.lexiconLocation),
+    list: () => ipcRenderer.invoke(IPC.lexiconList),
+    save: (entry) => ipcRenderer.invoke(IPC.lexiconSave, entry),
+    remove: (word) => ipcRenderer.invoke(IPC.lexiconRemove, word),
+    importAisling: () => ipcRenderer.invoke(IPC.lexiconImportAisling),
+  },
   sections: {
     create: (folder, title) => ipcRenderer.invoke(IPC.sectionsCreate, folder, title),
     rename: (folder, stem, title) => ipcRenderer.invoke(IPC.sectionsRename, folder, stem, title),

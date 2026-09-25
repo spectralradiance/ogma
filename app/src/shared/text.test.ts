@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { countWords, encodingLabel, extractHeadings, lineEndingLabel } from './text'
+import { countWords, encodingLabel, extractHeadings, isSingleWord, lineEndingLabel, matchCase, sentenceAround, wordAt } from './text'
 
 describe('countWords', () => {
   it('counts words, keeping contractions and hyphenations whole', () => {
@@ -25,5 +25,26 @@ describe('extractHeadings', () => {
       { level: 1, text: 'The First Era', line: 1 },
       { level: 2, text: 'Sources', line: 8 },
     ])
+  })
+})
+
+describe('word helpers', () => {
+  it('find the word at an offset, keeping apostrophes and hyphens', () => {
+    expect(wordAt('the star-stuff’s glow', 6)).toEqual({ word: 'star-stuff’s', from: 4, to: 16 })
+    expect(wordAt('a  b', 2)).toBeNull()
+    expect(isSingleWord('melancholy')).toBe(true)
+    expect(isSingleWord('two words')).toBe(false)
+  })
+
+  it('extract the sentence around a word', () => {
+    const paragraph = '> First sentence. The **deep** melancholy settled! Last one'
+    const from = paragraph.indexOf('melancholy')
+    expect(sentenceAround(paragraph, from, from + 10)).toBe('The deep melancholy settled!')
+  })
+
+  it('match the case of the replaced word', () => {
+    expect(matchCase('Gloomy', 'sad')).toBe('Sad')
+    expect(matchCase('GLOOMY', 'sad')).toBe('SAD')
+    expect(matchCase('gloomy', 'sad')).toBe('sad')
   })
 })

@@ -5,7 +5,7 @@ import type { TextDocument, TextFormat } from '../../shared/ipc'
 import { dirname } from '../../shared/paths'
 import { countWords, extractHeadings, type Heading } from '../../shared/text'
 import { onDiskChange, touchesFile } from './changes'
-import { MarkdownEditor, type MarkdownEditorHandle } from './editor/MarkdownEditor'
+import { MarkdownEditor, type MarkdownEditorHandle, type WordInContext } from './editor/MarkdownEditor'
 import { errorMessage } from './target'
 
 const AUTOSAVE_DELAY_MS = 1200
@@ -30,6 +30,8 @@ export interface DocumentPaneHandle {
   /** Saves pending edits. Resolves false if they could not be saved. */
   flush(): Promise<boolean>
   revealLine(line: number): void
+  currentWord(): WordInContext | null
+  replaceWord(replacement: string): boolean
 }
 
 interface DocumentPaneProps {
@@ -50,6 +52,7 @@ interface DocumentPaneProps {
   onHeadings?: (headings: Heading[]) => void
   onDirtyChange: (dirty: boolean) => void
   onFocus?: () => void
+  onSelectWord?: (word: WordInContext) => void
   onClose?: () => void
 }
 
@@ -60,7 +63,7 @@ interface DiskState {
 
 export function DocumentPane({
   ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, headerActions,
-  onInfo, onHeadings, onDirtyChange, onFocus, onClose,
+  onInfo, onHeadings, onDirtyChange, onFocus, onSelectWord, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -194,6 +197,8 @@ export function DocumentPane({
   useImperativeHandle(ref, () => ({
     flush: () => save(),
     revealLine: (line) => editor.current?.revealLine(line),
+    currentWord: () => editor.current?.currentWord() ?? null,
+    replaceWord: (replacement) => editor.current?.replaceWord(replacement) ?? false,
   }), [save])
 
   useEffect(() => {
@@ -285,6 +290,7 @@ export function DocumentPane({
           onSave={() => void save()}
           onBlur={() => void save()}
           onFocus={onFocus}
+          onSelectWord={onSelectWord}
         />
       ) : (
         <div className="document-message">Opening…</div>

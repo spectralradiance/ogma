@@ -741,3 +741,390 @@ button[aria-pressed='true'] {
 .view-split .document-compact .document-label {
   display: none;
 }
+
+/* Lexical panel (dictionary, etymology, thesaurus, lexicon) */
+
+.shell-panel {
+  grid-template-columns: 260px 1fr 340px;
+}
+
+.lexical-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.lexical-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 6px;
+}
+
+.lexical-search {
+  position: relative;
+  flex: 1;
+}
+
+.lexical-search input,
+.lexicon-list-head input,
+.lexicon-form input,
+.lexicon-form textarea {
+  width: 100%;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+
+.lexical-search input:focus,
+.lexicon-form input:focus,
+.lexicon-form textarea:focus {
+  border-color: var(--accent);
+}
+
+.lexical-suggestions {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  left: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+}
+
+.lexical-suggestions button {
+  display: block;
+  width: 100%;
+  padding: 4px 10px;
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.lexical-suggestions button:hover {
+  background: var(--selection);
+}
+
+.lexical-suggestions em,
+.lexical-suggestions span {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lexical-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lexical-tabs button {
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.lexical-tabs button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.lexical-body {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 14px 24px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.lexical-message {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lexical-hint {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lexical-word {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.lexical-ipa {
+  margin: 2px 0 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.lexical-saved {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 1px 8px;
+  color: var(--accent);
+  font-size: 11px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+}
+
+.lexical-entry h3 {
+  margin: 12px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lexical-entry ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.lexical-entry li {
+  margin-bottom: 4px;
+}
+
+.lexical-entry blockquote {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.etymology-tree {
+  margin: 4px 0 10px;
+  padding: 0;
+  list-style: none;
+  border-left: 2px solid var(--quote-bar);
+}
+
+.etymology-tree li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0 1px 10px;
+}
+
+.etymology-language {
+  min-width: 118px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.etymology-tree .link-button {
+  font-family: var(--font-serif);
+  font-size: 14px;
+}
+
+.etymology-prose,
+.etymology-cognates {
+  font-family: var(--font-serif);
+  font-size: 14px;
+}
+
+.etymology-cognates {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.chip button {
+  padding: 1px 8px;
+  font-size: 13px;
+  background: var(--raised);
+  border: none;
+  border-radius: 0;
+}
+
+.chip .chip-replace {
+  padding: 1px 6px;
+  color: var(--muted);
+  border-left: 1px solid var(--border);
+}
+
+.chip button:hover {
+  color: var(--accent);
+}
+
+.lexical-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lexical-links li {
+  padding: 3px 0;
+}
+
+.lexical-links .link-button {
+  font-size: 14px;
+}
+
+.lexicon-form {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 12px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lexicon-form label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lexicon-form textarea {
+  resize: vertical;
+}
+
+.lexicon-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.lexicon-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lexicon-list {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lexicon-list button {
+  display: block;
+  width: 100%;
+  padding: 5px 4px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+}
+
+.lexicon-list button:hover {
+  background: var(--raised);
+}
+
+.lexicon-list em {
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.lexicon-list span {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lexicon-footer {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lexicon-footer span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Hover definitions in the editor */
+
+.cm-tooltip.cm-tooltip-hover {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+}
+
+.cm-dictionary-tooltip {
+  max-width: 360px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cm-dictionary-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.cm-dictionary-pos,
+.cm-dictionary-ipa {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cm-dictionary-tooltip p {
+  margin: 3px 0 0;
+}
+
+/* A standalone editor fills its pane and scrolls itself (stacked editors use autoHeight instead). */
+.editor-host {
+  flex: 1;
+  min-height: 0;
+}
+
+.document-compact .editor-host {
+  flex: none;
+}
+
+/* Reconstructed forms (*h₂stḗr) need extended Latin that Georgia lacks. */
+.etymology-tree .link-button,
+.etymology-prose,
+.etymology-cognates,
+.lexical-ipa {
+  font-family: Cambria, 'Segoe UI', var(--font-serif);
+}
