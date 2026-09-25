@@ -5,11 +5,13 @@ import type { FolderModel, SectionInfo } from '../../shared/ipc'
 import { joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { onDiskChange, touchesFolder } from './changes'
-import { errorMessage, isOpenSection, type OpenTarget, type PaneId, sectionTarget } from './target'
+import { type ActivePane, errorMessage, type OpenTarget } from './target'
 
 export interface TreeActions {
   target: OpenTarget | null
-  outline: { pane: PaneId; headings: Heading[] } | null
+  /** The editor last typed in; its section is highlighted and its headings listed. */
+  active: ActivePane | null
+  outline: Heading[]
   open: (target: OpenTarget) => void
   reveal: (line: number) => void
   /** Runs a rename/move/trash, saving the open section first if it is affected. */
@@ -53,8 +55,18 @@ function NameInput({ initial, placeholder, depth, onSubmit, onCancel }: {
   )
 }
 
-function SectionRow({ folder, section, depth, index, count, onChanged }: {
-  folder: string
+interface FolderIdentity {
+  path: string
+  title: string
+  ordinal: string | null
+}
+
+function openDocument(folder: FolderIdentity, focusStem: string | null): OpenTarget {
+  return { kind: 'document', folder: folder.path, title: folder.title, ordinal: folder.ordinal, focusStem, nonce: Date.now() }
+}
+
+function SectionRow({ folder: identity, section, depth, index, count, onChanged }: {
+  folder: FolderIdentity
   section: SectionInfo
   depth: number
   index: number
@@ -63,7 +75,9 @@ function SectionRow({ folder, section, depth, index, count, onChanged }: {
 }) {
   const tree = useTree()
   const [renaming, setRenaming] = useState(false)
-  const active = isOpenSection(tree.target, folder, section.stem)
+  const folder = identity.path
+  const active = tree.active !== null && tree.active.folder !== null && samePath(tree.active.folder, folder)
+    && tree.active.stem?.toLowerCase() === section.stem.toLowerCase()
 
   const run = (operation: () => Promise<SectionInfo | null>) => {
     void tree.runSectionOperation(folder, section.stem, operation).then(onChanged)
@@ -92,7 +106,7 @@ function SectionRow({ folder, section, depth, index, count, onChanged }: {
           type="button"
           className="tree-row tree-section"
           style={indent(depth, 18)}
-          onClick={() => tree.open(sectionTarget(folder, section))}
+          onClick={() => tree.open(openDocument(identity, section.stem))}
           title={section.notes ?? section.notesName}
         >
           {section.ordinal && <span className="tree-ordinal">{section.ordinal}</span>}
@@ -131,9 +145,9 @@ function SectionRow({ folder, section, depth, index, count, onChanged }: {
           </button>
         </span>
       </div>
-      {active && tree.outline && tree.outline.headings.length > 0 && (
-        <ul className="tree tree-outline" aria-label={`${tree.outline.pane} headings`}>
-          {tree.outline.headings.map((heading) => (
+      {active && tree.outline.length > 0 && (
+        <ul className="tree tree-outline" aria-label="Headings">
+          {tree.outline.map((heading) => (
             <li key={`${heading.line}:${heading.text}`}>
               <button
                 type="button"
@@ -187,12 +201,13 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   }, [open, path, load])
 
   const expand = () => setOpen(true)
+  const identity: FolderIdentity = { path, title, ordinal: ordinal ?? null }
   const createSection = (name: string) => {
     setEditing(null)
     window.oisin.sections.create(path, name).then(
       (section) => {
         void load()
-        tree.open(sectionTarget(path, section))
+        tree.open(openDocument(identity, section.stem))
       },
       (reason: unknown) => window.alert(errorMessage(reason)),
     )
@@ -202,14 +217,40 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
     window.oisin.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
   }
 
+  const documentOpen = tree.target?.kind === 'document' && samePath(tree.target.folder, path)
   const fileActive = (name: string) => tree.target?.kind === 'file' && samePath(tree.target.path, joinPath(path, name))
   const empty = model && model.sections.length === 0 && model.subdocuments.length === 0 && model.documentNotes.length === 0
 
   return (
     <li>
       <div className={`tree-row-wrap${depth === 0 ? ' tree-root' : ''}`}>
-        <button type="button" className="tree-row tree-dir" style={indent(depth)} onClick={() => setOpen(!open)} aria-expanded={open} title={path}>
-          <span className="tree-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <button
+          type="button"
+          className={`tree-row tree-dir${documentOpen ? ' selected' : ''}`}
+          style={indent(depth)}
+          onClick={() => {
+            // A folder with sections opens as a document; other folders just expand or collapse.
+            const wasOpen = open
+            setOpen(true)
+            void (async () => {
+              const current = model ?? await window.oisin.folders.read(path).catch(() => null)
+              if (current && current.sections.length > 0) tree.open(openDocument(identity, null))
+              else if (wasOpen) setOpen(false)
+            })()
+          }}
+          aria-expanded={open}
+          title={path}
+        >
+          <span
+            className="tree-chevron"
+            aria-hidden="true"
+            onClick={(event) => {
+              event.stopPropagation()
+              setOpen(!open)
+            }}
+          >
+            {open ? '▾' : '▸'}
+          </span>
           {ordinal && <span className="tree-ordinal">{ordinal}</span>}
           <span className="tree-label">{title}</span>
         </button>
@@ -252,7 +293,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
           {model?.sections.map((section) => (
             <SectionRow
               key={section.stem}
-              folder={path}
+              folder={identity}
               section={section}
               depth={depth + 1}
               index={model.sections.filter((s) => s.ordinal !== null).indexOf(section)}

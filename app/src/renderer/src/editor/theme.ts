@@ -111,3 +111,10 @@ const live = EditorView.theme({
 })
 
 export const editorTheme: Extension = [base, live, syntaxHighlighting(highlight)]
+
+/** For editors stacked inside one scrolling document: no own scrollbar, no end padding. */
+export const autoHeightTheme: Extension = EditorView.theme({
+  '&': { height: 'auto' },
+  '.cm-scroller': { overflow: 'visible' },
+  '.cm-content, &.cm-live .cm-content': { maxWidth: 'none', padding: '6px 24px 14px' },
+})

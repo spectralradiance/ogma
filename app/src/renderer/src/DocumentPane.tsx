@@ -40,6 +40,9 @@ interface DocumentPaneProps {
   /** Open an empty editor when the file does not exist; the first save creates it. */
   allowMissing?: boolean
   placeholder?: string
+  /** A block inside the document view: small header, editor grows with its content. */
+  compact?: boolean
+  className?: string
   live: boolean
   focusMode: boolean
   headerActions?: ReactNode
@@ -56,7 +59,7 @@ interface DiskState {
 }
 
 export function DocumentPane({
-  ref, path, label, allowMissing = false, placeholder, live, focusMode, headerActions,
+  ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, headerActions,
   onInfo, onHeadings, onDirtyChange, onFocus, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
@@ -234,11 +237,11 @@ export function DocumentPane({
   }
 
   return (
-    <section className="document">
+    <section className={`document${compact ? ' document-compact' : ''}${className ? ` ${className}` : ''}`}>
       <header className="document-header">
         <div className="document-title" title={path}>
           {label && <span className="document-label">{label}</span>}
-          <span className="document-name">{fileName}</span>
+          {!compact && <span className="document-name">{fileName}</span>}
           {!label && <span className="document-folder">{folderName(dirname(path))}</span>}
           {!exists && <span className="document-new" title="Created when you start typing">new</span>}
         </div>
@@ -275,6 +278,7 @@ export function DocumentPane({
           path={path}
           initialText={loaded.document.text}
           placeholder={placeholder}
+          autoHeight={compact}
           live={live}
           focusMode={focusMode}
           onDocChanged={onDocChanged}

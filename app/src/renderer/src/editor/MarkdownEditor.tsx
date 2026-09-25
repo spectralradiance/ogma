@@ -2,14 +2,14 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { Compartment, EditorState } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { drawSelection, dropCursor, EditorView, keymap, placeholder as placeholderText } from '@codemirror/view'
 import { type Ref, useEffectEvent, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
 import { toggleWrap } from './commands'
 import { focusMode as focusModeExtension } from './focusMode'
 import { documentPath, livePreview } from './livePreview'
-import { editorTheme } from './theme'
+import { autoHeightTheme, editorTheme } from './theme'
 
 export interface MarkdownEditorHandle {
   getText(): string
@@ -23,6 +23,8 @@ interface MarkdownEditorProps {
   path: string
   initialText: string
   placeholder?: string
+  /** Grow with the content instead of scrolling, for editors stacked in one scrolling document. */
+  autoHeight?: boolean
   live: boolean
   focusMode: boolean
   onDocChanged: () => void
@@ -38,7 +40,7 @@ const noop = () => {}
  * instead of receiving it on every keystroke, which keeps large notes fast.
  */
 export function MarkdownEditor({
-  ref, path, initialText, placeholder, live, focusMode, onDocChanged, onSave, onBlur, onFocus,
+  ref, path, initialText, placeholder, autoHeight = false, live, focusMode, onDocChanged, onSave, onBlur, onFocus,
 }: MarkdownEditorProps) {
   const container = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -79,6 +81,7 @@ export function MarkdownEditor({
         compartments.live.of([]),
         compartments.focus.of([]),
         editorTheme,
+        autoHeight ? autoHeightTheme : ([] as Extension),
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off' }),
         placeholder ? placeholderText(placeholder) : [],
         keymap.of([
@@ -106,7 +109,7 @@ export function MarkdownEditor({
       editor.destroy()
       view.current = null
     }
-  }, [path, initialText, placeholder, compartments])
+  }, [path, initialText, placeholder, autoHeight, compartments])
 
   useLayoutEffect(() => {
     view.current?.dispatch({ effects: compartments.live.reconfigure(live ? livePreview : []) })

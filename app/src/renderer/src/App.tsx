@@ -3,29 +3,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
+import { DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
 import { readPref, writePref } from './prefs'
-import { ModeToggles, type PaneCallbacks, SectionView } from './SectionView'
 import { StatusBar } from './StatusBar'
-import { errorMessage, isOpenSection, type OpenTarget, type PaneId, parseTarget, sameTarget, sectionTarget } from './target'
+import {
+  type ActivePane, errorMessage, isOpenDocument, type OpenTarget, parseTarget, parseViewMode, sameTarget, type ViewMode,
+} from './target'
 import { WorkspaceTree } from './WorkspaceTree'
-
-const PANE_LABEL: Record<PaneId, string> = { notes: 'Notes', output: 'Output', file: '' }
 
 export function App() {
   const [status, setStatus] = useState<SidecarStatus | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceState>({ roots: [] })
   const [target, setTarget] = useState<OpenTarget | null>(() => parseTarget(readPref('openTarget')))
+  const [view, setView] = useState<ViewMode>(() => parseViewMode(readPref('documentView')))
   const [live, setLive] = useState(() => readPref('live') !== 'false')
   const [focusMode, setFocusMode] = useState(false)
-  const [activePane, setActivePane] = useState<PaneId>(() => (target?.kind === 'file' ? 'file' : 'notes'))
-  const [infos, setInfos] = useState<Partial<Record<PaneId, DocumentInfo | null>>>({})
-  const [headings, setHeadings] = useState<Partial<Record<PaneId, Heading[]>>>({})
-  const panes = useRef<Partial<Record<PaneId, DocumentPaneHandle | null>>>({})
-  const dirtyPanes = useRef(new Set<PaneId>())
+  const [active, setActive] = useState<ActivePane | null>(null)
+  const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
+  const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
+  const [reloadToken, setReloadToken] = useState(0)
+  const panes = useRef(new Map<string, DocumentPaneHandle>())
+  const dirtyPanes = useRef(new Set<string>())
   const closing = useRef(false)
 
   useEffect(() => {
-    let active = true
+    let alive = true
     let pushed = false
     // Subscribe first so a status pushed while the initial fetch is in flight is not overwritten.
     const unsubscribe = window.oisin.sidecar.onStatus((next) => {
@@ -33,31 +35,34 @@ export function App() {
       setStatus(next)
     })
     void window.oisin.sidecar.getStatus().then((initial) => {
-      if (active && !pushed) setStatus(initial)
+      if (alive && !pushed) setStatus(initial)
     })
     void window.oisin.workspace.get().then((initial) => {
-      if (active) setWorkspace(initial)
+      if (alive) setWorkspace(initial)
     })
     return () => {
-      active = false
+      alive = false
       unsubscribe()
     }
   }, [])
 
   const flushAll = useCallback(async () => {
-    const handles = Object.values(panes.current).filter((handle): handle is DocumentPaneHandle => Boolean(handle))
-    return (await Promise.all(handles.map((handle) => handle.flush()))).every(Boolean)
+    const results = await Promise.all([...panes.current.values()].map((handle) => handle.flush()))
+    return results.every(Boolean)
   }, [])
 
   const changeTarget = useCallback((next: OpenTarget | null) => {
     setTarget(next)
     writePref('openTarget', next ? JSON.stringify(next) : null)
-    setInfos({})
-    setHeadings({})
-    setActivePane(next?.kind === 'file' ? 'file' : 'notes')
+    setActive(next?.kind === 'file' ? { path: next.path, folder: null, stem: null } : null)
   }, [])
 
   const open = useCallback(async (next: OpenTarget) => {
+    // Scrolling within the open document needs no save.
+    if (next.kind === 'document' && sameTarget(target, next)) {
+      changeTarget(next)
+      return
+    }
     if (sameTarget(target, next)) return
     const saved = await flushAll()
     if (!saved && !window.confirm('Some changes could not be saved. Open the other file anyway and lose them?')) return
@@ -69,18 +74,27 @@ export function App() {
     stem: string,
     operation: () => Promise<SectionInfo | null>,
   ) => {
-    const affectsOpen = isOpenSection(target, folder, stem)
+    const affectsOpen = isOpenDocument(target, folder)
     if (affectsOpen && !(await flushAll())) {
-      window.alert('The open section has unsaved changes that could not be saved. Resolve that first.')
+      window.alert('The open document has unsaved changes that could not be saved. Resolve that first.')
       return
     }
     try {
       const result = await operation()
-      if (affectsOpen) changeTarget(result ? sectionTarget(folder, result) : null)
+      if (affectsOpen && target?.kind === 'document') {
+        const followed = target.focusStem?.toLowerCase() === stem.toLowerCase()
+        if (followed) changeTarget({ ...target, focusStem: result?.stem ?? null })
+        setReloadToken((token) => token + 1)
+      }
     } catch (error) {
       window.alert(errorMessage(error))
     }
   }, [target, flushAll, changeTarget])
+
+  const changeView = useCallback((next: ViewMode) => {
+    setView(next)
+    writePref('documentView', next)
+  }, [])
 
   const toggleLive = useCallback(() => {
     setLive((value) => {
@@ -125,24 +139,27 @@ export function App() {
   }, [flushAll])
 
   const callbacks = useMemo<PaneCallbacks>(() => ({
-    bindPane: (pane, handle) => {
-      panes.current[pane] = handle
+    bindPane: (path, handle) => {
+      if (handle) panes.current.set(path, handle)
+      else panes.current.delete(path)
     },
-    onInfo: (pane, info) => setInfos((current) => ({ ...current, [pane]: info })),
-    onHeadings: (pane, list) => setHeadings((current) => ({ ...current, [pane]: list })),
-    onDirtyChange: (pane, dirty) => {
-      if (dirty) dirtyPanes.current.add(pane)
-      else dirtyPanes.current.delete(pane)
+    onInfo: (path, info) => setInfos((current) => ({ ...current, [path]: info })),
+    onHeadings: (path, list) => setHeadings((current) => ({ ...current, [path]: list })),
+    onDirtyChange: (path, dirty) => {
+      if (dirty) dirtyPanes.current.add(path)
+      else dirtyPanes.current.delete(path)
     },
-    onActivePane: setActivePane,
+    onActivePane: setActive,
   }), [])
 
   const addRoot = () => void window.oisin.workspace.addRoot().then(setWorkspace)
   const removeRoot = (path: string) => void window.oisin.workspace.removeRoot(path).then(setWorkspace)
 
-  const outlinePane: PaneId = target?.kind === 'file' ? 'file' : activePane
-  const outline = target ? { pane: outlinePane, headings: headings[outlinePane] ?? [] } : null
-  const info = infos[target?.kind === 'file' ? 'file' : activePane] ?? null
+  const activePath = active?.path ?? null
+  const activeInfo = activePath ? infos[activePath] ?? null : null
+  const activeLabel = active?.stem && activePath
+    ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
+    : ''
   const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
 
   return (
@@ -153,41 +170,52 @@ export function App() {
           onAddRoot={addRoot}
           onRemoveRoot={removeRoot}
           target={target}
-          outline={outline}
+          active={active}
+          outline={activePath ? headings[activePath] ?? [] : []}
           open={(next) => void open(next)}
-          reveal={(line) => panes.current[outlinePane]?.revealLine(line)}
+          reveal={(line) => (activePath ? panes.current.get(activePath)?.revealLine(line) : undefined)}
           runSectionOperation={runSectionOperation}
         />
       )}
       <main className="stage">
-        {target?.kind === 'section' && (
-          <SectionView key={`${target.notesPath}|${target.outputPath}`} target={target} callbacks={callbacks} {...mode} />
+        {target?.kind === 'document' && (
+          <DocumentView
+            key={target.folder}
+            target={target}
+            view={view}
+            onView={changeView}
+            reloadToken={reloadToken}
+            callbacks={callbacks}
+            onOpenFile={(path) => void open({ kind: 'file', path })}
+            {...mode}
+          />
         )}
         {target?.kind === 'file' && (
           <DocumentPane
             key={target.path}
-            ref={(handle) => callbacks.bindPane('file', handle)}
+            ref={(handle) => callbacks.bindPane(target.path, handle)}
             path={target.path}
             live={live}
             focusMode={focusMode}
             headerActions={<ModeToggles {...mode} />}
-            onInfo={(next) => callbacks.onInfo('file', next)}
-            onHeadings={(list) => callbacks.onHeadings('file', list)}
-            onDirtyChange={(dirty) => callbacks.onDirtyChange('file', dirty)}
+            onInfo={(next) => callbacks.onInfo(target.path, next)}
+            onHeadings={(list) => callbacks.onHeadings(target.path, list)}
+            onDirtyChange={(dirty) => callbacks.onDirtyChange(target.path, dirty)}
+            onFocus={() => setActive({ path: target.path, folder: null, stem: null })}
             onClose={() => changeTarget(null)}
           />
         )}
         {!target && (
           <div className="placeholder">
             <h1 className="wordmark">Oisín</h1>
-            <p>{workspace.roots.length > 0 ? 'Choose a section or file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
+            <p>{workspace.roots.length > 0 ? 'Choose a document or file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
           </div>
         )}
       </main>
       <StatusBar
         status={status}
-        documentInfo={info}
-        documentLabel={target?.kind === 'section' ? PANE_LABEL[activePane] : ''}
+        documentInfo={activeInfo}
+        documentLabel={activeLabel}
       />
     </div>
   )
