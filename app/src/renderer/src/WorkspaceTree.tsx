@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react'
 
 import { folderName } from '../../shared/format'
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
@@ -311,21 +311,30 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   )
 }
 
+export type SidebarTab = 'files' | 'search'
+
 interface WorkspaceTreeProps extends TreeActions {
   roots: string[]
   onAddRoot: () => void
   onRemoveRoot: (path: string) => void
+  tab: SidebarTab
+  onTab: (tab: SidebarTab) => void
+  /** Rendered in place of the tree on the Search tab. */
+  search: ReactNode
 }
 
-export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, ...actions }: WorkspaceTreeProps) {
+export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, tab, onTab, search, ...actions }: WorkspaceTreeProps) {
   return (
     <TreeContext.Provider value={actions}>
       <aside className="sidebar">
         <header className="sidebar-header">
-          <span>Workspace</span>
+          <nav className="sidebar-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'files'} onClick={() => onTab('files')}>Files</button>
+            <button type="button" role="tab" aria-selected={tab === 'search'} onClick={() => onTab('search')} title="Search all folders (Ctrl+Shift+F)">Search</button>
+          </nav>
           <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder">+</button>
         </header>
-        {roots.length === 0 ? (
+        {tab === 'search' ? search : roots.length === 0 ? (
           <>
             <p className="sidebar-empty">No folders yet. Folders are edited in place; nothing is copied.</p>
             <button type="button" className="add-folder" onClick={onAddRoot}>Add folder…</button>

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { folderName } from '../../shared/format'
-import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
-import { joinPath } from '../../shared/paths'
+import type { SearchHit, SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import { dirname, joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { type AiWorkspace, AiPanel } from './AiPanel'
@@ -14,7 +14,8 @@ import { StatusBar } from './StatusBar'
 import {
   type ActivePane, errorMessage, isOpenDocument, type OpenTarget, parseTarget, parseViewMode, sameTarget, type ViewMode,
 } from './target'
-import { WorkspaceTree } from './WorkspaceTree'
+import { SearchPanel } from './SearchPanel'
+import { type SidebarTab, WorkspaceTree } from './WorkspaceTree'
 
 export function App() {
   const [status, setStatus] = useState<SidecarStatus | null>(null)
@@ -32,6 +33,10 @@ export function App() {
     return stored === 'words' || stored === 'ai' ? stored : null
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
+  const [searchFocus, setSearchFocus] = useState(0)
+  // A line to jump to once the pane for this file is ready (after opening a search result).
+  const pendingReveal = useRef<{ path: string; line: number } | null>(null)
   const [lexicalQuery, setLexicalQuery] = useState<LexicalQuery | null>(null)
   const drawerRef = useRef(drawer)
   const panes = useRef(new Map<string, DocumentPaneHandle>())
@@ -145,6 +150,12 @@ export function App() {
         event.preventDefault()
         event.stopPropagation()
         lookUpCurrentWord()
+      } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        event.stopPropagation()
+        setFocusMode(false)
+        setSidebarTab('search')
+        setSearchFocus((count) => count + 1)
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'j') {
         event.preventDefault()
         event.stopPropagation()
@@ -181,6 +192,12 @@ export function App() {
     bindPane: (path, handle) => {
       if (handle) panes.current.set(path, handle)
       else panes.current.delete(path)
+      const reveal = pendingReveal.current
+      if (handle && reveal && samePath(reveal.path, path)) {
+        pendingReveal.current = null
+        // Give the editor a moment to load its text before moving the cursor.
+        window.setTimeout(() => handle.revealLine(reveal.line), 350)
+      }
     },
     onInfo: (path, info) => setInfos((current) => ({ ...current, [path]: info })),
     onHeadings: (path, list) => setHeadings((current) => ({ ...current, [path]: list })),
@@ -193,6 +210,34 @@ export function App() {
       if (drawerRef.current === 'words') setLexicalQuery({ ...word, source: path })
     },
   }), [])
+
+  /** Opens a search hit: its double document scrolled to the section, or the file itself, at the hit's line. */
+  const openHit = useCallback(async (hit: SearchHit) => {
+    const folder = dirname(hit.path)
+    const model = await window.oisin.folders.read(folder).catch(() => null)
+    const section = model?.sections.find((candidate) =>
+      [candidate.notes, candidate.output].some((name) => name !== null && samePath(joinPath(folder, name), hit.path)))
+    const existing = panes.current.get(hit.path)
+    if (existing) {
+      pendingReveal.current = null
+      window.setTimeout(() => existing.revealLine(hit.line), 150)
+    } else {
+      pendingReveal.current = { path: hit.path, line: hit.line }
+    }
+    if (section) {
+      // Make sure the current view shows the file the hit is in.
+      const isNotes = section.notes !== null && samePath(joinPath(folder, section.notes), hit.path)
+      if ((isNotes && view === 'output') || (!isNotes && view === 'notes')) changeView('split')
+      const name = folderName(folder)
+      const numbered = /^(\d+(?:\.\d+)*)[\s._-]+(.+)$/.exec(name)
+      await open({
+        kind: 'document', folder, title: numbered ? numbered[2] : name, ordinal: numbered ? numbered[1] : null,
+        focusStem: section.stem, nonce: Date.now(),
+      })
+    } else {
+      await open({ kind: 'file', path: hit.path })
+    }
+  }, [open, view, changeView])
 
   const addRoot = () => void window.oisin.workspace.addRoot().then(setWorkspace)
   const removeRoot = (path: string) => void window.oisin.workspace.removeRoot(path).then(setWorkspace)
@@ -256,6 +301,23 @@ export function App() {
           open={(next) => void open(next)}
           reveal={(line) => (activePath ? panes.current.get(activePath)?.revealLine(line) : undefined)}
           runSectionOperation={runSectionOperation}
+          tab={sidebarTab}
+          onTab={setSidebarTab}
+          search={(
+            <SearchPanel
+              roots={workspace.roots}
+              autoFocus={searchFocus > 0}
+              key={searchFocus}
+              onOpen={(hit) => void openHit(hit)}
+              relatedSource={() => {
+                const handle = active ? panes.current.get(active.path) : undefined
+                if (!active || !handle) return null
+                const text = handle.getSelection().trim() || handle.getText()
+                const exclude = active.section ? [active.section.notesPath, active.section.outputPath] : [active.path]
+                return { label: active.section?.title ?? folderName(active.path), text, exclude }
+              }}
+            />
+          )}
         />
       )}
       <main className="stage">

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AiEvent } from '../shared/ai'
-import { IPC, type OisinApi, type SidecarStatus } from '../shared/ipc'
+import { IPC, type OisinApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
 
 const api: OisinApi = {
   sidecar: {
@@ -65,6 +65,19 @@ const api: OisinApi = {
       }
     },
     unloadLocal: () => ipcRenderer.invoke(IPC.aiUnloadLocal),
+  },
+  search: {
+    status: () => ipcRenderer.invoke(IPC.searchStatus),
+    sync: () => ipcRenderer.invoke(IPC.searchSync),
+    query: (text) => ipcRenderer.invoke(IPC.searchQuery, text),
+    related: (text, exclude) => ipcRenderer.invoke(IPC.searchRelated, text, exclude),
+    onProgress: (listener) => {
+      const handler = (_event: IpcRendererEvent, status: SearchStatus): void => listener(status)
+      ipcRenderer.on(IPC.searchProgress, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.searchProgress, handler)
+      }
+    },
   },
   sections: {
     create: (folder, title) => ipcRenderer.invoke(IPC.sectionsCreate, folder, title),

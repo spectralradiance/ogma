@@ -171,6 +171,23 @@ export interface LexiconEntry {
 
 import type { AiConfig, AiEvent, AiRunRequest, AiSettingsState, SecretName } from './ai'
 
+export interface SearchHit {
+  path: string
+  /** 1-based line where the matching paragraph starts. */
+  line: number
+  /** Excerpt with matches wrapped in MATCH_START … MATCH_END (see main/searchIndex.ts). */
+  snippet: string
+}
+
+export interface SearchStatus {
+  files: number
+  indexing: boolean
+  done: number
+  total: number
+  /** True once a full pass has completed this session. */
+  ready: boolean
+}
+
 /** Exposed to the renderer as `window.oisin` by the preload script. */
 export interface OisinApi {
   sidecar: {
@@ -222,6 +239,14 @@ export interface OisinApi {
     onEvent(listener: (runId: string, event: AiEvent) => void): () => void
     unloadLocal(): Promise<void>
   }
+  search: {
+    status(): Promise<SearchStatus>
+    /** Starts (or joins) bringing the index up to date; resolves when done. */
+    sync(): Promise<SearchStatus>
+    query(text: string): Promise<SearchHit[]>
+    related(text: string, exclude: string[]): Promise<SearchHit[]>
+    onProgress(listener: (status: SearchStatus) => void): () => void
+  }
   sections: {
     create(folder: string, title: string): Promise<SectionInfo>
     rename(folder: string, stem: string, title: string): Promise<SectionInfo>
@@ -265,7 +290,16 @@ export const IPC = {
   aiCancel: 'ai:cancel',
   aiEvent: 'ai:event',
   aiUnloadLocal: 'ai:unload-local',
+  searchStatus: 'search:status',
+  searchSync: 'search:sync',
+  searchQuery: 'search:query',
+  searchRelated: 'search:related',
+  searchProgress: 'search:progress',
 } as const
+
+/** Search snippet markers around matched words; control characters that cannot occur in normal text. */
+export const MATCH_START = '\u0002'
+export const MATCH_END = '\u0003'
 
 /** Custom protocol that serves images from inside workspace roots to the editor. */
 export const LOCAL_FILE_SCHEME = 'oisin-file'

@@ -1460,3 +1460,143 @@ button.primary {
 .section-title {
   min-width: 160px;
 }
+
+/* Sidebar tabs and search */
+
+.sidebar-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.sidebar-tabs button {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.sidebar-tabs button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.search-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.search-box {
+  display: grid;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-box input {
+  width: 100%;
+  padding: 5px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+
+.search-box input:focus {
+  border-color: var(--accent);
+}
+
+.search-box .link-button {
+  justify-self: start;
+}
+
+.search-box .lexical-hint {
+  margin: 0;
+}
+
+.search-message {
+  padding: 0 12px;
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0 16px;
+  overflow-y: auto;
+}
+
+.search-title {
+  margin: 4px 12px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.search-file h4 {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 8px 12px 2px;
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.search-folder {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: normal;
+  text-overflow: ellipsis;
+}
+
+.search-hit {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 12px 3px 16px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.search-hit:hover {
+  background: var(--raised);
+}
+
+.search-line {
+  flex: none;
+  min-width: 2.2em;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.search-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.search-snippet mark {
+  color: var(--text);
+  background: var(--search-match);
+  border-radius: 2px;
+}

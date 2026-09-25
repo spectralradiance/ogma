@@ -11,6 +11,7 @@ import { Dictionary } from './dictionary'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
 import { PromptStore } from './prompts'
+import { SearchIndex } from './searchIndex'
 import { SecretStore } from './secrets'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
@@ -55,7 +56,28 @@ const backupsDir = join(app.getPath('userData'), 'backups')
 const backups = new BackupStore(backupsDir, guard)
 const BACKUP_RETENTION_DAYS = 30
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'])
-const watcher = new WorkspaceWatcher((paths) => mainWindow?.webContents.send(IPC.filesChanged, paths))
+const watcher = new WorkspaceWatcher((paths) => {
+  mainWindow?.webContents.send(IPC.filesChanged, paths)
+  // Keep the search index current once it has been built.
+  if (searchIndex?.status().ready) {
+    for (const changed of paths) void searchIndex.updateFile(changed, settings.get().workspaceRoots).catch(() => {})
+  }
+})
+let searchIndex: SearchIndex | null = null
+
+function index(): SearchIndex {
+  searchIndex ??= new SearchIndex(join(app.getPath('userData'), 'search.db'))
+  return searchIndex
+}
+
+function syncIndex(): Promise<void> {
+  return index().sync(settings.get().workspaceRoots, (status) => mainWindow?.webContents.send(IPC.searchProgress, status))
+}
+
+function rootsChanged(): void {
+  watcher.setRoots(settings.get().workspaceRoots)
+  if (searchIndex?.status().ready) void syncIndex()
+}
 let mainWindow: BrowserWindow | null = null
 let quitting = false
 let dictionary: Dictionary | null = null
@@ -194,14 +216,14 @@ function registerIpc(): void {
         settings.get().workspaceRoots,
       )
       settings.update({ workspaceRoots: roots })
-      watcher.setRoots(roots)
+      rootsChanged()
     }
     return workspaceState()
   })
   ipcMain.handle(IPC.workspaceRemoveRoot, (_event, path: unknown) => {
     if (typeof path !== 'string') throw new TypeError('path must be a string')
     settings.update({ workspaceRoots: removeRoot(settings.get().workspaceRoots, path, process.platform) })
-    watcher.setRoots(settings.get().workspaceRoots)
+    rootsChanged()
     return workspaceState()
   })
 
@@ -249,6 +271,15 @@ function registerIpc(): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     return result.canceled ? null : lexicon().importAisling(result.filePaths[0])
   })
+
+  ipcMain.handle(IPC.searchStatus, () => index().status())
+  ipcMain.handle(IPC.searchSync, async () => {
+    await syncIndex()
+    return index().status()
+  })
+  ipcMain.handle(IPC.searchQuery, (_event, query: unknown) => index().search(text(query)))
+  ipcMain.handle(IPC.searchRelated, (_event, passage: unknown, exclude: unknown) =>
+    index().related(text(passage), Array.isArray(exclude) ? exclude.filter((item): item is string => typeof item === 'string') : []))
 
   ipcMain.handle(IPC.aiSettings, () => aiSettingsState())
   ipcMain.handle(IPC.aiSaveConfig, (_event, config: AiConfig) => {
@@ -314,6 +345,7 @@ app.on('will-quit', (event) => {
   quitting = true
   watcher.close()
   dictionary?.close()
+  searchIndex?.close()
   void sidecar.stop().finally(() => app.quit())
 })
 
