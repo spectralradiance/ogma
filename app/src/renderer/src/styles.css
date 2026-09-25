@@ -1703,3 +1703,102 @@ button.primary {
   padding: 0 4px;
   font-size: 12px;
 }
+
+/* Statistics */
+
+.stats-dialog {
+  width: min(760px, 100%);
+}
+
+.stats-summary {
+  display: flex;
+  gap: 28px;
+}
+
+.stats-summary div {
+  display: grid;
+}
+
+.stats-summary strong {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.stats-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stats-goal label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.stats-goal input {
+  width: 110px;
+  padding: 3px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.goal-bar {
+  position: relative;
+  height: 20px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+.goal-bar div {
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.goal-bar span {
+  position: absolute;
+  inset: 0;
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.stats-table td {
+  vertical-align: middle;
+}
+
+.stats-heading {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.daily-chart {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+}
+
+.daily-axis {
+  stroke: var(--border);
+}
+
+.daily-up {
+  fill: var(--accent);
+}
+
+.daily-down {
+  fill: var(--bad);
+}
+
+.daily-label {
+  fill: var(--muted);
+  font-size: 6px;
+}
+
+.status-today {
+  color: var(--accent);
+}

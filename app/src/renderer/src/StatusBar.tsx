@@ -17,9 +17,11 @@ interface StatusBarProps {
   documentInfo: DocumentInfo | null
   /** Which pane the document info describes, e.g. "Notes". */
   documentLabel?: string
+  /** Net words written today across all files. */
+  todayWords?: number | null
 }
 
-export function StatusBar({ status, documentInfo, documentLabel }: StatusBarProps) {
+export function StatusBar({ status, documentInfo, documentLabel, todayWords }: StatusBarProps) {
   const [open, setOpen] = useState(false)
   const state = status?.state ?? 'starting'
   const health = status?.health
@@ -44,6 +46,11 @@ export function StatusBar({ status, documentInfo, documentLabel }: StatusBarProp
         </>
       )}
       {!health && status?.error && <span className="status-item status-error">{status.error}</span>}
+      {todayWords !== undefined && todayWords !== null && todayWords !== 0 && (
+        <span className="status-item status-today" title="Net words written today, all files">
+          Today {todayWords > 0 ? '+' : ''}{todayWords.toLocaleString()}
+        </span>
+      )}
       {documentInfo && (
         <span className="status-document">
           {documentLabel && <span className="status-pane">{documentLabel}</span>}

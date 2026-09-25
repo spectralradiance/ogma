@@ -16,6 +16,7 @@ import { LexiconStore } from './lexicon'
 import { PromptStore } from './prompts'
 import { SearchIndex } from './searchIndex'
 import { SnapshotStore } from './snapshots'
+import { WritingStats } from './stats'
 import { SecretStore } from './secrets'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
@@ -49,6 +50,7 @@ const sidecar = new SidecarManager(resolveSidecarPaths(app.getAppPath(), process
 }))
 const prompts = new PromptStore(join(app.getPath('userData'), 'prompts'))
 const snapshots = new SnapshotStore(join(app.getPath('userData'), 'snapshots'))
+const writingStats = new WritingStats(join(app.getPath('userData'), 'stats.json'))
 const ai = new AiBridge({
   connection: () => sidecar.connection(),
   prompts,
@@ -250,10 +252,22 @@ function registerIpc(): void {
     readTextDocument(guard.resolve(path), options?.allowMissing === true))
   ipcMain.handle(IPC.filesWrite, async (_event, request: WriteRequest) => {
     const target = guard.resolve(request?.path)
+    const before = await readTextDocument(target, true).then((document) => (document.mtimeMs === null ? null : document.text), () => null)
     const result = await writeTextDocument(target, request, backups)
-    if (result.ok) void snapshots.afterSave(target, request.text).catch(() => {})
+    if (result.ok) {
+      void snapshots.afterSave(target, request.text).catch(() => {})
+      writingStats.recordSave(target, before, request.text)
+      mainWindow?.webContents.send(IPC.statsChanged, writingStats.daily())
+    }
     return result
   })
+  ipcMain.handle(IPC.statsDocument, (_event, folder: unknown) => writingStats.documentStats(guard.resolve(folder)))
+  ipcMain.handle(IPC.statsSetGoal, (_event, folder: unknown, words: unknown) => {
+    const target = guard.resolve(folder)
+    writingStats.setGoal(target, typeof words === 'number' && Number.isFinite(words) ? words : null)
+    return writingStats.documentStats(target)
+  })
+  ipcMain.handle(IPC.statsDaily, (_event, days: unknown) => writingStats.daily(typeof days === 'number' ? Math.min(Math.max(days, 1), 366) : 14))
   ipcMain.handle(IPC.historyList, (_event, file: unknown) => snapshots.list(guard.resolve(file)))
   ipcMain.handle(IPC.historyRead, (_event, file: unknown, id: unknown) => snapshots.read(guard.resolve(file), text(id)))
   ipcMain.handle(IPC.historySnapshot, (_event, file: unknown, content: unknown, label: unknown) =>

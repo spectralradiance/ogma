@@ -229,7 +229,8 @@ Tested end to end against a local mock of an OpenAI-compatible server (no API ke
 - **Lexical assist:** "vary this word", "stronger verb", and "thematic vocabulary for this section". Suggestions come back as a list, and each option is checked against the local dictionary.
 - Prompt templates are editable `.md` files (the same idea as ogma's `guidance.json`), and each run is logged to the history.
 
-### Phase 5 — Polish & later
+### Phase 5 — Polish & later ✅ done 2026-09-25 (except embeddings)
+Shipped: search across all roots (SQLite FTS5 index, Ctrl+Shift+F), keyword-based "related notes", export to PDF/HTML/Markdown, per-file version history (automatic every 10 minutes while editing, plus labelled snapshots, diff and restore), and writing statistics (per-section counts, output goal, net words per day). Not done: DOCX export, embedding-based related notes (needs the PyTorch stack), git-backed history.
 - Global search across all roots (ripgrep or SQLite FTS).
 - Export a whole document as the output files joined into one `.md`, HTML, PDF or DOCX.
 - Version snapshots for each section (git per root, or the backup store).

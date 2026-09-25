@@ -28,6 +28,7 @@ export function App() {
   const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
   const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
   const [reloadToken, setReloadToken] = useState(0)
+  const [todayWords, setTodayWords] = useState<number | null>(null)
   const [drawer, setDrawer] = useState<Drawer | null>(() => {
     const stored = readPref('drawer')
     return stored === 'words' || stored === 'ai' ? stored : null
@@ -57,9 +58,18 @@ export function App() {
     void window.oisin.workspace.get().then((initial) => {
       if (alive) setWorkspace(initial)
     })
+    const today = (days: { notes: number; output: number }[]) => {
+      const last = days.at(-1)
+      return last ? last.notes + last.output : 0
+    }
+    void window.oisin.stats.daily(1).then((days) => {
+      if (alive) setTodayWords(today(days))
+    })
+    const unsubscribeStats = window.oisin.stats.onChanged((days) => setTodayWords(today(days)))
     return () => {
       alive = false
       unsubscribe()
+      unsubscribeStats()
     }
   }, [])
 
@@ -378,6 +388,7 @@ export function App() {
         status={status}
         documentInfo={activeInfo}
         documentLabel={activeLabel}
+        todayWords={todayWords}
       />
     </div>
   )

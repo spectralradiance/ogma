@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AiEvent } from '../shared/ai'
-import { IPC, type OisinApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
+import { type DailyWords, IPC, type OisinApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
 
 const api: OisinApi = {
   sidecar: {
@@ -65,6 +65,18 @@ const api: OisinApi = {
       }
     },
     unloadLocal: () => ipcRenderer.invoke(IPC.aiUnloadLocal),
+  },
+  stats: {
+    document: (folder) => ipcRenderer.invoke(IPC.statsDocument, folder),
+    setGoal: (folder, words) => ipcRenderer.invoke(IPC.statsSetGoal, folder, words),
+    daily: (days) => ipcRenderer.invoke(IPC.statsDaily, days),
+    onChanged: (listener) => {
+      const handler = (_event: IpcRendererEvent, days: DailyWords[]): void => listener(days)
+      ipcRenderer.on(IPC.statsChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.statsChanged, handler)
+      }
+    },
   },
   history: {
     list: (path) => ipcRenderer.invoke(IPC.historyList, path),

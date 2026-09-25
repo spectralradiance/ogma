@@ -179,6 +179,32 @@ export interface SearchHit {
   snippet: string
 }
 
+export interface DailyWords {
+  /** Local date, YYYY-MM-DD. */
+  day: string
+  /** Net words added (negative when more were cut). */
+  notes: number
+  output: number
+}
+
+export interface SectionStats {
+  stem: string
+  ordinal: string | null
+  title: string
+  notesWords: number
+  outputWords: number
+  /** ISO time either file last changed. */
+  modified: string | null
+}
+
+export interface DocumentStats {
+  sections: SectionStats[]
+  notesWords: number
+  outputWords: number
+  /** Output word goal, if set. */
+  goal: number | null
+}
+
 export interface SnapshotEntry {
   id: string
   /** ISO time the version was captured. */
@@ -263,6 +289,13 @@ export interface OisinApi {
     onEvent(listener: (runId: string, event: AiEvent) => void): () => void
     unloadLocal(): Promise<void>
   }
+  stats: {
+    document(folder: string): Promise<DocumentStats>
+    setGoal(folder: string, words: number | null): Promise<DocumentStats>
+    daily(days?: number): Promise<DailyWords[]>
+    /** Fires after each save that changed the word count, with the last 14 days. */
+    onChanged(listener: (days: DailyWords[]) => void): () => void
+  }
   history: {
     /** Versions of a file, newest first. */
     list(path: string): Promise<SnapshotEntry[]>
@@ -325,6 +358,10 @@ export const IPC = {
   aiCancel: 'ai:cancel',
   aiEvent: 'ai:event',
   aiUnloadLocal: 'ai:unload-local',
+  statsDocument: 'stats:document',
+  statsSetGoal: 'stats:set-goal',
+  statsDaily: 'stats:daily',
+  statsChanged: 'stats:changed',
   historyList: 'history:list',
   historyRead: 'history:read',
   historySnapshot: 'history:snapshot',

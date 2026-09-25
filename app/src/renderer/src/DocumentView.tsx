@@ -7,6 +7,7 @@ import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { ExportDialog } from './ExportDialog'
+import { StatsDialog } from './StatsDialog'
 import { readPref, writePref } from './prefs'
 import { type ActivePane, errorMessage, type OpenTarget, VIEW_MODES, type ViewMode } from './target'
 
@@ -96,6 +97,7 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
   const [swapped, setSwapped] = useState(() => readPref('panesSwapped') === 'true')
   const [ratio, setRatio] = useState(readRatio)
   const [exporting, setExporting] = useState(false)
+  const [showStats, setShowStats] = useState(false)
   const sections = useRef(new Map<string, HTMLElement>())
   const body = useRef<HTMLDivElement>(null)
 
@@ -209,10 +211,22 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
         {view === 'split' && (
           <button type="button" onClick={toggleSwap} title="Swap notes and output sides">⇄</button>
         )}
+        <button type="button" onClick={() => setShowStats(true)} title="Word counts per section, goal and daily progress">Stats</button>
         <button type="button" onClick={() => setExporting(true)} title="Export the document as PDF, HTML or Markdown">Export…</button>
         <ModeToggles {...mode} />
       </header>
       {exporting && <ExportDialog folder={folder} title={target.title} flush={flush} onClose={() => setExporting(false)} />}
+      {showStats && (
+        <StatsDialog
+          folder={folder}
+          title={target.title}
+          onClose={() => setShowStats(false)}
+          onOpenSection={(stem) => {
+            setShowStats(false)
+            sections.current.get(stem.toLowerCase())?.scrollIntoView({ block: 'start' })
+          }}
+        />
+      )}
 
       {model && model.documentNotes.length > 0 && (
         <nav className="document-notes" aria-label="Document notes">
