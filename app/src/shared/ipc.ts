@@ -179,6 +179,16 @@ export interface SearchHit {
   snippet: string
 }
 
+export interface SnapshotEntry {
+  id: string
+  /** ISO time the version was captured. */
+  at: string
+  words: number
+  chars: number
+  /** Set for manual snapshots; null for automatic ones. */
+  label: string | null
+}
+
 export interface ExportOptions {
   format: 'md' | 'html' | 'pdf'
   /** Which file of each section to include. */
@@ -253,6 +263,12 @@ export interface OisinApi {
     onEvent(listener: (runId: string, event: AiEvent) => void): () => void
     unloadLocal(): Promise<void>
   }
+  history: {
+    /** Versions of a file, newest first. */
+    list(path: string): Promise<SnapshotEntry[]>
+    read(path: string, id: string): Promise<string>
+    snapshot(path: string, text: string, label: string): Promise<SnapshotEntry>
+  }
   exports: {
     /** Asks where to save, then writes the document; null if cancelled. */
     document(folder: string, title: string, options: ExportOptions): Promise<ExportOutcome | null>
@@ -309,6 +325,9 @@ export const IPC = {
   aiCancel: 'ai:cancel',
   aiEvent: 'ai:event',
   aiUnloadLocal: 'ai:unload-local',
+  historyList: 'history:list',
+  historyRead: 'history:read',
+  historySnapshot: 'history:snapshot',
   exportDocument: 'export:document',
   exportShow: 'export:show',
   searchStatus: 'search:status',

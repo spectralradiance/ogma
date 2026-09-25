@@ -66,6 +66,11 @@ const api: OisinApi = {
     },
     unloadLocal: () => ipcRenderer.invoke(IPC.aiUnloadLocal),
   },
+  history: {
+    list: (path) => ipcRenderer.invoke(IPC.historyList, path),
+    read: (path, id) => ipcRenderer.invoke(IPC.historyRead, path, id),
+    snapshot: (path, text, label) => ipcRenderer.invoke(IPC.historySnapshot, path, text, label),
+  },
   exports: {
     document: (folder, title, options) => ipcRenderer.invoke(IPC.exportDocument, folder, title, options),
     showInFolder: (path) => ipcRenderer.invoke(IPC.exportShow, path),

@@ -1621,3 +1621,85 @@ button.primary {
   font-weight: 600;
   text-transform: uppercase;
 }
+
+/* History */
+
+.history {
+  width: min(1100px, 100%);
+  height: min(760px, 100%);
+}
+
+.history-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 260px 1fr;
+  min-height: 0;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.history-snapshot {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-snapshot input {
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.history-list ul {
+  flex: 1;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.history-list li button {
+  display: grid;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.history-list li button:hover {
+  background: var(--raised);
+}
+
+.history-list li button.selected {
+  background: var(--selection);
+}
+
+.history-list li span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.history-legend {
+  margin-right: auto;
+}
+
+.history-button {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.document-compact .history-button {
+  padding: 0 4px;
+  font-size: 12px;
+}

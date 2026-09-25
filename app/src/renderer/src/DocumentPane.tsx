@@ -6,6 +6,7 @@ import { dirname } from '../../shared/paths'
 import { countWords, extractHeadings, type Heading } from '../../shared/text'
 import { onDiskChange, touchesFile } from './changes'
 import { MarkdownEditor, type MarkdownEditorHandle, type WordInContext } from './editor/MarkdownEditor'
+import { HistoryDialog } from './HistoryDialog'
 import { errorMessage } from './target'
 
 const AUTOSAVE_DELAY_MS = 1200
@@ -74,6 +75,7 @@ export function DocumentPane({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [exists, setExists] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const editor = useRef<MarkdownEditorHandle>(null)
   const disk = useRef<DiskState | null>(null)
@@ -259,8 +261,23 @@ export function DocumentPane({
         <span className={`save-state save-${saveState}`} title={saveError ?? undefined}>
           {exists || saveState !== 'saved' ? SAVE_LABEL[saveState] : ''}
         </span>
+        {exists && (
+          <button type="button" className="icon-button history-button" onClick={() => setHistoryOpen(true)} title="History: earlier versions of this file" aria-label="History">⟲</button>
+        )}
         {headerActions}
       </header>
+      {historyOpen && (
+        <HistoryDialog
+          path={path}
+          current={() => editor.current?.getText() ?? ''}
+          onRestore={(text) => {
+            setHistoryOpen(false)
+            editor.current?.replaceAll(text)
+            setNotice('Restored an earlier version. It saves automatically; Ctrl+Z undoes it.')
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
 
       {saveState === 'conflict' && (
         <div className="banner banner-warn" role="alert">

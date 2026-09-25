@@ -15,6 +15,7 @@ import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './f
 import { LexiconStore } from './lexicon'
 import { PromptStore } from './prompts'
 import { SearchIndex } from './searchIndex'
+import { SnapshotStore } from './snapshots'
 import { SecretStore } from './secrets'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
@@ -47,6 +48,7 @@ const sidecar = new SidecarManager(resolveSidecarPaths(app.getAppPath(), process
   ...(settings.get().compatBaseUrl ? { OISIN_COMPAT_BASE_URL: settings.get().compatBaseUrl } : {}),
 }))
 const prompts = new PromptStore(join(app.getPath('userData'), 'prompts'))
+const snapshots = new SnapshotStore(join(app.getPath('userData'), 'snapshots'))
 const ai = new AiBridge({
   connection: () => sidecar.connection(),
   prompts,
@@ -246,8 +248,16 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.filesRead, (_event, path: unknown, options?: { allowMissing?: boolean }) =>
     readTextDocument(guard.resolve(path), options?.allowMissing === true))
-  ipcMain.handle(IPC.filesWrite, (_event, request: WriteRequest) =>
-    writeTextDocument(guard.resolve(request?.path), request, backups))
+  ipcMain.handle(IPC.filesWrite, async (_event, request: WriteRequest) => {
+    const target = guard.resolve(request?.path)
+    const result = await writeTextDocument(target, request, backups)
+    if (result.ok) void snapshots.afterSave(target, request.text).catch(() => {})
+    return result
+  })
+  ipcMain.handle(IPC.historyList, (_event, file: unknown) => snapshots.list(guard.resolve(file)))
+  ipcMain.handle(IPC.historyRead, (_event, file: unknown, id: unknown) => snapshots.read(guard.resolve(file), text(id)))
+  ipcMain.handle(IPC.historySnapshot, (_event, file: unknown, content: unknown, label: unknown) =>
+    snapshots.manual(guard.resolve(file), text(content), typeof label === 'string' ? label : ''))
 
   ipcMain.handle(IPC.foldersRead, (_event, folder: unknown) => readFolder(guard.resolve(folder)))
   ipcMain.handle(IPC.foldersCreate, (_event, parent: unknown, name: unknown) =>
