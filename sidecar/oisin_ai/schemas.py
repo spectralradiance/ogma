@@ -43,6 +43,8 @@ class Health(BaseModel):
     status: Literal["ok"]
     version: str
     python: str
+    python_prefix: str
+    in_virtualenv: bool
     pid: int
     uptime_s: float
     gpu: GpuStatus

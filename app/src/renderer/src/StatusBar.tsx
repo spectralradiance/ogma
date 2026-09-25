@@ -104,6 +104,10 @@ function SidecarDetails({ status, onClose }: { status: SidecarStatus | null; onC
           <dl className="facts">
             <dt>Version</dt>
             <dd>{health.version} · Python {health.python} · pid {health.pid}</dd>
+            <dt>Environment</dt>
+            <dd title={health.python_prefix}>
+              {health.in_virtualenv ? 'virtual environment' : 'system Python (not a venv)'} · {health.python_prefix}
+            </dd>
             <dt>PyTorch</dt>
             <dd>{describeTorch(health.torch)}</dd>
             {health.gpu.devices.map((device) => (

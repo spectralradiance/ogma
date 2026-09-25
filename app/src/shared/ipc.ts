@@ -37,6 +37,8 @@ export interface SidecarHealth {
   status: 'ok'
   version: string
   python: string
+  python_prefix: string
+  in_virtualenv: boolean
   pid: number
   uptime_s: number
   gpu: GpuStatus

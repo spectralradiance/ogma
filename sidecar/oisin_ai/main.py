@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import os
 import platform
+import sys
 import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -76,6 +77,8 @@ def create_app(
             "status": "ok",
             "version": __version__,
             "python": platform.python_version(),
+            "python_prefix": sys.prefix,
+            "in_virtualenv": sys.prefix != sys.base_prefix,
             "pid": os.getpid(),
             "uptime_s": round(time.monotonic() - started, 1),
             "gpu": gpu.snapshot(),

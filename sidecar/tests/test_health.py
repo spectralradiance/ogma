@@ -67,6 +67,8 @@ def test_health_reports_gpu_torch_and_providers() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
+    assert body["python_prefix"]
+    assert isinstance(body["in_virtualenv"], bool)
     assert body["gpu"]["devices"][0]["memory_free_mb"] == 6988
     assert body["torch"]["cuda_available"] is True
     assert set(providers_by_id(body)) == {"anthropic", "openai", "gemini", "openai_compat", "local_hf"}
