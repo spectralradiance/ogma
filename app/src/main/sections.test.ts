@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -16,7 +16,8 @@ import {
   validateTitle,
 } from './sections'
 import { isIgnoredChange } from './watcher'
-import { applyRenames, createFolder, createSection, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
+import { BackupStore, PathGuard } from './fileService'
+import { applyRenames, createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
 
 const files = (...names: string[]): FolderEntryName[] => names.map((name) => ({ name, kind: 'file' }))
 const summary = (model: FolderModel) => model.sections.map((s) => `${s.stem} [${s.notes ?? '-'} | ${s.output ?? '-'}]`)
@@ -167,5 +168,25 @@ describe('workspace operations on disk', () => {
     await writeFile(path.join(folder, '01 a-output.md'), '')
     await trashSection(folder, '01 a', async (file) => { trashed.push(path.basename(file)) })
     expect(trashed).toEqual(['01 a', '01 a-output.md'])
+  })
+})
+
+describe('mergeSections', () => {
+  it('appends the later section to the earlier one, keeping its encoding, then trashes the later files', async () => {
+    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-merge-'))
+    await writeFile(path.join(folder, '1 first'), Buffer.from([0x49, 0x92, 0x6d, 0x0d, 0x0a]))
+    await writeFile(path.join(folder, '2 second'), 'second notes\n')
+    await writeFile(path.join(folder, '2 second-output.md'), 'Second output.\n')
+    const backups = new BackupStore(path.join(folder, '..', `backups-${path.basename(folder)}`), new PathGuard(() => [folder]))
+    const trashed: string[] = []
+    const merged = await mergeSections(folder, '1 first', '2 second', backups, async (file) => {
+      trashed.push(path.basename(file))
+      await rm(file)
+    })
+    expect(merged).toMatchObject({ stem: '1 first', output: '1 first-output.md' })
+    expect(await readFile(path.join(folder, '1 first'))).toEqual(Buffer.from('I\x92m\r\n\r\nsecond notes\r\n', 'latin1'))
+    expect(await readFile(path.join(folder, '1 first-output.md'), 'utf8')).toBe('Second output.\n')
+    expect(trashed.sort()).toEqual(['2 second', '2 second-output.md'])
+    await expect(mergeSections(folder, '1 first', '1 first', backups, async () => {})).rejects.toThrow(/two different/)
   })
 })

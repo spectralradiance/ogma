@@ -23,7 +23,7 @@ import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
 import { WorkspaceWatcher } from './watcher'
 import { addRoot, removeRoot } from './workspaceRoots'
-import { createFolder, createSection, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
+import { createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
 if (process.env.OISIN_USER_DATA) {
@@ -377,6 +377,8 @@ function registerIpc(): void {
     await fetch(`${connection.baseUrl}/ai/local/unload`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}` } })
   })
 
+  ipcMain.handle(IPC.sectionsMerge, (_event, folder: unknown, stem: unknown, laterStem: unknown) =>
+    mergeSections(guard.resolve(folder), text(stem), text(laterStem), backups, (file) => shell.trashItem(guard.resolve(file))))
   ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
     trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
 }

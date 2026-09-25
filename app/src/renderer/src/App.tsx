@@ -8,6 +8,7 @@ import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './Docu
 import { type AiWorkspace, AiPanel } from './AiPanel'
 import { AiSettings } from './AiSettings'
 import { type Drawer, DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
+import { SidePanel } from './SidePanel'
 import { type LexicalQuery, LexicalPanel } from './LexicalPanel'
 import { readPref, writePref } from './prefs'
 import { StatusBar } from './StatusBar'
@@ -257,9 +258,7 @@ export function App() {
   const activeLabel = active?.stem && activePath
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
     : ''
-  const mode = {
-    live, focusMode, drawer, onToggleLive: toggleLive, onToggleFocus: toggleFocus, onToggleDrawer: toggleDrawer,
-  }
+  const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
   const shownDrawer = focusMode ? null : drawer
   const documentTitle = target?.kind === 'document' ? target.title : target?.kind === 'file' ? folderName(target.path) : ''
 
@@ -299,7 +298,7 @@ export function App() {
   }
 
   return (
-    <div className={`shell${focusMode ? ' shell-focus' : ''}${shownDrawer ? ' shell-panel' : ''}`}>
+    <div className={`shell${focusMode ? ' shell-focus' : shownDrawer ? ' shell-panel' : ' shell-rail'}`}>
       {!focusMode && (
         <WorkspaceTree
           roots={workspace.roots}
@@ -339,6 +338,7 @@ export function App() {
             onView={changeView}
             reloadToken={reloadToken}
             flush={flushAll}
+            onSectionOperation={runSectionOperation}
             callbacks={callbacks}
             onOpenFile={(path) => void open({ kind: 'file', path })}
             {...mode}
@@ -367,21 +367,23 @@ export function App() {
           </div>
         )}
       </main>
-      {shownDrawer === 'words' && (
-        <LexicalPanel
-          query={lexicalQuery}
-          onLookup={(word) => setLexicalQuery((current) => ({ word, context: '', source: current?.source ?? null }))}
-          onReplace={(word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false)}
-          onClose={() => showDrawer(null)}
-        />
-      )}
-      {shownDrawer === 'ai' && (
-        <AiPanel
-          workspace={aiWorkspace}
-          providers={status?.health?.providers ?? []}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onClose={() => showDrawer(null)}
-        />
+      {!focusMode && (
+        <SidePanel open={shownDrawer} onSelect={showDrawer} onClose={() => showDrawer(null)}>
+          {shownDrawer === 'words' && (
+            <LexicalPanel
+              query={lexicalQuery}
+              onLookup={(word) => setLexicalQuery((current) => ({ word, context: '', source: current?.source ?? null }))}
+              onReplace={(word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false)}
+            />
+          )}
+          {shownDrawer === 'ai' && (
+            <AiPanel
+              workspace={aiWorkspace}
+              providers={status?.health?.providers ?? []}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          )}
+        </SidePanel>
       )}
       {settingsOpen && <AiSettings providers={status?.health?.providers ?? []} onClose={() => setSettingsOpen(false)} />}
       <StatusBar

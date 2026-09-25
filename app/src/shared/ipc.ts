@@ -320,6 +320,8 @@ export interface OisinApi {
     rename(folder: string, stem: string, title: string): Promise<SectionInfo>
     move(folder: string, stem: string, direction: 'up' | 'down'): Promise<SectionInfo>
     trash(folder: string, stem: string): Promise<void>
+    /** Appends `laterStem`'s notes and output to `stem`'s, then removes `laterStem`. */
+    merge(folder: string, stem: string, laterStem: string): Promise<SectionInfo>
   }
 }
 
@@ -340,6 +342,7 @@ export const IPC = {
   sectionsRename: 'sections:rename',
   sectionsMove: 'sections:move',
   sectionsTrash: 'sections:trash',
+  sectionsMerge: 'sections:merge',
   dictionaryStatus: 'dictionary:status',
   dictionaryChoose: 'dictionary:choose',
   dictionaryLookup: 'dictionary:lookup',

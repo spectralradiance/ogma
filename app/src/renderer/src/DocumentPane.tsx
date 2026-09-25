@@ -12,9 +12,9 @@ import { errorMessage } from './target'
 const AUTOSAVE_DELAY_MS = 1200
 const STATS_DELAY_MS = 400
 
-type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'
+export type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'
 
-const SAVE_LABEL: Record<SaveState, string> = {
+export const SAVE_LABEL: Record<SaveState, string> = {
   saved: 'Saved',
   dirty: 'Edited',
   saving: 'Saving…',
@@ -36,6 +36,7 @@ export interface DocumentPaneHandle {
   getText(): string
   getSelection(): string
   replaceAll(text: string): void
+  openHistory(): void
 }
 
 interface DocumentPaneProps {
@@ -57,6 +58,8 @@ interface DocumentPaneProps {
   onDirtyChange: (dirty: boolean) => void
   onFocus?: () => void
   onSelectWord?: (word: WordInContext) => void
+  /** Reports the save state (and whether the file exists yet), for headers drawn by the parent. */
+  onSaveState?: (state: SaveState, exists: boolean) => void
   onClose?: () => void
 }
 
@@ -67,7 +70,7 @@ interface DiskState {
 
 export function DocumentPane({
   ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, headerActions,
-  onInfo, onHeadings, onDirtyChange, onFocus, onSelectWord, onClose,
+  onInfo, onHeadings, onDirtyChange, onFocus, onSelectWord, onSaveState, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -90,9 +93,9 @@ export function DocumentPane({
 
   // The parent's latest callbacks, read through a ref so that their identity
   // changing on every parent render does not re-run the file load.
-  const parent = useRef({ onInfo, onHeadings, onDirtyChange })
+  const parent = useRef({ onInfo, onHeadings, onDirtyChange, onSaveState })
   useLayoutEffect(() => {
-    parent.current = { onInfo, onHeadings, onDirtyChange }
+    parent.current = { onInfo, onHeadings, onDirtyChange, onSaveState }
   })
 
   const updateState = useCallback((next: SaveState) => {
@@ -132,6 +135,10 @@ export function DocumentPane({
   useEffect(() => {
     parent.current.onDirtyChange(saveState !== 'saved')
   }, [saveState])
+
+  useEffect(() => {
+    parent.current.onSaveState?.(saveState, exists)
+  }, [saveState, exists])
 
   useEffect(() => () => {
     window.clearTimeout(autosaveTimer.current)
@@ -207,6 +214,7 @@ export function DocumentPane({
     getText: () => editor.current?.getText() ?? '',
     getSelection: () => editor.current?.getSelection() ?? '',
     replaceAll: (text) => editor.current?.replaceAll(text),
+    openHistory: () => setHistoryOpen(true),
   }), [save])
 
   useEffect(() => {
@@ -251,7 +259,7 @@ export function DocumentPane({
 
   return (
     <section className={`document${compact ? ' document-compact' : ''}${className ? ` ${className}` : ''}`}>
-      <header className="document-header">
+      {!compact && <header className="document-header">
         <div className="document-title" title={path}>
           {label && <span className="document-label">{label}</span>}
           {!compact && <span className="document-name">{fileName}</span>}
@@ -265,7 +273,7 @@ export function DocumentPane({
           <button type="button" className="icon-button history-button" onClick={() => setHistoryOpen(true)} title="History: earlier versions of this file" aria-label="History">⟲</button>
         )}
         {headerActions}
-      </header>
+      </header>}
       {historyOpen && (
         <HistoryDialog
           path={path}

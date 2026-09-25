@@ -87,10 +87,9 @@ interface AiPanelProps {
   workspace: AiWorkspace
   providers: ProviderStatus[]
   onOpenSettings: () => void
-  onClose: () => void
 }
 
-export function AiPanel({ workspace, providers, onOpenSettings, onClose }: AiPanelProps) {
+export function AiPanel({ workspace, providers, onOpenSettings }: AiPanelProps) {
   const [settings, setSettings] = useState<AiSettingsState | null>(null)
   const [profileId, setProfileId] = useState('')
   const [instruction, setInstruction] = useState<(typeof WORD_INSTRUCTIONS)[number]['id']>('vary')
@@ -187,9 +186,8 @@ export function AiPanel({ workspace, providers, onOpenSettings, onClose }: AiPan
     : ''
 
   return (
-    <aside className="lexical-panel ai-panel" aria-label="AI">
+    <div className="lexical-panel ai-panel" aria-label="AI">
       <header className="lexical-header ai-header">
-        <strong>AI</strong>
         <div className="segmented" role="group" aria-label="AI mode">
           {MODES.map((option) => (
             <button key={option.id} type="button" aria-pressed={mode === option.id} title={option.title} onClick={() => setMode(option.id)}>
@@ -197,8 +195,7 @@ export function AiPanel({ workspace, providers, onOpenSettings, onClose }: AiPan
             </button>
           ))}
         </div>
-        <button type="button" className="icon-button" onClick={onOpenSettings} title="AI settings: keys, models, routing, prompts" aria-label="AI settings">⚙</button>
-        <button type="button" className="icon-button" onClick={onClose} title="Close" aria-label="Close">×</button>
+        <button type="button" className="icon-button ai-settings-button" onClick={onOpenSettings} title="AI settings: keys, models, routing, prompts" aria-label="AI settings">⚙ Settings</button>
       </header>
 
       <div className="lexical-body">
@@ -286,7 +283,7 @@ export function AiPanel({ workspace, providers, onOpenSettings, onClose }: AiPan
           }}
         />
       )}
-    </aside>
+    </div>
   )
 }
 

@@ -3,7 +3,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { FolderModel, SectionInfo } from '../shared/ipc'
-import { listDirectory } from './fileService'
+import { type BackupStore, listDirectory, readTextDocument, writeTextDocument } from './fileService'
 import { buildFolderModel, planNewSection, planRename, planSwap, type RenameStep, validateTitle } from './sections'
 
 export async function readFolder(folder: string): Promise<FolderModel> {
@@ -90,4 +90,46 @@ export async function createFolder(parent: string, name: string): Promise<string
   const target = path.join(parent, name.trim())
   await mkdir(target)
   return target
+}
+
+/**
+ * Merges `laterStem` into `stem`: each of the later section's notes and output is
+ * appended (after a blank line) to the same file of the earlier section, which
+ * keeps its title and encoding. The later section's files go to the Recycle Bin
+ * only after every write succeeded.
+ */
+export async function mergeSections(
+  folder: string,
+  stem: string,
+  laterStem: string,
+  backups: BackupStore,
+  trash: (file: string) => Promise<void>,
+): Promise<SectionInfo> {
+  const model = await readFolder(folder)
+  const target = findSection(model, stem)
+  const later = findSection(model, laterStem)
+  if (target.stem.toLowerCase() === later.stem.toLowerCase()) throw new Error('Choose two different sections to merge.')
+
+  for (const role of ['notes', 'output'] as const) {
+    const laterName = later[role]
+    if (!laterName) continue
+    const addition = await readTextDocument(path.join(folder, laterName))
+    if (!addition.text.trim()) continue
+    const targetPath = path.join(folder, target[role] ?? (role === 'notes' ? target.notesName : target.outputName))
+    const current = await readTextDocument(targetPath, true)
+    const merged = current.text.trim()
+      ? `${current.text.replace(/\s+$/, '')}\n\n${addition.text.replace(/^\s+/, '')}`
+      : addition.text
+    const result = await writeTextDocument(targetPath, {
+      path: targetPath,
+      text: merged,
+      format: current.mtimeMs === null ? addition.format : current.format,
+      expectedMtimeMs: current.mtimeMs,
+    }, backups)
+    if (!result.ok) throw new Error(`${path.basename(targetPath)} changed while merging, so nothing was removed.`)
+  }
+  for (const name of [later.notes, later.output]) {
+    if (name) await trash(path.join(folder, name))
+  }
+  return findSection(await readFolder(folder), target.stem)
 }

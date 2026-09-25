@@ -1802,3 +1802,229 @@ button.primary {
 .status-today {
   color: var(--accent);
 }
+
+/* Right-hand pane: icon tabs above the panel, or a rail of tabs when closed */
+
+.shell-rail {
+  grid-template-columns: 260px 1fr 40px;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.side-panel .lexical-panel {
+  flex: 1;
+  border-left: none;
+}
+
+.side-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-tabs button[role='tab'] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 7px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+}
+
+.side-tabs button[role='tab']:hover {
+  color: var(--text);
+}
+
+.side-tabs button[aria-selected='true'] {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  margin-bottom: -1px;
+}
+
+.side-close {
+  margin-left: auto;
+  align-self: center;
+}
+
+.side-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.side-rail-tab {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.side-rail-tab:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.ai-header .ai-settings-button {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* Section line: title, rule, menu */
+
+.section-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 6px;
+}
+
+.section-line-title {
+  display: flex;
+  flex: none;
+  gap: 10px;
+  align-items: baseline;
+  max-width: 70%;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.section-line-title .section-ordinal {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.section-line-rule {
+  flex: 1;
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.section-rename {
+  flex: none;
+  width: min(420px, 60%);
+  padding: 2px 8px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+}
+
+.section-menu-button {
+  position: relative;
+  flex: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 18px;
+}
+
+.section-menu-button.attention::after {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 6px;
+  content: '';
+  background: var(--warn);
+  border-radius: 50%;
+}
+
+.section-menu-button.problem::after {
+  background: var(--bad);
+}
+
+.section-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  z-index: 6;
+  display: grid;
+  min-width: 260px;
+  padding: 4px 0;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+  font-size: 13px;
+}
+
+.section-menu > button {
+  padding: 5px 14px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.section-menu > button:hover:not(:disabled) {
+  background: var(--selection);
+}
+
+.menu-separator {
+  margin: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.menu-status {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.menu-status .save-saved {
+  color: var(--muted);
+}
+
+.doc-hidden {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+}
+
+.doc-hidden:hover {
+  color: var(--text);
+}
+
+.document-compact {
+  margin-bottom: 10px;
+}

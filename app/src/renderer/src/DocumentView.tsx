@@ -7,6 +7,7 @@ import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { ExportDialog } from './ExportDialog'
+import { type PaneState, SectionHeader, type SectionLayout } from './SectionHeader'
 import { StatsDialog } from './StatsDialog'
 import { readPref, writePref } from './prefs'
 import { type ActivePane, errorMessage, type OpenTarget, VIEW_MODES, type ViewMode } from './target'
@@ -16,25 +17,13 @@ export type Drawer = 'words' | 'ai'
 interface ModeProps {
   live: boolean
   focusMode: boolean
-  drawer: Drawer | null
   onToggleLive: () => void
   onToggleFocus: () => void
-  onToggleDrawer: (drawer: Drawer) => void
 }
 
-export function ModeToggles({ live, focusMode, drawer, onToggleLive, onToggleFocus, onToggleDrawer }: ModeProps) {
+export function ModeToggles({ live, focusMode, onToggleLive, onToggleFocus }: ModeProps) {
   return (
     <div className="mode-toggles">
-      <div className="segmented" role="group" aria-label="Side panel">
-        <button type="button" aria-pressed={drawer === 'words'} onClick={() => onToggleDrawer('words')}
-          title="Dictionary, thesaurus and lexicon (Ctrl+D looks up the word at the cursor)">
-          Words
-        </button>
-        <button type="button" aria-pressed={drawer === 'ai'} onClick={() => onToggleDrawer('ai')}
-          title="Draft output from notes, analyze, word choice (Ctrl+J)">
-          AI
-        </button>
-      </div>
       <div className="segmented" role="group" aria-label="Editing mode">
         <button type="button" aria-pressed={live} onClick={live ? undefined : onToggleLive} title="Live rendering (Ctrl+/)">
           Live
@@ -81,6 +70,8 @@ interface DocumentViewProps extends ModeProps {
   reloadToken: number
   /** Saves every open editor. */
   flush: () => Promise<boolean>
+  /** Runs a rename/move/merge, saving open editors first and reloading afterwards. */
+  onSectionOperation: (folder: string, stem: string, operation: () => Promise<SectionInfo | null>) => Promise<void>
   callbacks: PaneCallbacks
   onOpenFile: (path: string) => void
 }
@@ -90,7 +81,9 @@ interface DocumentViewProps extends ModeProps {
  * column (output then notes), side by side, or output/notes only. Each block
  * is its own editor saving to its own file.
  */
-export function DocumentView({ target, view, onView, reloadToken, flush, callbacks, onOpenFile, ...mode }: DocumentViewProps) {
+export function DocumentView({
+  target, view, onView, reloadToken, flush, onSectionOperation, callbacks, onOpenFile, ...mode
+}: DocumentViewProps) {
   const { folder } = target
   const [model, setModel] = useState<FolderModel | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -98,6 +91,15 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
   const [ratio, setRatio] = useState(readRatio)
   const [exporting, setExporting] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [paneStates, setPaneStates] = useState<Record<string, PaneState>>({})
+  const [layouts, setLayouts] = useState<Record<string, SectionLayout>>(() => {
+    try {
+      return JSON.parse(readPref(`sectionLayout:${folder}`) ?? '{}') as Record<string, SectionLayout>
+    } catch {
+      return {}
+    }
+  })
+  const handles = useRef(new Map<string, DocumentPaneHandle>())
   const sections = useRef(new Map<string, HTMLElement>())
   const body = useRef<HTMLDivElement>(null)
 
@@ -152,13 +154,36 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
     window.addEventListener('pointerup', stop)
   }
 
+  const layoutOf = (section: SectionInfo): SectionLayout => layouts[section.stem.toLowerCase()] ?? {}
+  const setLayout = (section: SectionInfo, layout: SectionLayout) => {
+    setLayouts((current) => {
+      const next = { ...current, [section.stem.toLowerCase()]: layout }
+      writePref(`sectionLayout:${folder}`, JSON.stringify(next))
+      return next
+    })
+  }
+  const pathOf = (section: SectionInfo, role: Role) => joinPath(folder, role === 'notes' ? section.notesName : section.outputName)
+
   const block = (section: SectionInfo, role: Role, background = false) => {
-    const path = joinPath(folder, role === 'notes' ? section.notesName : section.outputName)
+    const path = pathOf(section, role)
     const copy = ROLE_COPY[role]
+    const hidden = role === 'notes' ? layoutOf(section).hideNotes : layoutOf(section).hideOutput
+    if (hidden) {
+      return (
+        <button key={path} type="button" className={`doc-hidden doc-${role}`}
+          onClick={() => setLayout(section, { ...layoutOf(section), [role === 'notes' ? 'hideNotes' : 'hideOutput']: false })}>
+          {copy.label} hidden — show
+        </button>
+      )
+    }
     return (
       <DocumentPane
         key={path}
-        ref={(handle) => callbacks.bindPane(path, handle)}
+        ref={(handle) => {
+          if (handle) handles.current.set(path, handle)
+          else handles.current.delete(path)
+          callbacks.bindPane(path, handle)
+        }}
         path={path}
         label={copy.label}
         compact
@@ -181,8 +206,23 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
           },
         })}
         onSelectWord={(word) => callbacks.onSelectWord(path, word)}
+        onSaveState={(state, exists) => setPaneStates((current) => (
+          current[path]?.state === state && current[path]?.exists === exists ? current : { ...current, [path]: { state, exists } }
+        ))}
       />
     )
+  }
+
+  const merge = (section: SectionInfo, direction: 'previous' | 'next') => {
+    const list = model?.sections ?? []
+    const index = list.indexOf(section)
+    const [earlier, later] = direction === 'previous' ? [list[index - 1], section] : [section, list[index + 1]]
+    if (!earlier || !later) return
+    const question = `Merge “${later.title}” into “${earlier.title}”?\n\n`
+      + `Its notes and output are added to the end of “${earlier.title}”'s, and its files go to the Recycle Bin. `
+      + 'The files that change are backed up first.'
+    if (!window.confirm(question)) return
+    void onSectionOperation(folder, later.stem, () => window.oisin.sections.merge(folder, earlier.stem, later.stem))
   }
 
   const [left, right]: [Role, Role] = swapped ? ['output', 'notes'] : ['notes', 'output']
@@ -263,7 +303,7 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
             <span className="doc-column-label">{ROLE_COPY[right].label}</span>
           </div>
         )}
-        {model?.sections.map((section) => (
+        {model?.sections.map((section, index) => (
           <article
             key={section.stem}
             className="doc-section"
@@ -272,21 +312,35 @@ export function DocumentView({ target, view, onView, reloadToken, flush, callbac
               else sections.current.delete(section.stem.toLowerCase())
             }}
           >
-            <h2 className="doc-section-title">
-              {section.ordinal && <span className="section-ordinal">{section.ordinal}</span>}
-              {section.title}
-            </h2>
-            {view === 'column' && (
+            <SectionHeader
+              section={section}
+              notes={paneStates[pathOf(section, 'notes')]}
+              output={paneStates[pathOf(section, 'output')]}
+              layout={layoutOf(section)}
+              previous={model.sections[index - 1] ?? null}
+              next={model.sections[index + 1] ?? null}
+              onLayout={(layout) => setLayout(section, layout)}
+              onRename={(title) => void onSectionOperation(folder, section.stem, () => window.oisin.sections.rename(folder, section.stem, title))}
+              onMove={(direction) => void onSectionOperation(folder, section.stem, () => window.oisin.sections.move(folder, section.stem, direction))}
+              onMerge={(direction) => merge(section, direction)}
+              onHistory={(role) => handles.current.get(pathOf(section, role))?.openHistory()}
+            />
+            {view === 'column' && (layoutOf(section).swapped ? (
+              <>
+                {block(section, 'notes', true)}
+                {block(section, 'output')}
+              </>
+            ) : (
               <>
                 {block(section, 'output')}
                 {block(section, 'notes', true)}
               </>
-            )}
+            ))}
             {view === 'split' && (
               <div className="doc-row" style={{ gridTemplateColumns: columns }}>
-                {block(section, left)}
+                {block(section, layoutOf(section).swapped ? right : left)}
                 <div className="doc-gutter" />
-                {block(section, right)}
+                {block(section, layoutOf(section).swapped ? left : right)}
               </div>
             )}
             {view === 'output' && block(section, 'output')}

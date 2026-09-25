@@ -44,10 +44,9 @@ interface LexicalPanelProps {
   onLookup: (word: string) => void
   /** Replaces the current word in the active editor; false if there is none. */
   onReplace: (word: string) => boolean
-  onClose: () => void
 }
 
-export function LexicalPanel({ query, onLookup, onReplace, onClose }: LexicalPanelProps) {
+export function LexicalPanel({ query, onLookup, onReplace }: LexicalPanelProps) {
   const [tab, setTab] = useState<Tab>(() => (readPref('lexicalTab') as Tab | null) ?? 'define')
   const [status, setStatus] = useState<DictionaryStatus | null>(null)
   const [entries, setEntries] = useState<DictionaryEntry[] | null>(null)
@@ -105,11 +104,10 @@ export function LexicalPanel({ query, onLookup, onReplace, onClose }: LexicalPan
   )
 
   return (
-    <aside className="lexical-panel" aria-label="Words">
+    <div className="lexical-panel" aria-label="Words">
       <header className="lexical-header">
         <button type="button" className="icon-button" onClick={back} disabled={history.length === 0} title="Back" aria-label="Back">←</button>
         <SearchBox word={word} onLookup={lookUp} enabled={status?.available ?? false} />
-        <button type="button" className="icon-button" onClick={onClose} title="Close (Ctrl+D toggles)" aria-label="Close">×</button>
       </header>
       <nav className="lexical-tabs" role="tablist">
         {TABS.map((option) => (
@@ -158,7 +156,7 @@ export function LexicalPanel({ query, onLookup, onReplace, onClose }: LexicalPan
           </ul>
         )}
       </div>
-    </aside>
+    </div>
   )
 }
 
