@@ -6,6 +6,7 @@ import type { Heading } from '../../shared/text'
 import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
+import { ExportDialog } from './ExportDialog'
 import { readPref, writePref } from './prefs'
 import { type ActivePane, errorMessage, type OpenTarget, VIEW_MODES, type ViewMode } from './target'
 
@@ -77,6 +78,8 @@ interface DocumentViewProps extends ModeProps {
   onView: (view: ViewMode) => void
   /** Changes when the app renamed or moved something here, so the folder is re-read. */
   reloadToken: number
+  /** Saves every open editor. */
+  flush: () => Promise<boolean>
   callbacks: PaneCallbacks
   onOpenFile: (path: string) => void
 }
@@ -86,12 +89,13 @@ interface DocumentViewProps extends ModeProps {
  * column (output then notes), side by side, or output/notes only. Each block
  * is its own editor saving to its own file.
  */
-export function DocumentView({ target, view, onView, reloadToken, callbacks, onOpenFile, ...mode }: DocumentViewProps) {
+export function DocumentView({ target, view, onView, reloadToken, flush, callbacks, onOpenFile, ...mode }: DocumentViewProps) {
   const { folder } = target
   const [model, setModel] = useState<FolderModel | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [swapped, setSwapped] = useState(() => readPref('panesSwapped') === 'true')
   const [ratio, setRatio] = useState(readRatio)
+  const [exporting, setExporting] = useState(false)
   const sections = useRef(new Map<string, HTMLElement>())
   const body = useRef<HTMLDivElement>(null)
 
@@ -205,8 +209,10 @@ export function DocumentView({ target, view, onView, reloadToken, callbacks, onO
         {view === 'split' && (
           <button type="button" onClick={toggleSwap} title="Swap notes and output sides">⇄</button>
         )}
+        <button type="button" onClick={() => setExporting(true)} title="Export the document as PDF, HTML or Markdown">Export…</button>
         <ModeToggles {...mode} />
       </header>
+      {exporting && <ExportDialog folder={folder} title={target.title} flush={flush} onClose={() => setExporting(false)} />}
 
       {model && model.documentNotes.length > 0 && (
         <nav className="document-notes" aria-label="Document notes">

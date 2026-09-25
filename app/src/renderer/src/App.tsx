@@ -328,6 +328,7 @@ export function App() {
             view={view}
             onView={changeView}
             reloadToken={reloadToken}
+            flush={flushAll}
             callbacks={callbacks}
             onOpenFile={(path) => void open({ kind: 'file', path })}
             {...mode}

@@ -179,6 +179,20 @@ export interface SearchHit {
   snippet: string
 }
 
+export interface ExportOptions {
+  format: 'md' | 'html' | 'pdf'
+  /** Which file of each section to include. */
+  content: 'output' | 'notes'
+  includeTitle: boolean
+}
+
+export interface ExportOutcome {
+  path: string
+  sections: number
+  /** Sections left out because that file is empty or missing. */
+  skipped: string[]
+}
+
 export interface SearchStatus {
   files: number
   indexing: boolean
@@ -239,6 +253,11 @@ export interface OisinApi {
     onEvent(listener: (runId: string, event: AiEvent) => void): () => void
     unloadLocal(): Promise<void>
   }
+  exports: {
+    /** Asks where to save, then writes the document; null if cancelled. */
+    document(folder: string, title: string, options: ExportOptions): Promise<ExportOutcome | null>
+    showInFolder(path: string): Promise<void>
+  }
   search: {
     status(): Promise<SearchStatus>
     /** Starts (or joins) bringing the index up to date; resolves when done. */
@@ -290,6 +309,8 @@ export const IPC = {
   aiCancel: 'ai:cancel',
   aiEvent: 'ai:event',
   aiUnloadLocal: 'ai:unload-local',
+  exportDocument: 'export:document',
+  exportShow: 'export:show',
   searchStatus: 'search:status',
   searchSync: 'search:sync',
   searchQuery: 'search:query',

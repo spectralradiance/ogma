@@ -1600,3 +1600,24 @@ button.primary {
   background: var(--search-match);
   border-radius: 2px;
 }
+
+.export-dialog {
+  width: min(520px, 100%);
+}
+
+.export-choice {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.export-choice legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}

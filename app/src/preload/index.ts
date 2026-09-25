@@ -66,6 +66,10 @@ const api: OisinApi = {
     },
     unloadLocal: () => ipcRenderer.invoke(IPC.aiUnloadLocal),
   },
+  exports: {
+    document: (folder, title, options) => ipcRenderer.invoke(IPC.exportDocument, folder, title, options),
+    showInFolder: (path) => ipcRenderer.invoke(IPC.exportShow, path),
+  },
   search: {
     status: () => ipcRenderer.invoke(IPC.searchStatus),
     sync: () => ipcRenderer.invoke(IPC.searchSync),

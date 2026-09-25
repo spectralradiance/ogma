@@ -1,13 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell, type OpenDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
+import { rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
-import { type DictionaryStatus, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
+import { type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
 import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
+import { buildExportMarkdown, collectDocument, writeExport } from './exporter'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
 import { PromptStore } from './prompts'
@@ -90,6 +93,20 @@ function aiSettingsState(): AiSettingsState {
     compatBaseUrl: settings.get().compatBaseUrl,
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
     promptsDir: prompts.location,
+  }
+}
+
+/** Renders HTML to PDF in a hidden window with scripts disabled. */
+async function printToPdf(html: string): Promise<Buffer> {
+  const file = join(app.getPath('temp'), `oisin-export-${randomUUID()}.html`)
+  await writeFile(file, html, 'utf8')
+  const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } })
+  try {
+    await window.loadFile(file)
+    return await window.webContents.printToPDF({ pageSize: 'A4', printBackground: true })
+  } finally {
+    window.destroy()
+    await rm(file, { force: true })
   }
 }
 
@@ -271,6 +288,28 @@ function registerIpc(): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     return result.canceled ? null : lexicon().importAisling(result.filePaths[0])
   })
+
+  ipcMain.handle(IPC.exportDocument, async (event, folder: unknown, title: unknown, options: ExportOptions) => {
+    const source = guard.resolve(folder)
+    if (!options || !['md', 'html', 'pdf'].includes(options.format) || !['output', 'notes'].includes(options.content)) {
+      throw new TypeError('Invalid export options.')
+    }
+    const name = text(title).replace(/[<>:"/\\|?*]/g, '_') || 'document'
+    const suffix = options.content === 'notes' ? ' (notes)' : ''
+    const dialogOptions = {
+      title: 'Export document',
+      defaultPath: join(app.getPath('documents'), `${name}${suffix}.${options.format}`),
+      filters: [{ name: options.format.toUpperCase(), extensions: [options.format] }],
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const choice = owner ? await dialog.showSaveDialog(owner, dialogOptions) : await dialog.showSaveDialog(dialogOptions)
+    if (choice.canceled || !choice.filePath) return null
+    const { sections, skipped } = await collectDocument(source, options)
+    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle)
+    await writeExport(choice.filePath, options.format, markdown, text(title), source, printToPdf)
+    return { path: choice.filePath, sections: sections.length, skipped }
+  })
+  ipcMain.handle(IPC.exportShow, (_event, file: unknown) => shell.showItemInFolder(text(file)))
 
   ipcMain.handle(IPC.searchStatus, () => index().status())
   ipcMain.handle(IPC.searchSync, async () => {
