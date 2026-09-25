@@ -25,7 +25,7 @@ cd app; npm install                   # also downloads the Electron binary
 
 The status bar shows the sidecar state, GPU memory, PyTorch/CUDA and which AI providers have keys. Click it for details, logs and a restart button.
 
-Until the keychain-backed settings page arrives in Phase 4, providers read their keys from the environment the app was started from: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), and `OISIN_COMPAT_BASE_URL` for an OpenAI-compatible host.
+API keys are set in the app under **AI → ⚙ AI settings → Keys** (stored encrypted). Keys already in the environment the app starts from (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) also work; keys saved in the app take precedence.
 
 ## Samples
 
@@ -48,7 +48,7 @@ Set up providers under **⚙ AI settings**:
 
 The local model needs PyTorch and the transformers stack: run `.\scripts\setup-sidecar.ps1` without `-NoTorch`. The first local run downloads the model (Qwen 2.5 7B by default, several GB) and needs an NVIDIA GPU; it loads in 4-bit and unloads after 10 idle minutes.
 
-Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%\Oisíni-history\<month>.jsonl`.
+Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%\Oisín\ai-history\<month>.jsonl`.
 
 ## Editing safety
 
