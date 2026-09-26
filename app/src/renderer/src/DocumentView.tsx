@@ -90,7 +90,11 @@ export function DocumentView({
   const { folder } = target
   const [model, setModel] = useState<FolderModel | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [swapped, setSwapped] = useState(() => readPref('panesSwapped') === 'true')
+  // Swapping applies to every section; Column and Side by side each remember their own order.
+  const [swaps, setSwaps] = useState(() => ({
+    split: readPref('panesSwapped') === 'true',
+    column: readPref('columnSwapped') === 'true',
+  }))
   const [ratio, setRatio] = useState(readRatio)
   const [exporting, setExporting] = useState(false)
   const [showStats, setShowStats] = useState(false)
@@ -142,9 +146,10 @@ export function DocumentView({
   }, [model, target.focusStem, target.nonce])
 
   const toggleSwap = () => {
-    setSwapped((value) => {
-      writePref('panesSwapped', String(!value))
-      return !value
+    const key = view === 'column' ? 'column' : 'split'
+    setSwaps((current) => {
+      writePref(key === 'column' ? 'columnSwapped' : 'panesSwapped', String(!current[key]))
+      return { ...current, [key]: !current[key] }
     })
   }
 
@@ -247,7 +252,7 @@ export function DocumentView({
     void onSectionOperation(folder, later.stem, () => window.oisin.sections.merge(folder, earlier.stem, later.stem))
   }
 
-  const [left, right]: [Role, Role] = swapped ? ['output', 'notes'] : ['notes', 'output']
+  const [left, right]: [Role, Role] = swaps.split ? ['output', 'notes'] : ['notes', 'output']
   const columns = `${ratio}fr 6px ${1 - ratio}fr`
 
   return (
@@ -271,7 +276,10 @@ export function DocumentView({
           ))}
         </div>
         {view === 'split' && (
-          <button type="button" onClick={toggleSwap} title="Swap notes and output sides">⇄</button>
+          <button type="button" onClick={toggleSwap} aria-pressed={swaps.split} title="Swap notes and output sides, in every section">⇄</button>
+        )}
+        {view === 'column' && (
+          <button type="button" onClick={toggleSwap} aria-pressed={swaps.column} title="Put notes above output (or output above notes), in every section">⇅</button>
         )}
         <button type="button" onClick={() => setShowStats(true)} title="Word counts per section, goal and daily progress">Stats</button>
         <button type="button" onClick={() => setExporting(true)} title="Export the document as PDF, HTML or Markdown">Export…</button>
@@ -355,7 +363,7 @@ export function DocumentView({
                 else void onSectionOperation(folder, section.stem, () => window.oisin.sections.rename(folder, section.stem, heading.text))
               }}
             />
-            {view === 'column' && (layoutOf(section).swapped ? (
+            {view === 'column' && (swaps.column ? (
               <>
                 {block(section, 'notes', true)}
                 {block(section, 'output')}
@@ -368,9 +376,9 @@ export function DocumentView({
             ))}
             {view === 'split' && (
               <div className="doc-row" style={{ gridTemplateColumns: columns }}>
-                {block(section, layoutOf(section).swapped ? right : left)}
+                {block(section, left)}
                 <div className="doc-gutter" />
-                {block(section, layoutOf(section).swapped ? left : right)}
+                {block(section, right)}
               </div>
             )}
             {view === 'output' && block(section, 'output')}

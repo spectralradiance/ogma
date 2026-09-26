@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { folderName } from '../../shared/format'
 import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
 import { outlineMarkdown } from '../../shared/outline'
+import { DEFAULT_PREFERENCES, type Preferences } from '../../shared/preferences'
 import { splitLeadingHeading } from '../../shared/text'
 import { dirname, joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
@@ -18,9 +19,31 @@ import {
   type ActivePane, errorMessage, isOpenDocument, type OpenTarget, parseTarget, parseViewMode, sameTarget, type ViewMode,
 } from './target'
 import { SearchPanel } from './SearchPanel'
+import { ResizeHandle } from './ResizeHandle'
+import { SettingsDialog } from './SettingsDialog'
 import { OutlinePanel } from './OutlinePanel'
 import { useOutline } from './useOutline'
 import { type SidebarTab, WorkspaceTree } from './WorkspaceTree'
+
+const LEFT_WIDTH = { initial: 260, min: 180, max: 560 }
+const RIGHT_WIDTH = { initial: 340, min: 260, max: 720 }
+const RAIL_WIDTH = 40
+
+const storedWidth = (key: string, bounds: { initial: number; min: number; max: number }) => {
+  const value = Number(readPref(key))
+  return Number.isFinite(value) && value >= bounds.min && value <= bounds.max ? value : bounds.initial
+}
+
+/** Puts the appearance preferences into the CSS variables the styles and editors read. */
+function applyAppearance(preferences: Preferences) {
+  const { appearance } = preferences
+  const root = document.documentElement.style
+  root.setProperty('--font-serif', appearance.textFont)
+  root.setProperty('--font-source', appearance.sourceFont)
+  root.setProperty('--text-size', `${appearance.textSize}px`)
+  root.setProperty('--text-line-height', String(appearance.lineHeight))
+  root.setProperty('--text-width', `${appearance.textWidth}px`)
+}
 
 export function App() {
   const [status, setStatus] = useState<SidecarStatus | null>(null)
@@ -39,6 +62,13 @@ export function App() {
     return stored === 'words' || stored === 'ai' ? stored : null
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false)
+  const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES)
+  const savePreferencesTimer = useRef<number | undefined>(undefined)
+  const [leftOpen, setLeftOpen] = useState(() => readPref('leftOpen') !== 'false')
+  const [leftWidth, setLeftWidth] = useState(() => storedWidth('leftWidth', LEFT_WIDTH))
+  const [rightWidth, setRightWidth] = useState(() => storedWidth('rightWidth', RIGHT_WIDTH))
+  const lastDrawer = useRef<Drawer>(drawer ?? 'words')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   const [searchFocus, setSearchFocus] = useState(0)
   // A line to jump to once the pane for this file is ready (after opening a search result).
@@ -59,6 +89,11 @@ export function App() {
     })
     void window.oisin.sidecar.getStatus().then((initial) => {
       if (alive && !pushed) setStatus(initial)
+    })
+    void window.oisin.preferences.get().then((stored) => {
+      if (!alive) return
+      applyAppearance(stored)
+      setPreferences(stored)
     })
     void window.oisin.workspace.get().then((initial) => {
       if (alive) setWorkspace(initial)
@@ -136,7 +171,31 @@ export function App() {
   }, [])
   const toggleFocus = useCallback(() => setFocusMode((value) => !value), [])
 
+  const changePreferences = useCallback((next: Preferences) => {
+    applyAppearance(next)
+    setPreferences(next)
+    // Sliders change many times a second; write once they settle.
+    window.clearTimeout(savePreferencesTimer.current)
+    savePreferencesTimer.current = window.setTimeout(() => void window.oisin.preferences.save(next), 300)
+  }, [])
+
+  const toggleLeft = useCallback(() => {
+    setLeftOpen((open) => {
+      writePref('leftOpen', String(!open))
+      return !open
+    })
+  }, [])
+  const resizeLeft = useCallback((width: number) => {
+    setLeftWidth(width)
+    writePref('leftWidth', String(width))
+  }, [])
+  const resizeRight = useCallback((width: number) => {
+    setRightWidth(width)
+    writePref('rightWidth', String(width))
+  }, [])
+
   const showDrawer = useCallback((next: Drawer | null) => {
+    if (next) lastDrawer.current = next
     setDrawer(next)
     drawerRef.current = next
     writePref('drawer', next)
@@ -175,6 +234,14 @@ export function App() {
         event.preventDefault()
         event.stopPropagation()
         toggleDrawer('ai')
+      } else if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+        event.preventDefault()
+        event.stopPropagation()
+        setAppSettingsOpen(true)
+      } else if ((event.ctrlKey || event.metaKey) && event.key === '\\') {
+        event.preventDefault()
+        event.stopPropagation()
+        toggleLeft()
       } else if (event.key === 'F8') {
         event.preventDefault()
         toggleFocus()
@@ -185,7 +252,7 @@ export function App() {
     // Capture phase so these win over CodeMirror's own bindings (Ctrl+/ toggles comments there).
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggleLive, toggleFocus, focusMode, lookUpCurrentWord, toggleDrawer])
+  }, [toggleLive, toggleFocus, focusMode, lookUpCurrentWord, toggleDrawer, toggleLeft])
 
   useEffect(() => {
     // Hold the window open until pending edits are on disk.
@@ -314,7 +381,12 @@ export function App() {
   }
 
   return (
-    <div className={`shell${focusMode ? ' shell-focus' : shownDrawer ? ' shell-panel' : ' shell-rail'}`}>
+    <div
+      className={`shell${focusMode ? ' shell-focus' : ''}`}
+      style={focusMode ? undefined : {
+        gridTemplateColumns: `${leftOpen ? leftWidth : RAIL_WIDTH}px minmax(0, 1fr) ${shownDrawer ? rightWidth : RAIL_WIDTH}px`,
+      }}
+    >
       {!focusMode && (
         <WorkspaceTree
           roots={workspace.roots}
@@ -326,6 +398,12 @@ export function App() {
           runSectionOperation={runSectionOperation}
           tab={sidebarTab}
           onTab={setSidebarTab}
+          collapsed={!leftOpen}
+          onToggle={toggleLeft}
+          resizer={(
+            <ResizeHandle edge="right" width={leftWidth} min={LEFT_WIDTH.min} max={LEFT_WIDTH.max}
+              onResize={resizeLeft} onReset={() => resizeLeft(LEFT_WIDTH.initial)} />
+          )}
           outline={(
             <OutlinePanel
               outline={outline}
@@ -392,7 +470,17 @@ export function App() {
         )}
       </main>
       {!focusMode && (
-        <SidePanel open={shownDrawer} onSelect={showDrawer} onClose={() => showDrawer(null)} aiState={status?.state ?? 'starting'}>
+        <SidePanel
+          open={shownDrawer}
+          onSelect={showDrawer}
+          onClose={() => showDrawer(null)}
+          onShow={() => showDrawer(lastDrawer.current)}
+          resizer={(
+            <ResizeHandle edge="left" width={rightWidth} min={RIGHT_WIDTH.min} max={RIGHT_WIDTH.max}
+              onResize={resizeRight} onReset={() => resizeRight(RIGHT_WIDTH.initial)} />
+          )}
+          aiState={status?.state ?? 'starting'}
+        >
           {shownDrawer === 'words' && (
             <LexicalPanel
               query={lexicalQuery}
@@ -414,7 +502,15 @@ export function App() {
         documentInfo={activeInfo}
         documentLabel={activeLabel}
         todayWords={todayWords}
+        panes={focusMode ? null : {
+          left: leftOpen,
+          right: shownDrawer !== null,
+          onLeft: toggleLeft,
+          onRight: () => showDrawer(shownDrawer ? null : lastDrawer.current),
+        }}
+        onSettings={() => setAppSettingsOpen(true)}
       />
+      {appSettingsOpen && <SettingsDialog preferences={preferences} onChange={changePreferences} onClose={() => setAppSettingsOpen(false)} />}
     </div>
   )
 }

@@ -4,6 +4,10 @@ import type { AiEvent } from '../shared/ai'
 import { type DailyWords, IPC, type OisinApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
 
 const api: OisinApi = {
+  preferences: {
+    get: () => ipcRenderer.invoke(IPC.preferencesGet),
+    save: (preferences) => ipcRenderer.invoke(IPC.preferencesSave, preferences),
+  },
   sidecar: {
     getStatus: () => ipcRenderer.invoke(IPC.sidecarStatus),
     getLogs: () => ipcRenderer.invoke(IPC.sidecarLogs),

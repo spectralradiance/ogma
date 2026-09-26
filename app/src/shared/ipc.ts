@@ -170,6 +170,7 @@ export interface LexiconEntry {
 }
 
 import type { AiConfig, AiEvent, AiRunRequest, AiSettingsState, SecretName } from './ai'
+import type { Preferences } from './preferences'
 import type { LeadingHeading } from './text'
 
 export interface SearchHit {
@@ -241,6 +242,10 @@ export interface SearchStatus {
 
 /** Exposed to the renderer as `window.oisin` by the preload script. */
 export interface OisinApi {
+  preferences: {
+    get(): Promise<Preferences>
+    save(preferences: Preferences): Promise<Preferences>
+  }
   sidecar: {
     getStatus(): Promise<SidecarStatus>
     getLogs(): Promise<string[]>
@@ -332,6 +337,8 @@ export interface OisinApi {
 }
 
 export const IPC = {
+  preferencesGet: 'preferences:get',
+  preferencesSave: 'preferences:save',
   sidecarStatus: 'sidecar:status',
   sidecarLogs: 'sidecar:logs',
   sidecarRestart: 'sidecar:restart',

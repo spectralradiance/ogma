@@ -12,8 +12,6 @@ export interface PaneState {
 export interface SectionLayout {
   hideNotes?: boolean
   hideOutput?: boolean
-  /** Show notes before/left of output in this section, reversing the document's order. */
-  swapped?: boolean
 }
 
 interface SectionHeaderProps {
@@ -154,9 +152,6 @@ export function SectionHeader({
           </button>
           <button type="button" role="menuitem" onClick={act(() => onLayout({ ...layout, hideNotes: !layout.hideNotes }))}>
             {layout.hideNotes ? 'Show notes' : 'Hide notes'}
-          </button>
-          <button type="button" role="menuitem" onClick={act(() => onLayout({ ...layout, swapped: !layout.swapped }))}>
-            Swap output and notes
           </button>
           <div className="menu-separator" />
           <div className="menu-status">

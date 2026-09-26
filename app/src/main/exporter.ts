@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { marked } from 'marked'
 
 import type { ExportOptions } from '../shared/ipc'
+import { DEFAULT_PREFERENCES, type ExportPreferences } from '../shared/preferences'
 import { readTextDocument } from './fileService'
 import { readFolder } from './workspaceService'
 
@@ -34,7 +35,7 @@ function escapeHtml(text: string): string {
 }
 
 /** A self-contained HTML page; relative images resolve against the document folder. */
-export function renderHtml(markdown: string, title: string, baseFolder: string): string {
+export function renderHtml(markdown: string, title: string, baseFolder: string, style: ExportPreferences = DEFAULT_PREFERENCES.export): string {
   const body = marked.parse(markdown, { async: false, gfm: true })
   const base = pathToFileURL(baseFolder.endsWith(path.sep) ? baseFolder : baseFolder + path.sep).href
   return `<!doctype html>
@@ -44,7 +45,7 @@ export function renderHtml(markdown: string, title: string, baseFolder: string):
 <title>${escapeHtml(title)}</title>
 <base href="${escapeHtml(base)}">
 <style>
-  body { max-width: 42rem; margin: 3rem auto; padding: 0 1.5rem; font: 17px/1.7 Georgia, 'Times New Roman', serif; color: #1f2421; }
+  body { max-width: 42rem; margin: 3rem auto; padding: 0 1.5rem; font-family: ${style.font}; font-size: ${style.fontSize}pt; line-height: ${style.lineHeight}; color: #1f2421; }
   h1, h2, h3, h4 { line-height: 1.3; font-weight: 600; }
   h1 { font-size: 2em; margin-bottom: 1.2em; }
   h2 { font-size: 1.4em; margin-top: 2em; }
@@ -56,7 +57,7 @@ export function renderHtml(markdown: string, title: string, baseFolder: string):
   table { border-collapse: collapse; }
   th, td { border: 1px solid #d9d6cc; padding: 0.3em 0.7em; }
   hr { border: none; border-top: 1px solid #d9d6cc; margin: 2em 0; }
-  @media print { body { margin: 0 auto; } h2 { break-after: avoid; } }
+  @media print { body { max-width: none; margin: 0; padding: 0; } h2 { break-after: avoid; } }
 </style>
 </head>
 <body>
@@ -92,8 +93,9 @@ export async function writeExport(
   title: string,
   folder: string,
   printToPdf: (html: string) => Promise<Buffer>,
+  style: ExportPreferences = DEFAULT_PREFERENCES.export,
 ): Promise<void> {
   if (format === 'md') await writeFile(target, markdown, 'utf8')
-  else if (format === 'html') await writeFile(target, renderHtml(markdown, title, folder), 'utf8')
-  else await writeFile(target, await printToPdf(renderHtml(markdown, title, folder)))
+  else if (format === 'html') await writeFile(target, renderHtml(markdown, title, folder, style), 'utf8')
+  else await writeFile(target, await printToPdf(renderHtml(markdown, title, folder, style)))
 }

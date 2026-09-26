@@ -29,7 +29,7 @@ const highlight = HighlightStyle.define([
 const base = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)' },
   '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.6', overflow: 'auto' },
+  '.cm-scroller': { fontFamily: 'var(--font-source)', lineHeight: '1.6', overflow: 'auto' },
   '.cm-content': {
     maxWidth: '860px',
     margin: '0 auto',
@@ -48,7 +48,7 @@ const base = EditorView.theme({
 })
 
 const live = EditorView.theme({
-  '&.cm-live .cm-scroller': { fontFamily: 'var(--font-serif)', fontSize: '17px', lineHeight: '1.75' },
+  '&.cm-live .cm-scroller': { fontFamily: 'var(--font-serif)', fontSize: 'var(--text-size)', lineHeight: 'var(--text-line-height)' },
   '&.cm-live .cm-content': { maxWidth: '760px' },
 
   '.cm-md-heading': { fontWeight: '650', lineHeight: '1.3' },

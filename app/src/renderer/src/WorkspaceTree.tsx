@@ -4,6 +4,7 @@ import { folderName } from '../../shared/format'
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
 import { joinPath, samePath } from '../../shared/paths'
 import { onDiskChange, touchesFolder } from './changes'
+import { FilesIcon, OutlineIcon, PaneIcon, SearchIcon } from './icons'
 import { type ActivePane, errorMessage, type OpenTarget } from './target'
 
 export interface TreeActions {
@@ -303,19 +304,53 @@ interface WorkspaceTreeProps extends TreeActions {
   /** Rendered in place of the tree on the Outline and Search tabs. */
   outline: ReactNode
   search: ReactNode
+  /** Collapsed to a strip of tab icons. */
+  collapsed: boolean
+  onToggle: () => void
+  /** The drag handle on the sidebar's right edge. */
+  resizer: ReactNode
 }
 
-export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, tab, onTab, outline, search, ...actions }: WorkspaceTreeProps) {
+const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: () => ReactNode; title: string }[] = [
+  { id: 'files', label: 'Files', icon: FilesIcon, title: 'Files' },
+  { id: 'outline', label: 'Outline', icon: OutlineIcon, title: 'Every section and heading in the open document' },
+  { id: 'search', label: 'Search', icon: SearchIcon, title: 'Search all folders (Ctrl+Shift+F)' },
+]
+
+export function WorkspaceTree({
+  roots, onAddRoot, onRemoveRoot, tab, onTab, outline, search, collapsed, onToggle, resizer, ...actions
+}: WorkspaceTreeProps) {
+  if (collapsed) {
+    return (
+      <nav className="side-rail left-rail" aria-label="Sidebar">
+        <button type="button" className="side-rail-tab" onClick={onToggle} title="Show sidebar (Ctrl+\)" aria-label="Show sidebar">
+          <PaneIcon side="left" open={false} />
+        </button>
+        {SIDEBAR_TABS.map((item) => (
+          <button key={item.id} type="button" className="side-rail-tab" title={item.title} aria-label={item.label}
+            onClick={() => {
+              onTab(item.id)
+              onToggle()
+            }}>
+            <item.icon />
+          </button>
+        ))}
+      </nav>
+    )
+  }
   return (
     <TreeContext.Provider value={actions}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <nav className="sidebar-tabs" role="tablist">
-            <button type="button" role="tab" aria-selected={tab === 'files'} onClick={() => onTab('files')}>Files</button>
-            <button type="button" role="tab" aria-selected={tab === 'outline'} onClick={() => onTab('outline')} title="Every section and heading in the open document">Outline</button>
-            <button type="button" role="tab" aria-selected={tab === 'search'} onClick={() => onTab('search')} title="Search all folders (Ctrl+Shift+F)">Search</button>
+            {SIDEBAR_TABS.map((item) => (
+              <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => onTab(item.id)} title={item.title}>{item.label}</button>
+            ))}
           </nav>
           <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder">+</button>
+          <button type="button" className="icon-button" onClick={onToggle} title="Hide sidebar (Ctrl+\)" aria-label="Hide sidebar">
+            <PaneIcon side="left" open />
+          </button>
         </header>
         {tab === 'search' ? search : tab === 'outline' ? outline : roots.length === 0 ? (
           <>
@@ -336,6 +371,7 @@ export function WorkspaceTree({ roots, onAddRoot, onRemoveRoot, tab, onTab, outl
             ))}
           </ul>
         )}
+        {resizer}
       </aside>
     </TreeContext.Provider>
   )

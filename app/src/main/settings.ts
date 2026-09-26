@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path'
 
 import { type AiConfig, normalizeAiConfig } from '../shared/ai'
+import { normalizePreferences, type Preferences } from '../shared/preferences'
 
 export interface Settings {
   workspaceRoots: string[]
@@ -12,6 +13,8 @@ export interface Settings {
   ai: AiConfig
   /** Base URL for the OpenAI-compatible provider (not secret; its key is stored encrypted). */
   compatBaseUrl: string
+  /** Appearance and export defaults, from the Settings dialog. */
+  preferences: Preferences
 }
 
 export function parseSettings(raw: unknown): Settings {
@@ -26,6 +29,7 @@ export function parseSettings(raw: unknown): Settings {
     lexiconDir: optionalPath('lexiconDir'),
     ai: normalizeAiConfig(value.ai),
     compatBaseUrl: optionalPath('compatBaseUrl') ?? '',
+    preferences: normalizePreferences(value.preferences),
   }
 }
 

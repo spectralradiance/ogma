@@ -17,6 +17,13 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
   const [outcome, setOutcome] = useState<ExportOutcome | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Start from the defaults in Settings → Export.
+  useEffect(() => {
+    void window.oisin.preferences.get().then((preferences) => setOptions((current) => ({
+      ...current, format: preferences.export.format, includeTitle: preferences.export.includeTitle,
+    })))
+  }, [])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -63,7 +70,10 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
               <input type="checkbox" checked={options.includeTitle} onChange={(event) => setOptions({ ...options, includeTitle: event.target.checked })} />
               {' '}Start with the document title
             </label>
-            <p className="lexical-hint">Sections are joined in order; a section without its own heading gets one. Sections with nothing to export are left out.</p>
+            <p className="lexical-hint">
+              Sections are joined in order; a section without a heading continues the one before (notes exports give every section its title).
+              Empty sections are left out. Fonts, page size and margins are in Settings → Export.
+            </p>
             {error && <p className="lexical-message status-error">{error}</p>}
             {outcome && (
               <p className="lexical-message">

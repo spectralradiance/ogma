@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
 import { type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
+import { MARGIN_INCHES, normalizePreferences } from '../shared/preferences'
 import type { LeadingHeading } from '../shared/text'
 import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
@@ -110,7 +111,13 @@ async function printToPdf(html: string): Promise<Buffer> {
   const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } })
   try {
     await window.loadFile(file)
-    return await window.webContents.printToPDF({ pageSize: 'A4', printBackground: true })
+    const style = settings.get().preferences.export
+    const margin = MARGIN_INCHES[style.margins]
+    return await window.webContents.printToPDF({
+      pageSize: style.pageSize,
+      printBackground: true,
+      margins: { top: margin, bottom: margin, left: margin, right: margin },
+    })
   } finally {
     window.destroy()
     await rm(file, { force: true })
@@ -222,6 +229,14 @@ function createWindow(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(IPC.preferencesGet, () => settings.get().preferences)
+  ipcMain.handle(IPC.preferencesSave, (_event, value: unknown) => {
+    const preferences = normalizePreferences(value)
+    settings.update({ preferences })
+    // Switches prefers-color-scheme in every window, so the CSS follows.
+    nativeTheme.themeSource = preferences.appearance.theme
+    return preferences
+  })
   ipcMain.handle(IPC.sidecarStatus, () => sidecar.getStatus())
   ipcMain.handle(IPC.sidecarLogs, () => sidecar.getLogs())
   ipcMain.handle(IPC.sidecarRestart, () => sidecar.restart())
@@ -337,7 +352,7 @@ function registerIpc(): void {
     if (choice.canceled || !choice.filePath) return null
     const { sections, skipped } = await collectDocument(source, options)
     const markdown = buildExportMarkdown(text(title), sections, options.includeTitle, options.content === 'notes')
-    await writeExport(choice.filePath, options.format, markdown, text(title), source, printToPdf)
+    await writeExport(choice.filePath, options.format, markdown, text(title), source, printToPdf, settings.get().preferences.export)
     return { path: choice.filePath, sections: sections.length, skipped }
   })
   ipcMain.handle(IPC.exportShow, (_event, file: unknown) => shell.showItemInFolder(text(file)))
@@ -429,6 +444,7 @@ app.on('will-quit', (event) => {
 })
 
 void app.whenReady().then(() => {
+  nativeTheme.themeSource = settings.get().preferences.appearance.theme
   registerLocalFileProtocol()
   registerIpc()
   void BackupStore.prune(backupsDir, BACKUP_RETENTION_DAYS)
