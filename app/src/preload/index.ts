@@ -108,6 +108,7 @@ const api: OisinApi = {
     move: (folder, stem, direction) => ipcRenderer.invoke(IPC.sectionsMove, folder, stem, direction),
     trash: (folder, stem) => ipcRenderer.invoke(IPC.sectionsTrash, folder, stem),
     merge: (folder, stem, laterStem) => ipcRenderer.invoke(IPC.sectionsMerge, folder, stem, laterStem),
+    setHeading: (folder, stem, heading) => ipcRenderer.invoke(IPC.sectionsSetHeading, folder, stem, heading),
   },
 }
 

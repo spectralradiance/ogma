@@ -2,7 +2,7 @@ import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef,
 
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
 import { joinPath } from '../../shared/paths'
-import type { Heading } from '../../shared/text'
+import { type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
 import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
@@ -81,6 +81,9 @@ interface DocumentViewProps extends ModeProps {
  * column (output then notes), side by side, or output/notes only. Each block
  * is its own editor saving to its own file.
  */
+const sameHeading = (left: LeadingHeading | null | undefined, right: LeadingHeading | null) =>
+  (left ?? null) === right || (left != null && right !== null && left.level === right.level && left.text === right.text)
+
 export function DocumentView({
   target, view, onView, reloadToken, flush, onSectionOperation, callbacks, onOpenFile, ...mode
 }: DocumentViewProps) {
@@ -92,6 +95,8 @@ export function DocumentView({
   const [exporting, setExporting] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [paneStates, setPaneStates] = useState<Record<string, PaneState>>({})
+  // Each output file's first-line heading: the section's heading (keyed by output path).
+  const [leading, setLeading] = useState<Record<string, LeadingHeading | null>>({})
   const [layouts, setLayouts] = useState<Record<string, SectionLayout>>(() => {
     try {
       return JSON.parse(readPref(`sectionLayout:${folder}`) ?? '{}') as Record<string, SectionLayout>
@@ -104,7 +109,15 @@ export function DocumentView({
   const body = useRef<HTMLDivElement>(null)
 
   const load = useCallback(() => window.oisin.folders.read(folder).then(
-    (next) => {
+    async (next) => {
+      // Section headings for every section, including those whose output is not shown.
+      const found = await Promise.all(next.sections.map(async (section): Promise<[string, LeadingHeading | null]> => {
+        const path = joinPath(folder, section.outputName)
+        if (!section.output) return [path, null]
+        const document = await window.oisin.files.read(path, { allowMissing: true }).catch(() => null)
+        return [path, document ? splitLeadingHeading(document.text).heading : null]
+      }))
+      setLeading(Object.fromEntries(found))
       setModel(next)
       setError(null)
     },
@@ -209,9 +222,18 @@ export function DocumentView({
         onSaveState={(state, exists) => setPaneStates((current) => (
           current[path]?.state === state && current[path]?.exists === exists ? current : { ...current, [path]: { state, exists } }
         ))}
+        onLeadingHeading={role === 'output'
+          ? (heading) => setLeading((current) => (sameHeading(current[path], heading) ? current : { ...current, [path]: heading }))
+          : undefined}
       />
     )
   }
+
+  const setHeading = (section: SectionInfo, heading: LeadingHeading | null) => {
+    void onSectionOperation(folder, section.stem, () => window.oisin.sections.setHeading(folder, section.stem, heading))
+  }
+  // New headings follow the level the document's other section headings use.
+  const headingLevel = Object.values(leading).find((heading) => heading)?.level ?? 1
 
   const merge = (section: SectionInfo, direction: 'previous' | 'next') => {
     const list = model?.sections ?? []
@@ -324,6 +346,14 @@ export function DocumentView({
               onMove={(direction) => void onSectionOperation(folder, section.stem, () => window.oisin.sections.move(folder, section.stem, direction))}
               onMerge={(direction) => merge(section, direction)}
               onHistory={(role) => handles.current.get(pathOf(section, role))?.openHistory()}
+              heading={leading[pathOf(section, 'output')] ?? null}
+              onHeading={(on) => setHeading(section, on ? { level: headingLevel, text: section.title } : null)}
+              onMatchHeading={(use) => {
+                const heading = leading[pathOf(section, 'output')]
+                if (!heading) return
+                if (use === 'title') setHeading(section, { ...heading, text: section.title })
+                else void onSectionOperation(folder, section.stem, () => window.oisin.sections.rename(folder, section.stem, heading.text))
+              }}
             />
             {view === 'column' && (layoutOf(section).swapped ? (
               <>

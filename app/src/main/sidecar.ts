@@ -1,8 +1,9 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { type ChildProcessByStdio, execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
+import type { Readable } from 'node:stream'
 
 import type { SidecarHealth, SidecarStatus } from '../shared/ipc'
 import { LogRing, lineSplitter, restartDelayMs, type SidecarPaths, torchInstallCommands } from './sidecarUtil'
@@ -10,6 +11,8 @@ import { LogRing, lineSplitter, restartDelayMs, type SidecarPaths, torchInstallC
 const STARTUP_TIMEOUT_MS = 90_000
 const STARTUP_POLL_MS = 300
 const HEALTH_POLL_MS = 10_000
+/** While the sidecar is still probing PyTorch, so the answer shows up promptly. */
+const HEALTH_POLL_PENDING_MS = 1_000
 const HEALTH_TIMEOUT_MS = 15_000
 const MAX_FAILED_POLLS = 3
 const MAX_RESTARTS = 3
@@ -22,6 +25,8 @@ function delay(ms: number): Promise<void> {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+type Child = ChildProcessByStdio<null, Readable, Readable>
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -39,12 +44,12 @@ function freePort(): Promise<number> {
 /**
  * Owns the Python AI sidecar process: launches it on a free loopback port with a
  * per-launch bearer token, waits for /health, polls it, and restarts it with
- * backoff when it dies. The sidecar exits by itself when its stdin closes, so it
- * cannot outlive the app even if the app crashes.
+ * backoff when it dies. The sidecar is given this process's id and exits when it
+ * is gone, so it cannot outlive the app even if the app crashes.
  */
 export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
-  private child: ChildProcessWithoutNullStreams | null = null
-  private installer: ChildProcessWithoutNullStreams | null = null
+  private child: Child | null = null
+  private installer: Child | null = null
   private baseUrl = ''
   private token = ''
   private generation = 0
@@ -103,10 +108,11 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
 
     const child = spawn(
       this.paths.python,
-      ['-m', 'oisin_ai', '--host', '127.0.0.1', '--port', String(port), '--watch-stdin'],
+      ['-m', 'oisin_ai', '--host', '127.0.0.1', '--port', String(port), '--parent-pid', String(process.pid)],
       {
         cwd: this.paths.sidecarDir,
         env: { ...process.env, ...this.extraEnv(), OISIN_SIDECAR_TOKEN: this.token, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       },
     )
@@ -115,7 +121,6 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', lineSplitter((line) => this.logs.add(line)))
     child.stderr.on('data', lineSplitter((line) => this.logs.add(line)))
-    child.stdin.on('error', () => {}) // EPIPE when the sidecar exits first
 
     let gone = false
     const onGone = (reason: string): void => {
@@ -144,7 +149,12 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
       return
     }
     const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
-    child.stdin.end() // the sidecar exits on stdin EOF
+    // Ask it to exit; a server that does not answer is killed after the grace period.
+    void fetch(`${this.baseUrl}/shutdown`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal: AbortSignal.timeout(STOP_GRACE_MS),
+    }).catch(() => {})
     const graceful = await Promise.race([exited.then(() => true), delay(STOP_GRACE_MS).then(() => false)])
     if (!graceful) {
       this.killChild()
@@ -191,6 +201,7 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
       const child = spawn(this.paths.python, args, {
         cwd: this.paths.sidecarDir,
         env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       })
       this.installer = child
@@ -198,7 +209,6 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
       child.stderr.setEncoding('utf8')
       child.stdout.on('data', lineSplitter((line) => this.logs.add(line)))
       child.stderr.on('data', lineSplitter((line) => this.logs.add(line)))
-      child.stdin.end()
       const finish = (result: number | string) => {
         this.installer = null
         resolve(result)
@@ -233,7 +243,8 @@ export class SidecarManager extends EventEmitter<{ status: [SidecarStatus] }> {
   }
 
   private schedulePoll(generation: number): void {
-    this.pollTimer = setTimeout(() => void this.poll(generation), HEALTH_POLL_MS)
+    const pending = this.status.health?.torch.state === 'pending'
+    this.pollTimer = setTimeout(() => void this.poll(generation), pending ? HEALTH_POLL_PENDING_MS : HEALTH_POLL_MS)
   }
 
   private async poll(generation: number): Promise<void> {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { outlineMarkdown, sectionHeadings } from '../../shared/outline'
+import { displayTitle, outlineMarkdown, sectionHeadings } from '../../shared/outline'
 import { samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { readPref, writePref } from './prefs'
@@ -92,14 +92,14 @@ export function OutlinePanel({ outline, activePath, onOpenSection, onReveal }: O
       <ol className="outline-sections">
         {sections.map((section) => {
           const active = activePath !== null && (samePath(activePath, section.notesPath) || samePath(activePath, section.outputPath))
-          const size = section.output.exists
+          const size = (section.output.leading ? '' : 'No section heading. ') + (section.output.exists
             ? `${section.output.words.toLocaleString()} words of output, ${section.notes.words.toLocaleString()} of notes`
-            : `No output yet; ${section.notes.words.toLocaleString()} words of notes`
+            : `No output yet; ${section.notes.words.toLocaleString()} words of notes`)
           return (
             <li key={section.stem} className={active ? 'active' : undefined}>
               <button type="button" className="outline-section" onClick={() => onOpenSection(section.stem)} title={size}>
                 {section.ordinal && <span className="tree-ordinal">{section.ordinal}</span>}
-                <span className="outline-section-title">{section.title}</span>
+                <span className={`outline-section-title${section.output.leading ? '' : ' outline-no-heading'}`}>{displayTitle(section)}</span>
                 <span className={`outline-words${section.output.exists ? '' : ' outline-missing'}`}>
                   {section.output.exists ? section.output.words.toLocaleString() : 'notes only'}
                 </span>
@@ -107,8 +107,8 @@ export function OutlinePanel({ outline, activePath, onOpenSection, onReveal }: O
                   <span style={{ width: `${(section.output.words / largest) * 100}%` }} />
                 </span>
               </button>
-              <HeadingList headings={sectionHeadings(section.title, section.output)} path={section.outputPath} onReveal={onReveal} />
-              {showNotes && <HeadingList headings={sectionHeadings(section.title, section.notes)} path={section.notesPath} notes onReveal={onReveal} />}
+              <HeadingList headings={sectionHeadings(section.output)} path={section.outputPath} onReveal={onReveal} />
+              {showNotes && <HeadingList headings={section.notes.headings} path={section.notesPath} notes onReveal={onReveal} />}
             </li>
           )
         })}

@@ -79,6 +79,6 @@ cd sidecar; .\.venv\Scripts\python.exe -m pytest -q
 
 - The app spawns `sidecar/.venv` Python on a free `127.0.0.1` port with a random per-launch bearer token (passed by environment variable, never on the command line).
 - Every sidecar route requires the token. The renderer never talks to the sidecar directly; it goes through the main process over IPC.
-- The sidecar exits when its stdin closes, so it cannot outlive the app, even after a crash.
+- The sidecar is given the app's process id and exits when the app does, so it cannot outlive the app, even after a crash.
 - If the sidecar dies or fails three health checks, the app restarts it with backoff, up to three attempts, then shows the error and logs.
 - `OISIN_PYTHON` and `OISIN_SIDECAR_DIR` override the Python and sidecar locations.

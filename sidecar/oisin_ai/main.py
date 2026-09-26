@@ -13,7 +13,7 @@ import os
 import platform
 import sys
 import time
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
@@ -48,6 +48,7 @@ def create_app(
     torch_probe: StartableProbe | None = None,
     env: Mapping[str, str] | None = None,
     providers: Mapping[str, Provider] | None = None,
+    shutdown: Callable[[], None] | None = None,
 ) -> FastAPI:
     if not token:
         raise ValueError("a non-empty token is required")
@@ -123,5 +124,12 @@ def create_app(
         if local is not None and hasattr(local, "unload"):
             local.unload()
         return {"models_loaded": loaded_models()}
+
+    @app.post("/shutdown", status_code=202)
+    def request_shutdown() -> dict[str, bool]:
+        """Asks the server to finish its current requests and exit (the app's Stop)."""
+        if shutdown is not None:
+            shutdown()
+        return {"stopping": shutdown is not None}
 
     return app

@@ -12,10 +12,11 @@ describe('leadSentence', () => {
 })
 
 describe('sectionHeadings', () => {
-  it('drops a first heading that repeats the section title', () => {
-    const file = outlineFile('# The Wandering Stars\n\ntext\n\n## Retrograde\n')
-    expect(sectionHeadings('the wandering stars', file).map((h) => h.text)).toEqual(['Retrograde'])
-    expect(sectionHeadings('Planets', file).map((h) => h.text)).toEqual(['The Wandering Stars', 'Retrograde'])
+  it('leaves out the section heading on the first line, whatever it says', () => {
+    const file = outlineFile('# Starrlight\n\ntext\n\n## Retrograde\n')
+    expect(file.leading).toEqual({ level: 1, text: 'Starrlight' })
+    expect(sectionHeadings(file).map((h) => h.text)).toEqual(['Retrograde'])
+    expect(sectionHeadings(outlineFile('text\n\n## Retrograde\n')).map((h) => h.text)).toEqual(['Retrograde'])
   })
 })
 
@@ -35,7 +36,7 @@ describe('outlineMarkdown', () => {
       '1. 01 Light (output 8 words, notes 1 word)',
       '   - Speed',
       '      - Measuring',
-      '2. 02 Planets (no output yet, notes 4 words)',
+      '2. 02 Planets (no output yet, notes 4 words, no section heading)',
       '',
     ].join('\n'))
     const full = outlineMarkdown('Night Sky', sections, { notes: true, leads: true })

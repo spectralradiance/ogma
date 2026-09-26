@@ -17,7 +17,9 @@ import {
 } from './sections'
 import { isIgnoredChange } from './watcher'
 import { BackupStore, PathGuard } from './fileService'
-import { applyRenames, createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
+import {
+  applyRenames, createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection,
+} from './workspaceService'
 
 const files = (...names: string[]): FolderEntryName[] => names.map((name) => ({ name, kind: 'file' }))
 const summary = (model: FolderModel) => model.sections.map((s) => `${s.stem} [${s.notes ?? '-'} | ${s.output ?? '-'}]`)
@@ -188,5 +190,32 @@ describe('mergeSections', () => {
     expect(await readFile(path.join(folder, '1 first-output.md'), 'utf8')).toBe('Second output.\n')
     expect(trashed.sort()).toEqual(['2 second', '2 second-output.md'])
     await expect(mergeSections(folder, '1 first', '1 first', backups, async () => {})).rejects.toThrow(/two different/)
+  })
+})
+
+describe('section headings', () => {
+  async function setup() {
+    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-heading-'))
+    await writeFile(path.join(folder, '02 Starlight-notes.md'), 'notes\n')
+    await writeFile(path.join(folder, '02 Starlight-output.md'), '# Starrlight\r\n\r\nLight is fast.\r\n')
+    const backups = new BackupStore(path.join(folder, '..', `backups-${path.basename(folder)}`), new PathGuard(() => [folder]))
+    return { folder, backups, output: () => readFile(path.join(folder, '02 Starlight-output.md'), 'utf8') }
+  }
+
+  it('fixes, removes and adds the heading on the output’s first line, keeping line endings', async () => {
+    const { folder, backups, output } = await setup()
+    await setSectionHeading(folder, '02 Starlight', { level: 1, text: 'Starlight' }, backups)
+    expect(await output()).toBe('# Starlight\r\n\r\nLight is fast.\r\n')
+    await setSectionHeading(folder, '02 Starlight', null, backups)
+    expect(await output()).toBe('Light is fast.\r\n')
+    await setSectionHeading(folder, '02 Starlight', { level: 2, text: 'Starlight' }, backups)
+    expect(await output()).toBe('## Starlight\r\n\r\nLight is fast.\r\n')
+  })
+
+  it('renames a heading that matched the old title along with the files', async () => {
+    const { folder, backups } = await setup()
+    await setSectionHeading(folder, '02 Starlight', { level: 1, text: 'Starlight' }, backups)
+    const renamed = await renameSection(folder, '02 Starlight', 'Starlight and Time', backups)
+    expect(await readFile(path.join(folder, renamed.output ?? ''), 'utf8')).toBe('# Starlight and Time\r\n\r\nLight is fast.\r\n')
   })
 })

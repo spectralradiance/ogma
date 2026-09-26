@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import threading
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from oisin_ai.__main__ import main
+from oisin_ai.__main__ import main, watch_parent
 from oisin_ai.main import create_app
 from oisin_ai.system import parse_nvidia_smi
 
@@ -120,3 +123,21 @@ def test_create_app_requires_token() -> None:
 def test_refuses_non_loopback_host() -> None:
     with pytest.raises(SystemExit):
         main(["--host", "0.0.0.0"])
+
+
+def test_shutdown_calls_the_server_hook() -> None:
+    calls: list[bool] = []
+    app = create_app(TOKEN, gpu_probe=FakeGpu(), torch_probe=FakeTorch(), env={}, shutdown=lambda: calls.append(True))
+    with TestClient(app) as client:
+        assert client.post("/shutdown").status_code == 401
+        assert client.post("/shutdown", headers=AUTH).json() == {"stopping": True}
+    assert calls == [True]
+
+
+def test_watch_parent_fires_when_the_parent_exits() -> None:
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])
+    fired = threading.Event()
+    watch_parent(child.pid, fired.set)
+    assert not fired.is_set()
+    child.wait()
+    assert fired.wait(5)

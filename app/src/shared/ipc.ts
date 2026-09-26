@@ -170,6 +170,7 @@ export interface LexiconEntry {
 }
 
 import type { AiConfig, AiEvent, AiRunRequest, AiSettingsState, SecretName } from './ai'
+import type { LeadingHeading } from './text'
 
 export interface SearchHit {
   path: string
@@ -325,6 +326,8 @@ export interface OisinApi {
     trash(folder: string, stem: string): Promise<void>
     /** Appends `laterStem`'s notes and output to `stem`'s, then removes `laterStem`. */
     merge(folder: string, stem: string, laterStem: string): Promise<SectionInfo>
+    /** Sets (or with null removes) the heading on the first line of the section's output. */
+    setHeading(folder: string, stem: string, heading: LeadingHeading | null): Promise<SectionInfo>
   }
 }
 
@@ -348,6 +351,7 @@ export const IPC = {
   sectionsMove: 'sections:move',
   sectionsTrash: 'sections:trash',
   sectionsMerge: 'sections:merge',
+  sectionsSetHeading: 'sections:set-heading',
   dictionaryStatus: 'dictionary:status',
   dictionaryChoose: 'dictionary:choose',
   dictionaryLookup: 'dictionary:lookup',

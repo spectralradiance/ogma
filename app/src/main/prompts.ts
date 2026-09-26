@@ -17,7 +17,7 @@ export const DEFAULT_PROMPTS: Record<AiRunRequest['task'], string> = {
 
 Write the complete output for the section in Markdown, in the writer's own voice as shown in their existing output and the document outline. Use every idea in the notes that belongs in finished text; drop TODOs, questions to self and anything the notes mark as uncertain unless the notes resolve it. Keep what already works in the current output rather than rewriting it for its own sake. Do not add facts that are not in the notes or outline.
 
-Reply with the section's output text only — no preamble, no commentary, no code fences.
+Reply with the section's output text only — no preamble, no commentary, no code fences, and no heading for the section's title (the app adds that).
 
 === user ===
 Document: {{document}}

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { folderName } from '../../shared/format'
 import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
 import { outlineMarkdown } from '../../shared/outline'
+import { splitLeadingHeading } from '../../shared/text'
 import { dirname, joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
@@ -285,7 +286,11 @@ export function App() {
       if (!section || !folder) return null
       const read = async (path: string) => panes.current.get(path)?.getText()
         ?? window.oisin.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
-      const [notes, output] = await Promise.all([read(section.notesPath), read(section.outputPath)])
+      // An open output editor already leaves out the section heading; match that when reading from disk.
+      const [notes, output] = await Promise.all([
+        read(section.notesPath),
+        read(section.outputPath).then((text) => (panes.current.has(section.outputPath) ? text : splitLeadingHeading(text).body)),
+      ])
       // Document-wide notes (outline, sources) give the draft its context; capped to keep prompts reasonable.
       const model = await window.oisin.folders.read(folder).catch(() => null)
       const documentNotes = await Promise.all((model?.documentNotes ?? []).slice(0, 4).map(async (name) => {
@@ -404,7 +409,7 @@ export function App() {
           )}
         </SidePanel>
       )}
-      {settingsOpen && <AiSettings providers={status?.health?.providers ?? []} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <AiSettings status={status} onClose={() => setSettingsOpen(false)} />}
       <StatusBar
         documentInfo={activeInfo}
         documentLabel={activeLabel}

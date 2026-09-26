@@ -6,14 +6,14 @@ import { describe, expect, it } from 'vitest'
 import { buildExportMarkdown, collectDocument, renderHtml, writeExport } from './exporter'
 
 describe('buildExportMarkdown', () => {
-  it('joins sections, adding headings only where missing', () => {
-    const markdown = buildExportMarkdown('The Night Sky', [
+  it('joins sections; one without a heading continues the previous one', () => {
+    const sections = [
       { title: 'First Light', text: '## First Light\n\nDusk.' },
       { title: 'Constellations', text: 'Patterns.\n' },
       { title: 'Empty', text: '   ' },
-    ], true)
-    expect(markdown).toBe('# The Night Sky\n\n## First Light\n\nDusk.\n\n## Constellations\n\nPatterns.\n')
-    expect(buildExportMarkdown('X', [{ title: 'A', text: 'a' }], false)).toBe('## A\n\na\n')
+    ]
+    expect(buildExportMarkdown('The Night Sky', sections, true)).toBe('# The Night Sky\n\n## First Light\n\nDusk.\n\nPatterns.\n')
+    expect(buildExportMarkdown('The Night Sky', sections, false, true)).toBe('## First Light\n\nDusk.\n\n## Constellations\n\nPatterns.\n')
   })
 })
 

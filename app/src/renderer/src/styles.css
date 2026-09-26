@@ -1842,10 +1842,39 @@ button.primary {
   margin: 0;
   overflow: hidden;
   font-family: var(--font-serif);
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A section without a heading: its title only labels the files and is not part of the text. */
+.no-heading .section-line-title {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-style: italic;
+  font-weight: normal;
+}
+
+.section-mismatch {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.menu-check {
+  display: inline-block;
+  width: 1.3em;
+  margin-left: -0.3em;
+}
+
+.outline-no-heading {
+  color: var(--muted);
+  font-style: italic;
 }
 
 .section-line-title .section-ordinal {
@@ -1963,90 +1992,65 @@ button.primary {
   margin-bottom: 10px;
 }
 
-/* AI server section at the top of the AI panel */
-
-.ai-server {
-  margin: 0 0 12px;
-  padding: 6px 8px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
+/* AI server: a line in the AI panel, and the Server tab of AI settings */
 
 .ai-server-line {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.ai-server-line > button:not(.ai-server-toggle) {
-  padding: 1px 8px;
-  font-size: 12px;
-}
-
-.ai-server-toggle {
-  display: flex;
-  flex: 1;
-  align-items: center;
   gap: 7px;
-  min-width: 0;
-  padding: 2px 0;
-  background: none;
-  border: none;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 5px 8px;
+  overflow: hidden;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   color: var(--text);
-  font-size: 13px;
-  text-align: left;
-}
-
-.ai-server-chevron {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.ai-server-body {
-  margin-top: 4px;
   font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
 }
 
-.ai-server-facts {
-  margin-top: 4px;
+.ai-server-line:hover {
+  border-color: var(--accent);
 }
 
-.ai-server-note {
-  color: var(--bad);
+.ai-server-note,
+.ai-server-muted {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+.ai-server-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-server-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .ai-server-install {
-  display: flex;
+  display: inline-flex;
   gap: 6px;
-  margin-top: 8px;
+  margin-left: 10px;
+  vertical-align: middle;
 }
 
-.ai-server-install select {
-  font-size: 12px;
+.ai-server .facts {
+  margin-top: 12px;
 }
 
-.ai-server-more {
-  display: block;
-  margin-top: 8px;
-}
-
-.ai-server-body .providers {
-  margin-top: 8px;
-}
-
-.ai-server-body .provider-label {
-  min-width: 0;
-  flex: 1;
-}
-
-.ai-server-log-head {
-  margin: 10px 0 4px;
+.settings-subhead {
+  margin: 16px 0 6px;
   color: var(--muted);
-}
-
-.ai-server-log {
-  max-height: 160px;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .side-rail-tab,

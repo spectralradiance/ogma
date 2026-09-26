@@ -1,11 +1,13 @@
 // A double document's outline: its sections in order, each with its headings and size.
 
-import { countWords, extractHeadings, type Heading } from './text'
+import { countWords, extractHeadings, type Heading, type LeadingHeading, splitLeadingHeading } from './text'
 
 export interface FileOutline {
   exists: boolean
   words: number
   headings: Heading[]
+  /** A heading on the first line: in an output file, the section's heading. */
+  leading: LeadingHeading | null
   /** The first sentence of the first paragraph, for summaries. */
   lead: string
 }
@@ -20,11 +22,11 @@ export interface OutlineSection {
   output: FileOutline
 }
 
-export const EMPTY_FILE: FileOutline = { exists: false, words: 0, headings: [], lead: '' }
+export const EMPTY_FILE: FileOutline = { exists: false, words: 0, headings: [], leading: null, lead: '' }
 
 export function outlineFile(text: string | null): FileOutline {
   if (text === null) return EMPTY_FILE
-  return { exists: true, words: countWords(text), headings: extractHeadings(text), lead: leadSentence(text) }
+  return { exists: true, words: countWords(text), headings: extractHeadings(text), leading: splitLeadingHeading(text).heading, lead: leadSentence(text) }
 }
 
 const plain = (text: string) => text
@@ -54,14 +56,13 @@ export function leadSentence(text: string, limit = 160): string {
   return ''
 }
 
-const normalized = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
-
-/** A section's headings, without a first heading that only repeats the section title. */
-export function sectionHeadings(title: string, file: FileOutline): Heading[] {
-  const [first, ...rest] = file.headings
-  if (first && normalized(first.text) === normalized(title)) return rest
-  return file.headings
+/** The headings inside a section's file, without its section heading (the heading on its first line). */
+export function sectionHeadings(file: FileOutline): Heading[] {
+  return file.leading ? file.headings.slice(1) : file.headings
 }
+
+/** The title a reader sees: the section heading when there is one, otherwise the file name's title. */
+export const displayTitle = (section: OutlineSection) => section.output.leading?.text ?? section.title
 
 export interface OutlineOptions {
   /** Include the notes files' headings too. */
@@ -79,16 +80,17 @@ export function outlineMarkdown(title: string, sections: OutlineSection[], optio
       section.output.exists ? `output ${words(section.output.words)}` : 'no output yet',
       section.notes.exists ? `notes ${words(section.notes.words)}` : 'no notes',
     ].join(', ')
-    lines.push(`${index + 1}. ${section.ordinal ? `${section.ordinal} ` : ''}${section.title} (${size})`)
+    const heading = section.output.leading ? '' : ', no section heading'
+    lines.push(`${index + 1}. ${section.ordinal ? `${section.ordinal} ` : ''}${displayTitle(section)} (${size}${heading})`)
     const lead = section.output.lead || (options.leads ? section.notes.lead : '')
     if (options.leads && lead) lines.push(`   > ${section.output.lead ? '' : '(notes) '}${lead}`)
     const add = (headings: Heading[], prefix: string) => {
       const top = Math.min(...headings.map((heading) => heading.level))
       for (const heading of headings) lines.push(`${'   '.repeat(heading.level - top + 1)}- ${prefix}${heading.text}`)
     }
-    const output = sectionHeadings(section.title, section.output)
+    const output = sectionHeadings(section.output)
     if (output.length) add(output, '')
-    const notes = options.notes ? sectionHeadings(section.title, section.notes) : []
+    const notes = options.notes ? section.notes.headings : []
     if (notes.length) add(notes, '(notes) ')
   })
   return `${lines.join('\n')}\n`

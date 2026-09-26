@@ -5,7 +5,7 @@ import { PROVIDERS } from '../../shared/ai'
 import type { SidecarStatus } from '../../shared/ipc'
 import { describeMetrics, measureText, type TextMetrics } from '../../shared/readability'
 import type { WordInContext } from './editor/MarkdownEditor'
-import { AiServer } from './AiServer'
+import { AiServerLine } from './AiServer'
 import { SynthesisReview } from './SynthesisReview'
 import { errorMessage } from './target'
 
@@ -212,7 +212,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
       </header>
 
       <div className="lexical-body">
-        <AiServer status={status} />
+        <AiServerLine status={status} onOpen={onOpenSettings} />
         <label className="ai-field">
           Model
           <select value={profileId} onChange={(event) => setProfileId(event.target.value)}>

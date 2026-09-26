@@ -3,6 +3,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { FolderModel, SectionInfo } from '../shared/ipc'
+import { type LeadingHeading, splitLeadingHeading, withLeadingHeading } from '../shared/text'
 import { type BackupStore, listDirectory, readTextDocument, writeTextDocument } from './fileService'
 import { buildFolderModel, planNewSection, planRename, planSwap, type RenameStep, validateTitle } from './sections'
 
@@ -55,12 +56,40 @@ export async function createSection(folder: string, title: string): Promise<Sect
   return created
 }
 
-export async function renameSection(folder: string, stem: string, title: string): Promise<SectionInfo> {
+/**
+ * Renames both files of a section. With `backups`, the section's heading (a
+ * heading on the output's first line) is changed to the new title too.
+ */
+export async function renameSection(folder: string, stem: string, title: string, backups?: BackupStore): Promise<SectionInfo> {
   const section = findSection(await readFolder(folder), stem)
   const steps = planRename(section, title, await existingNames(folder))
   await applyRenames(folder, steps)
   const newStem = section.ordinal === null ? title.trim() : `${section.ordinal}${section.separator || ' '}${title.trim()}`
-  return findSection(await readFolder(folder), steps.length > 0 ? newStem : section.stem)
+  const renamed = findSection(await readFolder(folder), steps.length > 0 ? newStem : section.stem)
+  if (backups && renamed.output) {
+    const current = await readTextDocument(path.join(folder, renamed.output))
+    const heading = splitLeadingHeading(current.text).heading
+    if (heading && heading.text !== title.trim()) {
+      await setSectionHeading(folder, renamed.stem, { level: heading.level, text: title.trim() }, backups)
+    }
+  }
+  return renamed
+}
+
+/**
+ * Sets the heading on the first line of a section's output (creating the file
+ * if needed), or removes it when `heading` is null. The file is backed up first.
+ */
+export async function setSectionHeading(folder: string, stem: string, heading: LeadingHeading | null, backups: BackupStore): Promise<SectionInfo> {
+  const section = findSection(await readFolder(folder), stem)
+  if (heading && !heading.text.trim()) throw new Error('A heading needs some text.')
+  const target = path.join(folder, section.output ?? section.outputName)
+  const current = await readTextDocument(target, true)
+  const text = withLeadingHeading(current.text, heading && { level: Math.min(6, Math.max(1, heading.level)), text: heading.text.trim() })
+  if (text === current.text || (current.mtimeMs === null && !heading)) return section
+  const result = await writeTextDocument(target, { path: target, text, format: current.format, expectedMtimeMs: current.mtimeMs }, backups)
+  if (!result.ok) throw new Error(`${path.basename(target)} changed on disk; try again.`)
+  return findSection(await readFolder(folder), stem)
 }
 
 /** Moves a numbered section one place by swapping ordinals with its numbered neighbour. */

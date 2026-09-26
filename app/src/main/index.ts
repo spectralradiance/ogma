@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
 import { type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
+import type { LeadingHeading } from '../shared/text'
 import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
 import { buildExportMarkdown, collectDocument, writeExport } from './exporter'
@@ -23,7 +24,9 @@ import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
 import { WorkspaceWatcher } from './watcher'
 import { addRoot, removeRoot } from './workspaceRoots'
-import { createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, trashSection } from './workspaceService'
+import {
+  createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection,
+} from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
 if (process.env.OISIN_USER_DATA) {
@@ -281,7 +284,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sectionsCreate, (_event, folder: unknown, title: unknown) =>
     createSection(guard.resolve(folder), text(title)))
   ipcMain.handle(IPC.sectionsRename, (_event, folder: unknown, stem: unknown, title: unknown) =>
-    renameSection(guard.resolve(folder), text(stem), text(title)))
+    renameSection(guard.resolve(folder), text(stem), text(title), backups))
+  ipcMain.handle(IPC.sectionsSetHeading, (_event, folder: unknown, stem: unknown, heading: unknown) =>
+    setSectionHeading(guard.resolve(folder), text(stem), leadingHeading(heading), backups))
   ipcMain.handle(IPC.sectionsMove, (_event, folder: unknown, stem: unknown, direction: unknown) => {
     if (direction !== 'up' && direction !== 'down') throw new TypeError('direction must be up or down')
     return moveSection(guard.resolve(folder), text(stem), direction)
@@ -331,7 +336,7 @@ function registerIpc(): void {
     const choice = owner ? await dialog.showSaveDialog(owner, dialogOptions) : await dialog.showSaveDialog(dialogOptions)
     if (choice.canceled || !choice.filePath) return null
     const { sections, skipped } = await collectDocument(source, options)
-    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle)
+    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle, options.content === 'notes')
     await writeExport(choice.filePath, options.format, markdown, text(title), source, printToPdf)
     return { path: choice.filePath, sections: sections.length, skipped }
   })
@@ -383,6 +388,13 @@ function registerIpc(): void {
     mergeSections(guard.resolve(folder), text(stem), text(laterStem), backups, (file) => shell.trashItem(guard.resolve(file))))
   ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
     trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
+}
+
+function leadingHeading(value: unknown): LeadingHeading | null {
+  if (value === null) return null
+  const candidate = value as Partial<LeadingHeading> | undefined
+  if (typeof candidate?.level !== 'number' || typeof candidate.text !== 'string') throw new TypeError('Expected a heading or null.')
+  return { level: candidate.level, text: candidate.text }
 }
 
 function text(value: unknown): string {

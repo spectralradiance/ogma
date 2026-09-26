@@ -13,14 +13,18 @@ export interface ExportSection {
   text: string
 }
 
-/** Joins sections in order; a section whose text does not open with a heading gets one. */
-export function buildExportMarkdown(title: string, sections: ExportSection[], includeTitle: boolean): string {
+/**
+ * Joins sections in order. A section's heading is the heading on its first line;
+ * one without continues the previous section's text, unless `titleSections`
+ * gives every such section its title as a heading (used for notes).
+ */
+export function buildExportMarkdown(title: string, sections: ExportSection[], includeTitle: boolean, titleSections = false): string {
   const parts: string[] = []
   if (includeTitle) parts.push(`# ${title}`)
   for (const section of sections) {
     const text = section.text.trim()
     if (!text) continue
-    parts.push(/^#{1,6}\s/.test(text) ? text : `## ${section.title}\n\n${text}`)
+    parts.push(/^#{1,6}\s/.test(text) || !titleSections ? text : `## ${section.title}\n\n${text}`)
   }
   return `${parts.join('\n\n')}\n`
 }

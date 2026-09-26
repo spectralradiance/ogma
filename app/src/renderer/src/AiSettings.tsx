@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import {
   AI_TASKS, type AiConfig, type AiEvent, type AiProfile, type AiProviderId, type AiSettingsState, type AiTask, PROVIDERS, type SecretName,
 } from '../../shared/ai'
-import type { ProviderStatus } from '../../shared/ipc'
+import type { ProviderStatus, SidecarStatus } from '../../shared/ipc'
+import { AiServerSettings } from './AiServer'
 import { errorMessage } from './target'
 
-type Tab = 'keys' | 'profiles' | 'routing' | 'prompts'
+type Tab = 'server' | 'keys' | 'profiles' | 'routing' | 'prompts'
 
 const KEY_LABELS: Record<SecretName, string> = {
   ANTHROPIC_API_KEY: 'Anthropic (Claude)',
@@ -18,12 +19,13 @@ const KEY_LABELS: Record<SecretName, string> = {
 const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max']
 
 interface AiSettingsProps {
-  providers: ProviderStatus[]
+  status: SidecarStatus | null
   onClose: () => void
 }
 
-export function AiSettings({ providers, onClose }: AiSettingsProps) {
-  const [tab, setTab] = useState<Tab>('keys')
+export function AiSettings({ status, onClose }: AiSettingsProps) {
+  const providers = status?.health?.providers ?? []
+  const [tab, setTab] = useState<Tab>('server')
   const [state, setState] = useState<AiSettingsState | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,15 +55,16 @@ export function AiSettings({ providers, onClose }: AiSettingsProps) {
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
         </header>
         <nav className="lexical-tabs" role="tablist">
-          {(['keys', 'profiles', 'routing', 'prompts'] as Tab[]).map((id) => (
+          {(['server', 'keys', 'profiles', 'routing', 'prompts'] as Tab[]).map((id) => (
             <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
-              {{ keys: 'Keys', profiles: 'Models', routing: 'Routing', prompts: 'Prompts' }[id]}
+              {{ server: 'Server', keys: 'Keys', profiles: 'Models', routing: 'Routing', prompts: 'Prompts' }[id]}
             </button>
           ))}
         </nav>
         <div className="settings-body">
           {error && <p className="lexical-message status-error">{error}</p>}
-          {!state && <p className="lexical-message">Loading…</p>}
+          {tab === 'server' && <AiServerSettings status={status} />}
+          {!state && tab !== 'server' && <p className="lexical-message">Loading…</p>}
           {state && tab === 'keys' && <KeysTab state={state} onChange={guard} />}
           {state && tab === 'profiles' && <ProfilesTab config={state.config} providers={providers} onSave={saveConfig} />}
           {state && tab === 'routing' && <RoutingTab config={state.config} onSave={saveConfig} />}
