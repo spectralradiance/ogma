@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { parseEtymology } from '../../shared/etymology'
-import type { DictionaryEntry, DictionarySearchResult, DictionaryStatus, LexiconEntry } from '../../shared/ipc'
+import type { DictionaryDownload, DictionaryEntry, DictionarySearchResult, DictionaryStatus, LexiconEntry } from '../../shared/ipc'
 import { matchesLexiconQuery, splitList } from '../../shared/lexicon'
 import { readPref, writePref } from './prefs'
 import { errorMessage } from './target'
@@ -37,6 +37,44 @@ const EXTERNAL_SITES: { label: string; url: (word: string) => string }[] = [
 function wiktionaryUrl(term: string, language: string): string {
   const page = term.replace(/^\*/, 'Reconstruction:' + language.replace(/ /g, '_') + '/')
   return `https://en.wiktionary.org/wiki/${encodeURIComponent(page).replace(/%2F/g, '/').replace(/%3A/g, ':')}#${encodeURIComponent(language.replace(/ /g, '_'))}`
+}
+
+const megabytes = (bytes: number) => `${Math.round(bytes / 1_048_576).toLocaleString()} MB`
+
+/** Offers to download Wiktionary and build the dictionary from it, with progress. */
+function DictionaryDownloader({ onReady }: { onReady: (status: DictionaryStatus) => void }) {
+  const [progress, setProgress] = useState<DictionaryDownload | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const busy = progress !== null && (progress.state === 'downloading' || progress.state === 'indexing')
+
+  useEffect(() => window.ogma.dictionary.onDownload(setProgress), [])
+
+  const start = () => {
+    setFailure(null)
+    window.ogma.dictionary.download().then(onReady, (reason: unknown) => setFailure(errorMessage(reason)))
+  }
+
+  return (
+    <div className="dictionary-download">
+      {busy ? (
+        <>
+          <progress value={progress.total ? progress.received : undefined} max={progress.total ?? undefined} />
+          <p>
+            {progress.state === 'indexing'
+              ? 'Building the search index…'
+              : `Downloading Wiktionary: ${megabytes(progress.received)}${progress.total ? ` of ${megabytes(progress.total)}` : ''} · ${progress.entries.toLocaleString()} entries`}
+          </p>
+          <button type="button" disabled={progress.state === 'indexing'} onClick={() => void window.ogma.dictionary.cancelDownload()}>Cancel</button>
+        </>
+      ) : (
+        <>
+          <button type="button" onClick={start}>Download Wiktionary</button>
+          <p className="lexical-hint">A one-time download of about 2.5 GB from kaikki.org; it becomes a database of roughly 1 GB on this computer.</p>
+        </>
+      )}
+      {failure && <p className="status-error">{failure}</p>}
+    </div>
+  )
 }
 
 interface LexicalPanelProps {
@@ -121,7 +159,8 @@ export function LexicalPanel({ query, onLookup, onReplace }: LexicalPanelProps) 
         {status && !status.available && tab !== 'lexicon' && tab !== 'external' && (
           <div className="lexical-message">
             <p>{status.error}</p>
-            <button type="button" onClick={() => void window.ogma.dictionary.choose().then(setStatus)}>Choose wiktionary.db…</button>
+            <DictionaryDownloader onReady={setStatus} />
+            <button type="button" className="link-button" onClick={() => void window.ogma.dictionary.choose().then(setStatus)}>or choose an existing wiktionary.db…</button>
           </div>
         )}
         {!word && tab !== 'lexicon' && status?.available && (

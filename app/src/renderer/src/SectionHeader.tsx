@@ -25,6 +25,7 @@ interface SectionHeaderProps {
   onRename: (title: string) => void
   onMove: (direction: 'up' | 'down') => void
   onMerge: (direction: 'previous' | 'next') => void
+  onDelete: () => void
   onHistory: (role: 'notes' | 'output') => void
   /** The heading on the output's first line: the section's heading, if it has one. */
   heading: LeadingHeading | null
@@ -46,7 +47,7 @@ const needsAttention = (pane: PaneState | undefined) => pane !== undefined && pa
 
 /** A section as a single line: title, a rule, and a menu with everything else. */
 export function SectionHeader({
-  section, notes, output, layout, previous, next, onLayout, onRename, onMove, onMerge, onHistory, heading, onHeading, onMatchHeading,
+  section, notes, output, layout, previous, next, onLayout, onRename, onMove, onMerge, onDelete, onHistory, heading, onHeading, onMatchHeading,
 }: SectionHeaderProps) {
   const [open, setOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -153,6 +154,8 @@ export function SectionHeader({
           <button type="button" role="menuitem" onClick={act(() => onLayout({ ...layout, hideNotes: !layout.hideNotes }))}>
             {layout.hideNotes ? 'Show notes' : 'Hide notes'}
           </button>
+          <div className="menu-separator" />
+          <button type="button" role="menuitem" onClick={act(onDelete)}>Delete section</button>
           <div className="menu-separator" />
           <div className="menu-status">
             <span>Output</span><span className={`save-${output?.state ?? 'saved'}`}>{statusText(output)}</span>

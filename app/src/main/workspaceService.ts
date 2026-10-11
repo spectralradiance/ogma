@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { FolderModel, SectionInfo } from '../shared/ipc'
@@ -106,10 +106,30 @@ export async function moveSection(folder: string, stem: string, direction: 'up' 
   return findSection(await readFolder(folder), `${neighbour.ordinal}${section.separator || ' '}${section.title}`)
 }
 
-export async function trashSection(folder: string, stem: string, trash: (file: string) => Promise<void>): Promise<void> {
+export interface TrashedFile {
+  name: string
+  bytes: Buffer
+}
+
+/** Moves the section's files to the trash and returns their contents, so the deletion can be undone. */
+export async function trashSection(folder: string, stem: string, trash: (file: string) => Promise<void>): Promise<TrashedFile[]> {
   const section = findSection(await readFolder(folder), stem)
+  const files: TrashedFile[] = []
   for (const name of [section.notes, section.output]) {
-    if (name) await trash(path.join(folder, name))
+    if (!name) continue
+    const file = path.join(folder, name)
+    files.push({ name, bytes: await readFile(file) })
+    await trash(file)
+  }
+  return files
+}
+
+/** Puts back files removed by `trashSection`, refusing to overwrite anything created since. */
+export async function restoreSection(folder: string, files: TrashedFile[]): Promise<void> {
+  for (const file of files) {
+    await writeFile(path.join(folder, file.name), file.bytes, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
+      throw error.code === 'EEXIST' ? new Error(`“${file.name}” exists again, so nothing was restored.`) : error
+    })
   }
 }
 
@@ -118,6 +138,20 @@ export async function createFolder(parent: string, name: string): Promise<string
   if (error) throw new Error(error)
   const target = path.join(parent, name.trim())
   await mkdir(target)
+  return target
+}
+
+/** Renames a folder in place and returns its new path. */
+export async function renameFolder(folder: string, name: string): Promise<string> {
+  const error = validateTitle(name)
+  if (error) throw new Error(error)
+  const target = path.join(path.dirname(folder), name.trim())
+  if (path.basename(folder) === name.trim()) return folder
+  // A case-only change is the same directory on Windows, so only other matches are collisions.
+  if (target.toLowerCase() !== folder.toLowerCase() && await access(target).then(() => true, () => false)) {
+    throw new Error(`“${name.trim()}” already exists here.`)
+  }
+  await rename(folder, target)
   return target
 }
 

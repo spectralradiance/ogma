@@ -287,18 +287,29 @@ button[aria-pressed='true'] {
 }
 
 .tree-input-row {
-  padding: 2px 8px 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 8px;
 }
 
 .tree-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 2px 6px;
   font: inherit;
   color: var(--text);
-  background: var(--bg);
+  background: var(--raised);
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: 4px;
   outline: none;
+}
+
+.tree-input::placeholder {
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* Stage and document */
@@ -1952,6 +1963,12 @@ button.primary {
   background: var(--selection);
 }
 
+.context-menu {
+  position: fixed;
+  right: auto;
+  min-width: 170px;
+}
+
 .menu-separator {
   margin: 4px 0;
   border-top: 1px solid var(--border);
@@ -2295,4 +2312,50 @@ body.resizing {
 .settings input[type="range"] {
   flex: 1;
   accent-color: var(--accent);
+}
+
+.tree-row-wrap.dragging {
+  opacity: 0.4;
+}
+
+.tree-row-wrap.drop-target {
+  box-shadow: inset 0 2px 0 var(--accent, currentColor);
+}
+
+.dictionary-download {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  margin: 12px 0;
+}
+
+.dictionary-download progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.dictionary-download p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dictionary-download p.status-error {
+  color: var(--bad);
+}
+
+.undo-toast {
+  position: fixed;
+  left: 16px;
+  bottom: 40px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+  font-size: 13px;
 }

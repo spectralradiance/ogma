@@ -6,7 +6,7 @@ import { extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
-import { type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
+import { type DictionaryDownload, type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
 import { MARGIN_INCHES, normalizePreferences } from '../shared/preferences'
 import type { LeadingHeading } from '../shared/text'
@@ -23,10 +23,11 @@ import { SecretStore } from './secrets'
 import { SettingsStore } from './settings'
 import { SidecarManager } from './sidecar'
 import { resolveSidecarPaths } from './sidecarUtil'
+import { buildWiktionary } from './wiktionaryBuilder'
 import { WorkspaceWatcher } from './watcher'
-import { addRoot, removeRoot } from './workspaceRoots'
+import { addRoot, removeRoot, samePath } from './workspaceRoots'
 import {
-  createFolder, createSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection,
+  createFolder, createSection, renameFolder, restoreSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection, type TrashedFile,
 } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
@@ -153,6 +154,32 @@ function openDictionary(candidates = dictionaryCandidates()): DictionaryStatus {
 
 function dictionaryStatus(): DictionaryStatus {
   return { available: dictionary !== null, path: dictionary ? settings.get().dictionaryPath : null, error: dictionary ? null : dictionaryError }
+}
+
+/** Recently deleted sections, held so Undo can write them back. */
+const trashedSections = new Map<string, { folder: string; files: TrashedFile[] }>()
+
+let dictionaryDownload: AbortController | null = null
+
+async function downloadDictionary(): Promise<DictionaryStatus> {
+  if (dictionaryDownload) throw new Error('Wiktionary is already downloading.')
+  const controller = new AbortController()
+  dictionaryDownload = controller
+  const send = (status: DictionaryDownload) => mainWindow?.webContents.send(IPC.dictionaryDownloadProgress, status)
+  const target = join(app.getPath('userData'), 'wiktionary.db')
+  try {
+    await buildWiktionary(target, send, controller.signal)
+    const status = openDictionary([target])
+    send({ state: 'done', received: 0, total: null, entries: 0, error: null })
+    return status
+  } catch (error) {
+    const cancelled = controller.signal.aborted
+    send({ state: cancelled ? 'idle' : 'error', received: 0, total: null, entries: 0, error: cancelled ? null : (error instanceof Error ? error.message : String(error)) })
+    if (cancelled) return dictionaryStatus()
+    throw error
+  } finally {
+    dictionaryDownload = null
+  }
 }
 
 function requireDictionary(): Dictionary {
@@ -289,6 +316,16 @@ function registerIpc(): void {
   ipcMain.handle(IPC.historySnapshot, (_event, file: unknown, content: unknown, label: unknown) =>
     snapshots.manual(guard.resolve(file), text(content), typeof label === 'string' ? label : ''))
 
+  ipcMain.handle(IPC.foldersRename, async (_event, folder: unknown, name: unknown) => {
+    const source = guard.resolve(folder)
+    const target = await renameFolder(source, text(name))
+    const roots = settings.get().workspaceRoots
+    if (roots.some((root) => samePath(root, source, process.platform))) {
+      settings.update({ workspaceRoots: roots.map((root) => (samePath(root, source, process.platform) ? target : root)) })
+      rootsChanged()
+    }
+    return target
+  })
   ipcMain.handle(IPC.foldersRead, (_event, folder: unknown) => readFolder(guard.resolve(folder)))
   ipcMain.handle(IPC.foldersCreate, (_event, parent: unknown, name: unknown) =>
     createFolder(guard.resolve(parent), text(name)))
@@ -313,6 +350,8 @@ function registerIpc(): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     return result.canceled ? dictionaryStatus() : openDictionary([result.filePaths[0]])
   })
+  ipcMain.handle(IPC.dictionaryDownload, () => downloadDictionary())
+  ipcMain.handle(IPC.dictionaryCancelDownload, () => dictionaryDownload?.abort())
   ipcMain.handle(IPC.dictionaryLookup, (_event, word: unknown) => requireDictionary().lookup(text(word)))
   ipcMain.handle(IPC.dictionarySearch, (_event, query: unknown, limit: unknown) =>
     requireDictionary().search(text(query), typeof limit === 'number' ? limit : 20))
@@ -397,8 +436,20 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.sectionsMerge, (_event, folder: unknown, stem: unknown, laterStem: unknown) =>
     mergeSections(guard.resolve(folder), text(stem), text(laterStem), backups, (file) => shell.trashItem(guard.resolve(file))))
-  ipcMain.handle(IPC.sectionsTrash, (_event, folder: unknown, stem: unknown) =>
-    trashSection(guard.resolve(folder), text(stem), (file) => shell.trashItem(guard.resolve(file))))
+  ipcMain.handle(IPC.sectionsTrash, async (_event, folder: unknown, stem: unknown) => {
+    const resolved = guard.resolve(folder)
+    const files = await trashSection(resolved, text(stem), (file) => shell.trashItem(guard.resolve(file)))
+    const undoId = randomUUID()
+    trashedSections.set(undoId, { folder: resolved, files })
+    if (trashedSections.size > 20) trashedSections.delete(trashedSections.keys().next().value as string)
+    return { undoId }
+  })
+  ipcMain.handle(IPC.sectionsRestore, async (_event, undoId: unknown) => {
+    const entry = trashedSections.get(text(undoId))
+    if (!entry) throw new Error('That deletion can no longer be undone.')
+    await restoreSection(entry.folder, entry.files)
+    trashedSections.delete(text(undoId))
+  })
 }
 
 function leadingHeading(value: unknown): LeadingHeading | null {

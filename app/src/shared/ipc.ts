@@ -147,6 +147,15 @@ export interface DictionarySearchResult {
   gloss: string
 }
 
+/** Progress of building the dictionary from Wiktionary (a large download, streamed straight into the database). */
+export interface DictionaryDownload {
+  state: 'idle' | 'downloading' | 'indexing' | 'done' | 'error'
+  received: number
+  total: number | null
+  entries: number
+  error: string | null
+}
+
 export interface DictionaryStatus {
   available: boolean
   path: string | null
@@ -267,6 +276,8 @@ export interface OgmaApi {
     onChanged(listener: (paths: string[]) => void): () => void
   }
   folders: {
+    /** Renames the folder and returns its new path. */
+    rename(path: string, name: string): Promise<string>
     read(path: string): Promise<FolderModel>
     create(parent: string, name: string): Promise<string>
   }
@@ -274,6 +285,10 @@ export interface OgmaApi {
     status(): Promise<DictionaryStatus>
     /** Lets the user pick a wiktionary.db file. */
     choose(): Promise<DictionaryStatus>
+    /** Downloads Wiktionary and builds the database; resolves when it is ready to use. */
+    download(): Promise<DictionaryStatus>
+    cancelDownload(): Promise<void>
+    onDownload(listener: (status: DictionaryDownload) => void): () => void
     lookup(word: string): Promise<DictionaryEntry[]>
     search(text: string, limit?: number): Promise<DictionarySearchResult[]>
   }
@@ -328,7 +343,9 @@ export interface OgmaApi {
     create(folder: string, title: string): Promise<SectionInfo>
     rename(folder: string, stem: string, title: string): Promise<SectionInfo>
     move(folder: string, stem: string, direction: 'up' | 'down'): Promise<SectionInfo>
-    trash(folder: string, stem: string): Promise<void>
+    /** Moves the section's files to the Recycle Bin; the result can be passed to `restore`. */
+    trash(folder: string, stem: string): Promise<{ undoId: string }>
+    restore(undoId: string): Promise<void>
     /** Appends `laterStem`'s notes and output to `stem`'s, then removes `laterStem`. */
     merge(folder: string, stem: string, laterStem: string): Promise<SectionInfo>
     /** Sets (or with null removes) the heading on the first line of the section's output. */
@@ -353,14 +370,19 @@ export const IPC = {
   filesChanged: 'files:changed',
   foldersRead: 'folders:read',
   foldersCreate: 'folders:create',
+  foldersRename: 'folders:rename',
   sectionsCreate: 'sections:create',
   sectionsRename: 'sections:rename',
   sectionsMove: 'sections:move',
   sectionsTrash: 'sections:trash',
+  sectionsRestore: 'sections:restore',
   sectionsMerge: 'sections:merge',
   sectionsSetHeading: 'sections:set-heading',
   dictionaryStatus: 'dictionary:status',
   dictionaryChoose: 'dictionary:choose',
+  dictionaryDownload: 'dictionary:download',
+  dictionaryCancelDownload: 'dictionary:cancel-download',
+  dictionaryDownloadProgress: 'dictionary:download-progress',
   dictionaryLookup: 'dictionary:lookup',
   dictionarySearch: 'dictionary:search',
   lexiconLocation: 'lexicon:location',

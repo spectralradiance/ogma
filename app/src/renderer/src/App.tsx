@@ -158,6 +158,58 @@ export function App() {
     }
   }, [target, flushAll, changeTarget])
 
+  const [undo, setUndo] = useState<{ undoId: string; title: string } | null>(null)
+
+  useEffect(() => {
+    if (!undo) return
+    const timer = window.setTimeout(() => setUndo(null), 10000)
+    return () => window.clearTimeout(timer)
+  }, [undo])
+
+  const deleteSection = useCallback(async (folder: string, section: SectionInfo) => {
+    const deleted = { undoId: null as string | null }
+    await runSectionOperation(folder, section.stem, async () => {
+      deleted.undoId = (await window.ogma.sections.trash(folder, section.stem)).undoId
+      return null
+    })
+    if (deleted.undoId) setUndo({ undoId: deleted.undoId, title: section.title })
+  }, [runSectionOperation])
+
+  const undoDelete = useCallback(() => {
+    if (!undo) return
+    setUndo(null)
+    window.ogma.sections.restore(undo.undoId).then(
+      () => setReloadToken((token) => token + 1),
+      (error: unknown) => window.alert(errorMessage(error)),
+    )
+  }, [undo])
+
+  const renameFolder = useCallback(async (folder: string, name: string) => {
+    if (!(await flushAll())) {
+      window.alert('Some changes could not be saved. Resolve that before renaming a folder.')
+      return
+    }
+    try {
+      const renamed = await window.ogma.folders.rename(folder, name)
+      // Open files inside the folder keep working at their new location.
+      const remap = (path: string) => {
+        if (samePath(path, folder)) return renamed
+        const inside = path.length > folder.length && samePath(path.slice(0, folder.length), folder) && /[\\/]/.test(path[folder.length])
+        return inside ? renamed + path.slice(folder.length) : path
+      }
+      if (target?.kind === 'document') {
+        const same = samePath(target.folder, folder)
+        changeTarget({ ...target, folder: remap(target.folder), ...(same ? { title: name.trim(), ordinal: null } : {}) })
+      } else if (target?.kind === 'file') {
+        changeTarget({ ...target, path: remap(target.path) })
+      }
+      setWorkspace(await window.ogma.workspace.get())
+      setReloadToken((token) => token + 1)
+    } catch (error) {
+      window.alert(errorMessage(error))
+    }
+  }, [target, flushAll, changeTarget])
+
   const changeView = useCallback((next: ViewMode) => {
     setView(next)
     writePref('documentView', next)
@@ -396,6 +448,8 @@ export function App() {
           active={active}
           open={(next) => void open(next)}
           runSectionOperation={runSectionOperation}
+          renameFolder={renameFolder}
+          deleteSection={deleteSection}
           tab={sidebarTab}
           onTab={setSidebarTab}
           collapsed={!leftOpen}
@@ -441,6 +495,7 @@ export function App() {
             reloadToken={reloadToken}
             flush={flushAll}
             onSectionOperation={runSectionOperation}
+            onDeleteSection={deleteSection}
             callbacks={callbacks}
             onOpenFile={(path) => void open({ kind: 'file', path })}
             {...mode}
@@ -510,6 +565,13 @@ export function App() {
         }}
         onSettings={() => setAppSettingsOpen(true)}
       />
+      {undo && (
+        <div className="undo-toast" role="status">
+          <span>Deleted “{undo.title}”.</span>
+          <button type="button" onClick={undoDelete}>Undo</button>
+          <button type="button" className="icon-button" onClick={() => setUndo(null)} aria-label="Dismiss">×</button>
+        </div>
+      )}
       {appSettingsOpen && <SettingsDialog preferences={preferences} onChange={changePreferences} onClose={() => setAppSettingsOpen(false)} />}
     </div>
   )

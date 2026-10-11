@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AiEvent } from '../shared/ai'
-import { type DailyWords, IPC, type OgmaApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
+import { type DailyWords, type DictionaryDownload, IPC, type OgmaApi, type SearchStatus, type SidecarStatus } from '../shared/ipc'
 
 const api: OgmaApi = {
   preferences: {
@@ -41,10 +41,20 @@ const api: OgmaApi = {
   folders: {
     read: (path) => ipcRenderer.invoke(IPC.foldersRead, path),
     create: (parent, name) => ipcRenderer.invoke(IPC.foldersCreate, parent, name),
+    rename: (path, name) => ipcRenderer.invoke(IPC.foldersRename, path, name),
   },
   dictionary: {
     status: () => ipcRenderer.invoke(IPC.dictionaryStatus),
     choose: () => ipcRenderer.invoke(IPC.dictionaryChoose),
+    download: () => ipcRenderer.invoke(IPC.dictionaryDownload),
+    cancelDownload: () => ipcRenderer.invoke(IPC.dictionaryCancelDownload),
+    onDownload: (listener) => {
+      const handler = (_event: IpcRendererEvent, status: DictionaryDownload): void => listener(status)
+      ipcRenderer.on(IPC.dictionaryDownloadProgress, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.dictionaryDownloadProgress, handler)
+      }
+    },
     lookup: (word) => ipcRenderer.invoke(IPC.dictionaryLookup, word),
     search: (text, limit) => ipcRenderer.invoke(IPC.dictionarySearch, text, limit),
   },
@@ -111,6 +121,7 @@ const api: OgmaApi = {
     rename: (folder, stem, title) => ipcRenderer.invoke(IPC.sectionsRename, folder, stem, title),
     move: (folder, stem, direction) => ipcRenderer.invoke(IPC.sectionsMove, folder, stem, direction),
     trash: (folder, stem) => ipcRenderer.invoke(IPC.sectionsTrash, folder, stem),
+    restore: (undoId) => ipcRenderer.invoke(IPC.sectionsRestore, undoId),
     merge: (folder, stem, laterStem) => ipcRenderer.invoke(IPC.sectionsMerge, folder, stem, laterStem),
     setHeading: (folder, stem, heading) => ipcRenderer.invoke(IPC.sectionsSetHeading, folder, stem, heading),
   },

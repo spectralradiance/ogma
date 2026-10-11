@@ -72,6 +72,8 @@ interface DocumentViewProps extends ModeProps {
   flush: () => Promise<boolean>
   /** Runs a rename/move/merge, saving open editors first and reloading afterwards. */
   onSectionOperation: (folder: string, stem: string, operation: () => Promise<SectionInfo | null>) => Promise<void>
+  /** Deletes a section, offering Undo afterwards. */
+  onDeleteSection: (folder: string, section: SectionInfo) => Promise<void>
   callbacks: PaneCallbacks
   onOpenFile: (path: string) => void
 }
@@ -85,7 +87,7 @@ const sameHeading = (left: LeadingHeading | null | undefined, right: LeadingHead
   (left ?? null) === right || (left != null && right !== null && left.level === right.level && left.text === right.text)
 
 export function DocumentView({
-  target, view, onView, reloadToken, flush, onSectionOperation, callbacks, onOpenFile, ...mode
+  target, view, onView, reloadToken, flush, onSectionOperation, onDeleteSection, callbacks, onOpenFile, ...mode
 }: DocumentViewProps) {
   const { folder } = target
   const [model, setModel] = useState<FolderModel | null>(null)
@@ -353,6 +355,7 @@ export function DocumentView({
               onRename={(title) => void onSectionOperation(folder, section.stem, () => window.ogma.sections.rename(folder, section.stem, title))}
               onMove={(direction) => void onSectionOperation(folder, section.stem, () => window.ogma.sections.move(folder, section.stem, direction))}
               onMerge={(direction) => merge(section, direction)}
+              onDelete={() => void onDeleteSection(folder, section)}
               onHistory={(role) => handles.current.get(pathOf(section, role))?.openHistory()}
               heading={leading[pathOf(section, 'output')] ?? null}
               onHeading={(on) => setHeading(section, on ? { level: headingLevel, text: section.title } : null)}
