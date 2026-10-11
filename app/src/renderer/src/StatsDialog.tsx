@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import type { DailyWords, DocumentStats } from '../../shared/ipc'
 import { errorMessage } from './target'
+import { X } from 'lucide-react'
 
 interface StatsDialogProps {
   folder: string
@@ -74,7 +75,7 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
       <section className="modal stats-dialog" role="dialog" aria-label={`Statistics for ${title}`}>
         <header className="modal-header">
           <h2>Statistics · {title}</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </header>
         <div className="settings-body">
           {error && <p className="lexical-message status-error">{error}</p>}

@@ -8,6 +8,7 @@ import { onDiskChange, touchesFile } from './changes'
 import { MarkdownEditor, type MarkdownEditorHandle, type WordInContext } from './editor/MarkdownEditor'
 import { HistoryDialog } from './HistoryDialog'
 import { errorMessage } from './target'
+import { History, X } from 'lucide-react'
 
 const AUTOSAVE_DELAY_MS = 1200
 const STATS_DELAY_MS = 400
@@ -286,7 +287,7 @@ export function DocumentPane({
           {exists || saveState !== 'saved' ? SAVE_LABEL[saveState] : ''}
         </span>
         {exists && (
-          <button type="button" className="icon-button history-button" onClick={() => setHistoryOpen(true)} title="History: earlier versions of this file" aria-label="History">⟲</button>
+          <button type="button" className="icon-button history-button" onClick={() => setHistoryOpen(true)} title="History: earlier versions of this file" aria-label="History"><History size={14} aria-hidden="true" /></button>
         )}
         {headerActions}
       </header>}
@@ -322,7 +323,7 @@ export function DocumentPane({
       {notice && (
         <div className="banner banner-info" role="status">
           <span>{notice}</span>
-          <button type="button" className="icon-button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
+          <button type="button" className="icon-button" onClick={() => setNotice(null)} aria-label="Dismiss"><X size={14} aria-hidden="true" /></button>
         </div>
       )}
 

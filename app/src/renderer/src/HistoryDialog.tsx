@@ -4,6 +4,7 @@ import { diffLines } from '../../shared/diff'
 import { folderName } from '../../shared/format'
 import type { SnapshotEntry } from '../../shared/ipc'
 import { errorMessage } from './target'
+import { X } from 'lucide-react'
 
 interface HistoryDialogProps {
   path: string
@@ -66,7 +67,7 @@ export function HistoryDialog({ path, current, onRestore, onClose }: HistoryDial
             <h2>History · {folderName(path)}</h2>
             <p className="modal-subtitle">Saved automatically at most every 10 minutes while you edit, plus any snapshots you take.</p>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </header>
         <div className="history-body">
           <aside className="history-list">

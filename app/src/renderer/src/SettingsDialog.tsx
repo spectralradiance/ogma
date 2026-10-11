@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   type Appearance, type ExportPreferences, type FontChoice, type Preferences, SOURCE_FONTS, TEXT_FONTS, type ThemeChoice,
 } from '../../shared/preferences'
+import { X } from 'lucide-react'
 
 type Tab = 'appearance' | 'export'
 
@@ -87,7 +88,7 @@ export function SettingsDialog({ preferences, onChange, onClose }: SettingsDialo
       <section className="modal settings" role="dialog" aria-label="Settings">
         <header className="modal-header">
           <h2>Settings</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </header>
         <nav className="lexical-tabs" role="tablist">
           {(['appearance', 'export'] as Tab[]).map((id) => (

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SectionInfo } from '../../shared/ipc'
 import type { LeadingHeading } from '../../shared/text'
 import { SAVE_LABEL, type SaveState } from './DocumentPane'
+import { Check, Ellipsis } from 'lucide-react'
 
 export interface PaneState {
   state: SaveState
@@ -125,14 +126,14 @@ export function SectionHeader({
         aria-label={`Section menu for ${section.title}`}
         title={attention ? `Section menu — notes: ${statusText(notes)}, output: ${statusText(output)}` : 'Section menu'}
       >
-        ⋯
+        <Ellipsis size={16} aria-hidden="true" />
       </button>
       {open && (
         <div className="section-menu" role="menu">
           <button type="button" role="menuitem" onClick={act(() => { setTitle(shownTitle); setRenaming(true) })}>Edit section title</button>
           <button type="button" role="menuitemcheckbox" aria-checked={heading !== null} onClick={act(() => onHeading(heading === null))}
             title="The title as a heading at the top of the output (its first line), so it appears in exports">
-            <span className="menu-check" aria-hidden="true">{heading ? '✓' : ''}</span>Section heading
+            <span className="menu-check" aria-hidden="true">{heading && <Check size={13} />}</span>Section heading
           </button>
           <div className="menu-separator" />
           <button type="button" role="menuitem" disabled={!numbered || !previous?.ordinal} onClick={act(() => onMove('up'))}>

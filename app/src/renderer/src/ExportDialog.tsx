@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import type { ExportOptions, ExportOutcome } from '../../shared/ipc'
 import { errorMessage } from './target'
+import { X } from 'lucide-react'
 
 interface ExportDialogProps {
   folder: string
@@ -51,7 +52,7 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
       <section className="modal export-dialog" role="dialog" aria-label="Export document">
         <header className="modal-header">
           <h2>Export · {title}</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </header>
         <div className="settings-body">
           <div className="settings-section">

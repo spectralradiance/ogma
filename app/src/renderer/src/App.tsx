@@ -24,6 +24,7 @@ import { SettingsDialog } from './SettingsDialog'
 import { OutlinePanel } from './OutlinePanel'
 import { useOutline } from './useOutline'
 import { type SidebarTab, WorkspaceTree } from './WorkspaceTree'
+import { X } from 'lucide-react'
 
 const LEFT_WIDTH = { initial: 260, min: 180, max: 560 }
 const RIGHT_WIDTH = { initial: 340, min: 260, max: 720 }
@@ -572,7 +573,7 @@ export function App() {
         >
           <span>Deleted “{undo.title}”.</span>
           <button type="button" onClick={undoDelete}>Undo</button>
-          <button type="button" className="icon-button" onClick={() => setUndo(null)} aria-label="Dismiss">×</button>
+          <button type="button" className="icon-button" onClick={() => setUndo(null)} aria-label="Dismiss"><X size={14} aria-hidden="true" /></button>
         </div>
       )}
       {appSettingsOpen && <SettingsDialog preferences={preferences} onChange={changePreferences} onClose={() => setAppSettingsOpen(false)} />}

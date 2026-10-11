@@ -108,6 +108,10 @@ button[aria-pressed='true'] {
   padding: 0 6px;
   font-size: 16px;
   line-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
 }
 
 .link-button {
@@ -212,6 +216,7 @@ button[aria-pressed='true'] {
 }
 
 .tree-chevron {
+  display: inline-flex;
   flex: none;
   width: 14px;
   color: var(--muted);

@@ -8,6 +8,7 @@ import type { WordInContext } from './editor/MarkdownEditor'
 import { AiServerLine } from './AiServer'
 import { SynthesisReview } from './SynthesisReview'
 import { errorMessage } from './target'
+import { Settings } from 'lucide-react'
 
 export interface SectionMaterial {
   document: string
@@ -208,7 +209,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
             </button>
           ))}
         </div>
-        <button type="button" className="icon-button ai-settings-button" onClick={onOpenSettings} title="AI settings: keys, models, routing, prompts" aria-label="AI settings">⚙ Settings</button>
+        <button type="button" className="icon-button ai-settings-button" onClick={onOpenSettings} title="AI settings: keys, models, routing, prompts" aria-label="AI settings"><Settings size={14} aria-hidden="true" /> Settings</button>
       </header>
 
       <div className="lexical-body">

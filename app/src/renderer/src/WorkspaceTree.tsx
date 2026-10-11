@@ -6,6 +6,7 @@ import { joinPath, samePath } from '../../shared/paths'
 import { onDiskChange, touchesFolder } from './changes'
 import { FilesIcon, OutlineIcon, PaneIcon, SearchIcon } from './icons'
 import { type ActivePane, errorMessage, type OpenTarget } from './target'
+import { ChevronDown, ChevronRight, FilePlus, FolderPlus, X } from 'lucide-react'
 
 export interface TreeActions {
   target: OpenTarget | null
@@ -338,16 +339,16 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
               setOpen(!open)
             }}
           >
-            {open ? '▾' : '▸'}
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
           {ordinal && <span className="tree-ordinal">{ordinal}</span>}
           <span className="tree-label">{title}</span>
         </button>
         <span className="tree-actions">
-          <button type="button" className="icon-button" title="New section" onClick={() => { expand(); setEditing('section') }}>+</button>
-          <button type="button" className="icon-button" title="New folder" onClick={() => { expand(); setEditing('folder') }}>⊞</button>
+          <button type="button" className="icon-button" title="New section" onClick={() => { expand(); setEditing('section') }}><FilePlus size={14} aria-hidden="true" /></button>
+          <button type="button" className="icon-button" title="New folder" onClick={() => { expand(); setEditing('folder') }}><FolderPlus size={14} aria-hidden="true" /></button>
           {onRemoveRoot && (
-            <button type="button" className="icon-button" title="Remove from workspace (files are not touched)" onClick={onRemoveRoot}>×</button>
+            <button type="button" className="icon-button" title="Remove from workspace (files are not touched)" onClick={onRemoveRoot}><X size={14} aria-hidden="true" /></button>
           )}
         </span>
       </div>
@@ -466,7 +467,7 @@ export function WorkspaceTree({
               <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => onTab(item.id)} title={item.title}>{item.label}</button>
             ))}
           </nav>
-          <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder">+</button>
+          <button type="button" className="icon-button" onClick={onAddRoot} title="Add folder…" aria-label="Add folder"><FolderPlus size={14} aria-hidden="true" /></button>
           <button type="button" className="icon-button" onClick={onToggle} title="Hide sidebar (Ctrl+\)" aria-label="Hide sidebar">
             <PaneIcon side="left" open />
           </button>

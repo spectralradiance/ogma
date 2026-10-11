@@ -6,6 +6,7 @@ import {
 import type { ProviderStatus, SidecarStatus } from '../../shared/ipc'
 import { AiServerSettings } from './AiServer'
 import { errorMessage } from './target'
+import { ArrowDown, ArrowUp, X } from 'lucide-react'
 
 type Tab = 'server' | 'keys' | 'profiles' | 'routing' | 'prompts'
 
@@ -52,7 +53,7 @@ export function AiSettings({ status, onClose }: AiSettingsProps) {
       <section className="modal settings" role="dialog" aria-label="AI settings">
         <header className="modal-header">
           <h2>AI settings</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
         </header>
         <nav className="lexical-tabs" role="tablist">
           {(['server', 'keys', 'profiles', 'routing', 'prompts'] as Tab[]).map((id) => (
@@ -160,7 +161,7 @@ function ProfilesTab({ config, providers, onSave }: { config: AiConfig; provider
                 </td>
                 <td className="settings-cell-actions">
                   <TestButton profileId={profile.id} />
-                  <button type="button" className="icon-button" title="Remove profile" onClick={() => remove(profile.id)}>×</button>
+                  <button type="button" className="icon-button" title="Remove profile" onClick={() => remove(profile.id)}><X size={14} aria-hidden="true" /></button>
                 </td>
               </tr>
             )
@@ -243,11 +244,11 @@ function RoutingTab({ config, onSave }: { config: AiConfig; onSave: (config: AiC
                 <li key={id}>
                   <span>{byId.get(id)?.label ?? id}</span>
                   <button type="button" className="icon-button" disabled={index === 0} title="Earlier"
-                    onClick={() => setOrder(task.id, swap(order, index, index - 1))}>↑</button>
+                    onClick={() => setOrder(task.id, swap(order, index, index - 1))}><ArrowUp size={14} aria-hidden="true" /></button>
                   <button type="button" className="icon-button" disabled={index === order.length - 1} title="Later"
-                    onClick={() => setOrder(task.id, swap(order, index, index + 1))}>↓</button>
+                    onClick={() => setOrder(task.id, swap(order, index, index + 1))}><ArrowDown size={14} aria-hidden="true" /></button>
                   <button type="button" className="icon-button" title="Remove from this task"
-                    onClick={() => setOrder(task.id, order.filter((item) => item !== id))}>×</button>
+                    onClick={() => setOrder(task.id, order.filter((item) => item !== id))}><X size={14} aria-hidden="true" /></button>
                 </li>
               ))}
             </ol>

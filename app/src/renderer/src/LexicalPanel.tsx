@@ -5,6 +5,7 @@ import type { DictionaryDownload, DictionaryEntry, DictionarySearchResult, Dicti
 import { matchesLexiconQuery, splitList } from '../../shared/lexicon'
 import { readPref, writePref } from './prefs'
 import { errorMessage } from './target'
+import { ArrowLeft } from 'lucide-react'
 
 export interface LexicalQuery {
   word: string
@@ -144,7 +145,7 @@ export function LexicalPanel({ query, onLookup, onReplace }: LexicalPanelProps) 
   return (
     <div className="lexical-panel" aria-label="Words">
       <header className="lexical-header">
-        <button type="button" className="icon-button" onClick={back} disabled={history.length === 0} title="Back" aria-label="Back">←</button>
+        <button type="button" className="icon-button" onClick={back} disabled={history.length === 0} title="Back" aria-label="Back"><ArrowLeft size={14} aria-hidden="true" /></button>
         <SearchBox word={word} onLookup={lookUp} enabled={status?.available ?? false} />
       </header>
       <nav className="lexical-tabs" role="tablist">
