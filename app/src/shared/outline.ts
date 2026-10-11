@@ -1,5 +1,6 @@
 // A double document's outline: its sections in order, each with its headings and size.
 
+import type { SectionSummary } from './document'
 import { countWords, extractHeadings, type Heading, type LeadingHeading, splitLeadingHeading } from './text'
 
 export interface FileOutline {
@@ -92,6 +93,20 @@ export function outlineMarkdown(title: string, sections: OutlineSection[], optio
     if (output.length) add(output, '')
     const notes = options.notes ? section.notes.headings : []
     if (notes.length) add(notes, '(notes) ')
+  })
+  return `${lines.join('\n')}\n`
+}
+
+/** A single-file document's outline as Markdown: its sections with sizes, headings nested beneath. */
+export function fileOutlineMarkdown(title: string, sections: readonly SectionSummary[]): string {
+  const lines = [`# ${title}`, '']
+  const words = (count: number) => `${count} ${count === 1 ? 'word' : 'words'}`
+  sections.filter((section) => section.title !== null).forEach((section, index) => {
+    const notes = section.notesWords > 0 ? `, notes ${words(section.notesWords)}` : ', no notes'
+    lines.push(`${index + 1}. ${section.title} (${section.outputWords > 0 ? words(section.outputWords) : 'no text yet'}${notes})`)
+    if (section.headings.length === 0) return
+    const top = Math.min(...section.headings.map((heading) => heading.level))
+    for (const heading of section.headings) lines.push(`${'   '.repeat(heading.level - top + 1)}- ${heading.text}`)
   })
   return `${lines.join('\n')}\n`
 }

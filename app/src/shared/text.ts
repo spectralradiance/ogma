@@ -1,4 +1,5 @@
 import type { LineEnding, TextEncodingName } from './ipc'
+import { classifyLines } from './notes'
 
 const WORD = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu
 
@@ -29,11 +30,14 @@ export interface Heading {
   line: number
 }
 
-/** ATX headings outside fenced code blocks, for the outline. */
+/** ATX headings outside fenced code blocks and notes blocks, for the outline. */
 export function extractHeadings(text: string): Heading[] {
   const headings: Heading[] = []
   let fence: string | null = null
-  text.split('\n').forEach((line, index) => {
+  const lines = text.split('\n')
+  const roles = classifyLines(lines)
+  lines.forEach((line, index) => {
+    if (roles[index] !== 'output') return
     const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
     if (fenceMatch) {
       if (fence === null) fence = fenceMatch[1][0]
