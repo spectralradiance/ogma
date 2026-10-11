@@ -31,6 +31,17 @@ API keys are set in the app under **AI → ⚙ AI settings → Keys** (stored en
 
 `samples/` holds example documents: *The Night Sky* (a double document — each section has a `-notes.md` and an `-output.md`, one section has notes only), a notebook in the older extensionless naming, and a regular single-file document. Add the folder with **+** in the sidebar and try the Column / Side by side / Output / Notes views.
 
+## Working in the sidebar
+
+- **Reorder** numbered sections by dragging them in the sidebar; the files are renumbered for you.
+- **Rename** a section or folder by double-clicking it (or right-click → Rename). Open files inside a renamed folder stay open.
+- **Right-click** a section for Rename, Move up/down and Delete; right-click a folder for Rename, New section, New folder and (for top-level folders) Remove from workspace. Delete is also in a section's ⋯ menu.
+- **Delete** doesn't ask first. A toast offers **Undo** for 10 seconds; the files also go to the Recycle Bin. Undo works until the app closes, for the last 20 deletions.
+
+## Dictionary
+
+The Words panel (Ctrl+D) reads a local `wiktionary.db`. If none is found, click **Download Wiktionary** in the panel: it downloads the English Wiktionary extract from kaikki.org (about 500 MB compressed), builds the database in `%APPDATA%\Ogma\wiktionary.db` (roughly 1 GB) and starts using it. You can cancel at any time. **Choose an existing wiktionary.db…** points the app at one you already have.
+
 ## AI
 
 Open the **AI** panel (button in the document header, or Ctrl+J):
