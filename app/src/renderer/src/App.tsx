@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { type SectionSummary, splitSections } from '../../shared/document'
 import { folderName } from '../../shared/format'
 import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
-import { outlineMarkdown } from '../../shared/outline'
+import { stripNotes } from '../../shared/notes'
+import { fileOutlineMarkdown, outlineMarkdown } from '../../shared/outline'
 import { DEFAULT_PREFERENCES, type Preferences } from '../../shared/preferences'
 import { splitLeadingHeading } from '../../shared/text'
 import { dirname, joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
+import { ExportDialog } from './ExportDialog'
 import { type AiWorkspace, AiPanel } from './AiPanel'
 import { AiSettings } from './AiSettings'
-import { type Drawer, DocumentView, ModeToggles, type PaneCallbacks } from './DocumentView'
+import { type Drawer, DocumentView, ModeToggles, NotesViewSwitch, type PaneCallbacks } from './DocumentView'
+import type { NotesView } from './editor/notesBlocks'
 import { SidePanel } from './SidePanel'
 import { type LexicalQuery, LexicalPanel } from './LexicalPanel'
 import { readPref, writePref } from './prefs'
@@ -57,6 +61,11 @@ export function App() {
   const [active, setActive] = useState<ActivePane | null>(null)
   const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
   const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
+  const [docSections, setDocSections] = useState<Record<string, SectionSummary[]>>({})
+  const [notesView, setNotesView] = useState<NotesView>(() => {
+    const stored = readPref('notesView')
+    return stored === 'notes' || stored === 'all' ? stored : 'output'
+  })
   const [reloadToken, setReloadToken] = useState(0)
   const [todayWords, setTodayWords] = useState<number | null>(null)
   const [drawer, setDrawer] = useState<Drawer | null>(() => {
@@ -64,6 +73,7 @@ export function App() {
     return stored === 'words' || stored === 'ai' ? stored : null
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [exportingFile, setExportingFile] = useState(false)
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES)
   const savePreferencesTimer = useRef<number | undefined>(undefined)
@@ -224,6 +234,10 @@ export function App() {
     })
   }, [])
   const toggleFocus = useCallback(() => setFocusMode((value) => !value), [])
+  const changeNotesView = useCallback((next: NotesView) => {
+    setNotesView(next)
+    writePref('notesView', next)
+  }, [])
 
   const changePreferences = useCallback((next: Preferences) => {
     applyAppearance(next)
@@ -337,6 +351,7 @@ export function App() {
     },
     onInfo: (path, info) => setInfos((current) => ({ ...current, [path]: info })),
     onHeadings: (path, list) => setHeadings((current) => ({ ...current, [path]: list })),
+    onSections: (path, list) => setDocSections((current) => ({ ...current, [path]: list })),
     onDirtyChange: (path, dirty) => {
       if (dirty) dirtyPanes.current.add(path)
       else dirtyPanes.current.delete(path)
@@ -383,7 +398,7 @@ export function App() {
     () => Object.fromEntries(Object.entries(infos).map(([path, info]) => [path, info?.words])),
     [infos],
   )
-  const outline = useOutline(target, { headings, words: liveWords }, reloadToken)
+  const outline = useOutline(target, { headings, words: liveWords, sections: docSections }, reloadToken)
   const activeInfo = activePath ? infos[activePath] ?? null : null
   const activeLabel = active?.stem && activePath
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
@@ -394,17 +409,39 @@ export function App() {
 
   const aiWorkspace: AiWorkspace = {
     focus: active
-      ? { label: active.section ? `${active.section.title} (${activeLabel.toLowerCase()})` : folderName(active.path), inSection: Boolean(active.section) }
+      ? {
+        label: active.section ? `${active.section.title} (${activeLabel.toLowerCase()})` : folderName(active.path),
+        inSection: Boolean(active.section) || (target?.kind === 'file' && samePath(target.path, active.path)),
+      }
       : null,
     readActive: () => {
       const handle = active ? panes.current.get(active.path) : undefined
       if (!active || !handle) return null
-      return { text: handle.getText(), selection: handle.getSelection(), document: documentTitle, section: active.section?.title ?? '' }
+      // Notes blocks are the writer's scaffolding, not text to analyze.
+      return {
+        text: stripNotes(handle.getText()),
+        selection: handle.getSelection(),
+        document: documentTitle,
+        section: active.section?.title ?? handle.currentSection()?.title ?? '',
+      }
     },
     readSection: async () => {
       const section = active?.section
       const folder = active?.folder
-      if (!section || !folder) return null
+      if (!section || !folder) {
+        // A single-file document: the section under the cursor, its notes blocks being the notes.
+        const handle = active ? panes.current.get(active.path) : undefined
+        const current = handle?.currentSection()
+        if (!handle || !current) return null
+        const preface = splitSections(handle.getText()).find((candidate) => candidate.title === null)?.notes
+        return {
+          document: documentTitle,
+          section: current.title ?? documentTitle,
+          notes: current.notes,
+          output: current.output,
+          documentNotes: preface || '(none)',
+        }
+      }
       const read = async (path: string) => panes.current.get(path)?.getText()
         ?? window.ogma.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
       // An open output editor already leaves out the section heading; match that when reading from disk.
@@ -422,6 +459,7 @@ export function App() {
     },
     currentWord: () => (active ? panes.current.get(active.path)?.currentWord() ?? null : null),
     applyOutput: (text) => {
+      if (!active?.section) return active ? panes.current.get(active.path)?.replaceCurrentSectionOutput(text) ?? false : false
       const path = active?.section?.outputPath
       const handle = path ? panes.current.get(path) : undefined
       if (!handle) return false
@@ -431,7 +469,9 @@ export function App() {
     replaceWord: (word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false),
     outline: outline?.kind === 'document'
       ? { title: outline.title, sections: outline.sections.length, markdown: () => outlineMarkdown(outline.title, outline.sections, { notes: true, leads: true }) }
-      : null,
+      : outline?.kind === 'file' && outline.sections.some((section) => section.title !== null)
+        ? { title: outline.title, sections: outline.sections.length, markdown: () => fileOutlineMarkdown(outline.title, outline.sections) }
+        : null,
   }
 
   return (
@@ -452,6 +492,7 @@ export function App() {
           runSectionOperation={runSectionOperation}
           renameFolder={renameFolder}
           deleteSection={deleteSection}
+          flush={flushAll}
           tab={sidebarTab}
           onTab={setSidebarTab}
           collapsed={!leftOpen}
@@ -510,9 +551,18 @@ export function App() {
             path={target.path}
             live={live}
             focusMode={focusMode}
-            headerActions={<ModeToggles {...mode} />}
+            notesView={notesView}
+            onShowNotes={() => changeNotesView('notes')}
+            headerActions={(
+              <>
+                <button type="button" onClick={() => setExportingFile(true)} title="Export as PDF, HTML or Markdown (notes are left out of the output)">Export…</button>
+                <NotesViewSwitch view={notesView} onView={changeNotesView} />
+                <ModeToggles {...mode} />
+              </>
+            )}
             onInfo={(next) => callbacks.onInfo(target.path, next)}
             onHeadings={(list) => callbacks.onHeadings(target.path, list)}
+            onSections={(list) => callbacks.onSections?.(target.path, list)}
             onDirtyChange={(dirty) => callbacks.onDirtyChange(target.path, dirty)}
             onFocus={() => setActive({ path: target.path, folder: null, stem: null })}
             onSelectWord={(word) => callbacks.onSelectWord(target.path, word)}
@@ -553,6 +603,9 @@ export function App() {
             />
           )}
         </SidePanel>
+      )}
+      {exportingFile && target?.kind === 'file' && (
+        <ExportDialog folder={target.path} title={folderName(target.path).replace(/\.[^.]+$/, '')} flush={flushAll} onClose={() => setExportingFile(false)} />
       )}
       {settingsOpen && <AiSettings status={status} onClose={() => setSettingsOpen(false)} />}
       <StatusBar

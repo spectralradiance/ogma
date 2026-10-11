@@ -233,6 +233,16 @@ export interface ExportOptions {
   includeTitle: boolean
 }
 
+export interface ConvertOutcome {
+  /** The single-file document. */
+  path: string
+  /** False when it already existed and was left as it is. */
+  created: boolean
+  sections: number
+  /** Nested documents inside the folder, which are not included. */
+  subfolders: number
+}
+
 export interface ExportOutcome {
   path: string
   sections: number
@@ -280,6 +290,10 @@ export interface OgmaApi {
     rename(path: string, name: string): Promise<string>
     read(path: string): Promise<FolderModel>
     create(parent: string, name: string): Promise<string>
+    /** Writes the folder's sections into one Markdown file next to it (the folder is kept) and returns it. */
+    convert(path: string): Promise<ConvertOutcome>
+    /** The folder's single-file document, if it has been made; null otherwise. */
+    singleDocument(path: string): Promise<string | null>
   }
   dictionary: {
     status(): Promise<DictionaryStatus>
@@ -371,6 +385,8 @@ export const IPC = {
   foldersRead: 'folders:read',
   foldersCreate: 'folders:create',
   foldersRename: 'folders:rename',
+  foldersConvert: 'folders:convert',
+  foldersSingleDocument: 'folders:single-document',
   sectionsCreate: 'sections:create',
   sectionsRename: 'sections:rename',
   sectionsMove: 'sections:move',

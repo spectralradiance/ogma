@@ -1,11 +1,14 @@
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react'
 
+import type { SectionSummary } from '../../shared/document'
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
+import { folderName } from '../../shared/format'
 import { joinPath } from '../../shared/paths'
 import { type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
 import type { WordInContext } from './editor/MarkdownEditor'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
+import type { NotesView } from './editor/notesBlocks'
 import { ExportDialog } from './ExportDialog'
 import { type PaneState, SectionHeader, type SectionLayout } from './SectionHeader'
 import { StatsDialog } from './StatsDialog'
@@ -19,6 +22,25 @@ interface ModeProps {
   focusMode: boolean
   onToggleLive: () => void
   onToggleFocus: () => void
+}
+
+const NOTES_VIEWS: { id: NotesView; label: string; title: string }[] = [
+  { id: 'output', label: 'Output', title: 'The text as one continuous document, notes hidden' },
+  { id: 'notes', label: 'Notes', title: 'All notes as one continuous document, under each section’s # heading. Enter on a heading starts its notes.' },
+  { id: 'all', label: 'Both', title: 'Text and notes together, each section’s notes under its text. Ctrl+Alt+N adds or jumps to notes.' },
+]
+
+/** For single-file documents: the output alone, the notes alone, or both. */
+export function NotesViewSwitch({ view, onView }: { view: NotesView; onView: (view: NotesView) => void }) {
+  return (
+    <div className="segmented" role="group" aria-label="Document view">
+      {NOTES_VIEWS.map((option) => (
+        <button key={option.id} type="button" aria-pressed={view === option.id} onClick={() => onView(option.id)} title={option.title}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export function ModeToggles({ live, focusMode, onToggleLive, onToggleFocus }: ModeProps) {
@@ -47,6 +69,7 @@ export interface PaneCallbacks {
   onDirtyChange: (path: string, dirty: boolean) => void
   onActivePane: (active: ActivePane) => void
   onSelectWord: (path: string, word: WordInContext) => void
+  onSections?: (path: string, sections: SectionSummary[]) => void
 }
 
 type DocumentTarget = Extract<OpenTarget, { kind: 'document' }>
@@ -92,6 +115,8 @@ export function DocumentView({
   const { folder } = target
   const [model, setModel] = useState<FolderModel | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The folder's one-file document, once it has been made.
+  const [singleFile, setSingleFile] = useState<string | null>(null)
   // Swapping applies to every section; Column and Side by side each remember their own order.
   const [swaps, setSwaps] = useState(() => ({
     split: readPref('panesSwapped') === 'true',
@@ -124,6 +149,7 @@ export function DocumentView({
         return [path, document ? splitLeadingHeading(document.text).heading : null]
       }))
       setLeading(Object.fromEntries(found))
+      setSingleFile(await window.ogma.folders.singleDocument(folder).catch(() => null))
       setModel(next)
       setError(null)
     },
@@ -146,6 +172,17 @@ export function DocumentView({
     const timer = window.setTimeout(scroll, 300)
     return () => window.clearTimeout(timer)
   }, [model, target.focusStem, target.nonce])
+
+  /** Opens the folder as one continuous document, writing that file first if needed. */
+  const openAsOneDocument = async () => {
+    try {
+      if (!(await flush())) throw new Error('Some changes could not be saved. Resolve that first.')
+      const result = await window.ogma.folders.convert(folder)
+      onOpenFile(result.path)
+    } catch (reason) {
+      window.alert(errorMessage(reason))
+    }
+  }
 
   const toggleSwap = () => {
     const key = view === 'column' ? 'column' : 'split'
@@ -300,6 +337,18 @@ export function DocumentView({
         />
       )}
 
+      {model && model.sections.length > 0 && (
+        <div className="banner banner-info" role="note">
+          <span>
+            {singleFile
+              ? <>This document also exists as one file, “{folderName(singleFile)}”: one continuous text, sections split by its # headings.</>
+              : <>Each section here is a separate pair of files. Open it as one continuous document, with a # heading per section that you edit like any other text (the folder is kept as it is).</>}
+          </span>
+          <button type="button" className="primary" onClick={() => void openAsOneDocument()}>
+            {singleFile ? 'Open it' : 'Open as one document'}
+          </button>
+        </div>
+      )}
       {model && model.documentNotes.length > 0 && (
         <nav className="document-notes" aria-label="Document notes">
           <span>Document notes:</span>

@@ -558,6 +558,32 @@ button[aria-pressed='true'] {
   font-size: 12px;
 }
 
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.banner > span {
+  flex: 1;
+}
+
+.banner-warn {
+  border-left: 3px solid var(--warn);
+}
+
+.banner-error {
+  border-left: 3px solid var(--bad);
+}
+
+.banner-info {
+  border-left: 3px solid var(--accent);
+}
+
 .document-body {
   flex: 1;
   min-height: 0;

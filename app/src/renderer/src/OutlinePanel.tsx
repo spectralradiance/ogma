@@ -44,15 +44,39 @@ export function OutlinePanel({ outline, activePath, onOpenSection, onReveal }: O
   if (!outline) return <p className="sidebar-empty">Open a document to see its outline.</p>
 
   if (outline.kind === 'file') {
+    // A single-file document: its headings split it into sections; notes blocks are counted apart.
+    const titled = outline.sections.filter((section) => section.title !== null)
+    const outputWords = outline.sections.reduce((sum, section) => sum + section.outputWords, 0)
+    const notesWords = outline.sections.reduce((sum, section) => sum + section.notesWords, 0)
+    const largest = Math.max(1, ...titled.map((section) => section.outputWords))
     return (
       <div className="outline-panel">
         <header className="outline-head">
           <div className="outline-title">{outline.title}</div>
-          <div className="outline-totals">{outline.file.words.toLocaleString()} words · {outline.file.headings.length} headings</div>
+          <div className="outline-totals">
+            {titled.length} {titled.length === 1 ? 'section' : 'sections'} · {outputWords.toLocaleString()} words
+            {notesWords > 0 && <> · {notesWords.toLocaleString()} in notes</>}
+          </div>
         </header>
-        {outline.file.headings.length === 0
-          ? <p className="sidebar-empty">No headings yet. Lines starting with # become headings.</p>
-          : <HeadingList headings={outline.file.headings} path={outline.path} onReveal={onReveal} />}
+        {titled.length === 0
+          ? <p className="sidebar-empty">No headings yet. Lines starting with # become headings, and each heading starts a section.</p>
+          : (
+            <ol className="outline-sections">
+              {titled.map((section) => (
+                <li key={`${section.line}:${section.title}`}>
+                  <button type="button" className="outline-section" onClick={() => onReveal(outline.path, section.line)}
+                    title={`${section.outputWords.toLocaleString()} words, ${section.notesWords.toLocaleString()} in notes`}>
+                    <span className="outline-section-title">{section.title}</span>
+                    <span className="outline-words">{section.outputWords.toLocaleString()}</span>
+                    <span className="outline-bar" aria-hidden="true">
+                      <span style={{ width: `${(section.outputWords / largest) * 100}%` }} />
+                    </span>
+                  </button>
+                  <HeadingList headings={section.headings} path={outline.path} onReveal={onReveal} />
+                </li>
+              ))}
+            </ol>
+          )}
       </div>
     )
   }

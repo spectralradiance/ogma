@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { FolderModel, SectionInfo } from '../shared/ipc'
+import { buildSingleDocument, singleDocumentName } from '../shared/document'
+import type { ConvertOutcome, FolderModel, SectionInfo } from '../shared/ipc'
 import { type LeadingHeading, splitLeadingHeading, withLeadingHeading } from '../shared/text'
 import { type BackupStore, listDirectory, readTextDocument, writeTextDocument } from './fileService'
 import { buildFolderModel, planNewSection, planRename, planSwap, type RenameStep, validateTitle } from './sections'
@@ -131,6 +132,39 @@ export async function restoreSection(folder: string, files: TrashedFile[]): Prom
       throw error.code === 'EEXIST' ? new Error(`“${file.name}” exists again, so nothing was restored.`) : error
     })
   }
+}
+
+/**
+ * Where a folder of sections goes as one document: next to the folder, or inside it
+ * when the folder is a workspace root (next to it would be outside the workspace).
+ */
+export function singleDocumentTarget(folder: string, isRoot: boolean): string {
+  const name = singleDocumentName(path.basename(folder))
+  return isRoot ? path.join(folder, name) : path.join(path.dirname(folder), name)
+}
+
+/**
+ * Writes a double document's sections into one Markdown file at `target`: a `#`
+ * heading per section with its output, and its notes in a notes block. The
+ * folder itself is left as it is.
+ */
+export async function convertToSingleDocument(folder: string, target = singleDocumentTarget(folder, false)): Promise<ConvertOutcome> {
+  const model = await readFolder(folder)
+  if (model.sections.length === 0) throw new Error('This folder has no sections to convert.')
+  const read = async (file: string | null) => (file ? (await readTextDocument(path.join(folder, file), true)).text : '')
+  const preface = (await Promise.all(model.documentNotes.filter((file) => path.join(folder, file) !== target).map(async (file) => ({ file, text: (await read(file)).trim() }))))
+    .filter((note) => note.text)
+    .map((note) => `**${note.file}**\n\n${note.text}`)
+    .join('\n\n')
+  const sections = await Promise.all(model.sections.map(async (section) => ({
+    title: section.title,
+    output: await read(section.output),
+    notes: await read(section.notes),
+  })))
+  await writeFile(target, buildSingleDocument(preface, sections), { encoding: 'utf8', flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
+    throw error.code === 'EEXIST' ? new Error(`“${path.basename(target)}” already exists.`) : error
+  })
+  return { path: target, created: true, sections: sections.length, subfolders: model.subdocuments.length }
 }
 
 export async function createFolder(parent: string, name: string): Promise<string> {

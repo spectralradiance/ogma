@@ -11,6 +11,7 @@ import { toggleWrap } from './commands'
 import { dictionaryHover } from './dictionaryHover'
 import { focusMode as focusModeExtension } from './focusMode'
 import { documentPath, livePreview } from './livePreview'
+import { addOrJumpToNotes, notesBlocks, notesView as notesViewFacet, type NotesView, revealSelection, SHOW_NOTES_EVENT } from './notesBlocks'
 import { autoHeightTheme, editorTheme } from './theme'
 
 export interface MarkdownEditorHandle {
@@ -23,8 +24,10 @@ export interface MarkdownEditorHandle {
   /** Replaces the selection, or the word at the cursor, matching its capitalization. */
   replaceWord(replacement: string): boolean
   getSelection(): string
-  /** Replaces the whole document as one undoable change. */
+  /** Replaces the whole document as one undoable change (only the part that differs is touched). */
   replaceAll(text: string): void
+  /** The 1-based line the cursor is on. */
+  cursorLine(): number
 }
 
 export interface WordInContext {
@@ -54,6 +57,10 @@ interface MarkdownEditorProps {
   autoHeight?: boolean
   live: boolean
   focusMode: boolean
+  /** Show the text alone, the notes alone, or both (see notesBlocks). */
+  notesView?: NotesView
+  /** A command needs the notes view (Ctrl+Alt+N in the output view). */
+  onShowNotes?: () => void
   onDocChanged: () => void
   onSave: () => void
   onBlur: () => void
@@ -69,16 +76,17 @@ const noop = () => {}
  * instead of receiving it on every keystroke, which keeps large notes fast.
  */
 export function MarkdownEditor({
-  ref, path, initialText, placeholder, autoHeight = false, live, focusMode, onDocChanged, onSave, onBlur, onFocus, onSelectWord,
+  ref, path, initialText, placeholder, autoHeight = false, live, focusMode, notesView = 'all', onShowNotes, onDocChanged, onSave, onBlur, onFocus, onSelectWord,
 }: MarkdownEditorProps) {
   const container = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
-  const [compartments] = useState(() => ({ live: new Compartment(), focus: new Compartment() }))
+  const [compartments] = useState(() => ({ live: new Compartment(), focus: new Compartment(), notes: new Compartment() }))
   const handleDocChanged = useEffectEvent(onDocChanged)
   const handleSave = useEffectEvent(onSave)
   const handleBlur = useEffectEvent(onBlur)
   const handleFocus = useEffectEvent(onFocus ?? noop)
   const handleSelectWord = useEffectEvent((word: WordInContext) => onSelectWord?.(word))
+  const handleShowNotes = useEffectEvent(onShowNotes ?? noop)
 
   useImperativeHandle(ref, () => ({
     getText: () => view.current?.state.doc.toString() ?? initialText,
@@ -120,7 +128,21 @@ export function MarkdownEditor({
     replaceAll: (text) => {
       const editor = view.current
       if (!editor) return
-      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, userEvent: 'input.replace', scrollIntoView: true })
+      const current = editor.state.doc.toString()
+      let start = 0
+      while (start < current.length && start < text.length && current[start] === text[start]) start += 1
+      let end = 0
+      while (end < current.length - start && end < text.length - start
+        && current[current.length - 1 - end] === text[text.length - 1 - end]) end += 1
+      editor.dispatch({
+        changes: { from: start, to: current.length - end, insert: text.slice(start, text.length - end) },
+        userEvent: 'input.replace',
+        scrollIntoView: true,
+      })
+    },
+    cursorLine: () => {
+      const editor = view.current
+      return editor ? editor.state.doc.lineAt(editor.state.selection.main.head).number : 1
     },
   }), [initialText])
 
@@ -139,6 +161,8 @@ export function MarkdownEditor({
         highlightSelectionMatches(),
         compartments.live.of([]),
         compartments.focus.of([]),
+        compartments.notes.of([]),
+        notesBlocks,
         editorTheme,
         autoHeight ? autoHeightTheme : ([] as Extension),
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off' }),
@@ -149,6 +173,7 @@ export function MarkdownEditor({
           { key: 'Mod-b', run: toggleWrap('**') },
           { key: 'Mod-i', run: toggleWrap('*') },
           { key: 'Mod-`', run: toggleWrap('`') },
+          { key: 'Mod-Alt-n', run: addOrJumpToNotes },
           ...searchKeymap,
           ...defaultKeymap,
           ...historyKeymap,
@@ -169,7 +194,10 @@ export function MarkdownEditor({
     })
     const editor = new EditorView({ state, parent: container.current })
     view.current = editor
+    const showNotes = () => handleShowNotes()
+    editor.dom.addEventListener(SHOW_NOTES_EVENT, showNotes)
     return () => {
+      editor.dom.removeEventListener(SHOW_NOTES_EVENT, showNotes)
       editor.destroy()
       view.current = null
     }
@@ -182,6 +210,13 @@ export function MarkdownEditor({
   useLayoutEffect(() => {
     view.current?.dispatch({ effects: compartments.focus.reconfigure(focusMode ? focusModeExtension : []) })
   }, [focusMode, compartments, path, initialText])
+
+  useLayoutEffect(() => {
+    const editor = view.current
+    if (!editor) return
+    editor.dispatch({ effects: compartments.notes.reconfigure(notesViewFacet.of(notesView)) })
+    revealSelection(editor)
+  }, [notesView, compartments, path, initialText])
 
   return <div className="editor-host" ref={container} />
 }

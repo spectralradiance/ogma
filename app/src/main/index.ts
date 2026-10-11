@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell, type OpenDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { extname, join, resolve } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
@@ -12,7 +12,7 @@ import { MARGIN_INCHES, normalizePreferences } from '../shared/preferences'
 import type { LeadingHeading } from '../shared/text'
 import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
-import { buildExportMarkdown, collectDocument, writeExport } from './exporter'
+import { buildExportMarkdown, collectDocument, collectFile, writeExport } from './exporter'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
 import { PromptStore } from './prompts'
@@ -27,7 +27,7 @@ import { buildWiktionary } from './wiktionaryBuilder'
 import { WorkspaceWatcher } from './watcher'
 import { addRoot, removeRoot, samePath } from './workspaceRoots'
 import {
-  createFolder, createSection, renameFolder, restoreSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection, type TrashedFile,
+  convertToSingleDocument, createFolder, singleDocumentTarget, createSection, renameFolder, restoreSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection, type TrashedFile,
 } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
@@ -326,6 +326,19 @@ function registerIpc(): void {
     }
     return target
   })
+  // A folder's one-file document: inside it for a workspace root, otherwise next to it.
+  const singleDocumentFor = (folder: string) =>
+    singleDocumentTarget(folder, settings.get().workspaceRoots.some((root) => samePath(root, folder, process.platform)))
+  ipcMain.handle(IPC.foldersSingleDocument, (_event, folder: unknown) => {
+    const target = singleDocumentFor(guard.resolve(folder))
+    return existsSync(target) ? target : null
+  })
+  ipcMain.handle(IPC.foldersConvert, async (_event, folder: unknown) => {
+    const source = guard.resolve(folder)
+    const target = singleDocumentFor(source)
+    if (existsSync(target)) return { path: target, created: false, sections: 0, subfolders: 0 }
+    return convertToSingleDocument(source, target)
+  })
   ipcMain.handle(IPC.foldersRead, (_event, folder: unknown) => readFolder(guard.resolve(folder)))
   ipcMain.handle(IPC.foldersCreate, (_event, parent: unknown, name: unknown) =>
     createFolder(guard.resolve(parent), text(name)))
@@ -385,9 +398,13 @@ function registerIpc(): void {
     const owner = BrowserWindow.fromWebContents(event.sender)
     const choice = owner ? await dialog.showSaveDialog(owner, dialogOptions) : await dialog.showSaveDialog(dialogOptions)
     if (choice.canceled || !choice.filePath) return null
-    const { sections, skipped } = await collectDocument(source, options)
-    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle, options.content === 'notes')
-    await writeExport(choice.filePath, options.format, markdown, text(title), source, printToPdf, settings.get().preferences.export)
+    // A single-file document is exported from the file itself; a folder from its sections.
+    const single = (await stat(source)).isFile()
+    const { sections, skipped, hasTitle } = single
+      ? await collectFile(source, options)
+      : { ...(await collectDocument(source, options)), hasTitle: false }
+    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle && !hasTitle, options.content === 'notes')
+    await writeExport(choice.filePath, options.format, markdown, text(title), single ? dirname(source) : source, printToPdf, settings.get().preferences.export)
     return { path: choice.filePath, sections: sections.length, skipped }
   })
   ipcMain.handle(IPC.exportShow, (_event, file: unknown) => shell.showItemInFolder(text(file)))

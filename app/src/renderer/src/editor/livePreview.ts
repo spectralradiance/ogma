@@ -4,6 +4,7 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 import type { SyntaxNode } from '@lezer/common'
 
 import { dirname, localFileUrl, resolvePath } from '../../../shared/paths'
+import { notesMarkersCollapse } from './notesBlocks'
 import { TableWidget } from './tableWidget'
 
 /**
@@ -469,4 +470,6 @@ const linkClicks = EditorView.domEventHandlers({
   },
 })
 
-export const livePreview: Extension = [livePlugin, tableField, linkClicks, EditorView.editorAttributes.of({ class: 'cm-live' })]
+export const livePreview: Extension = [
+  livePlugin, tableField, linkClicks, notesMarkersCollapse.of(true), EditorView.editorAttributes.of({ class: 'cm-live' }),
+]

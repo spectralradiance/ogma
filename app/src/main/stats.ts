@@ -3,9 +3,10 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { DailyWords, DocumentStats } from '../shared/ipc'
+import { hasNotes, splitWordCounts } from '../shared/document'
 import { countWords } from '../shared/text'
 import { readTextDocument } from './fileService'
-import { parseFileName } from './sections'
+import { parseFileName, parseOrdinal } from './sections'
 import { readFolder } from './workspaceService'
 
 interface StatsFile {
@@ -24,6 +25,18 @@ export function roleOf(file: string): 'notes' | 'output' {
   return parseFileName(path.basename(file)).role === 'output' ? 'output' : 'notes'
 }
 
+/**
+ * Whether a file keeps its notes inline (a single-file document): a plain Markdown
+ * file that is not numbered like a section, or any file that has notes blocks.
+ * Its words are split by those blocks instead of by the file's name.
+ */
+export function usesInlineNotes(file: string, ...texts: (string | null)[]): boolean {
+  const { stem, role } = parseFileName(path.basename(file))
+  if (role !== 'plain') return false
+  if (texts.some((text) => text !== null && hasNotes(text))) return true
+  return /\.md$/i.test(file) && parseOrdinal(stem).ordinal === null
+}
+
 /** Writing statistics in <userData>/stats.json: words written per day and per-document goals. */
 export class WritingStats {
   private readonly file: string
@@ -38,11 +51,19 @@ export class WritingStats {
 
   /** Records the net change in words from one save. */
   recordSave(file: string, before: string | null, after: string): void {
-    const change = countWords(after) - (before === null ? 0 : countWords(before))
-    if (change === 0) return
     const day = localDay(this.now())
     const entry = this.data.days[day] ?? { notes: 0, output: 0 }
-    entry[roleOf(file)] += change
+    if (usesInlineNotes(file, before, after)) {
+      const was = before === null ? { output: 0, notes: 0 } : splitWordCounts(before)
+      const now = splitWordCounts(after)
+      if (now.output === was.output && now.notes === was.notes) return
+      entry.output += now.output - was.output
+      entry.notes += now.notes - was.notes
+    } else {
+      const change = countWords(after) - (before === null ? 0 : countWords(before))
+      if (change === 0) return
+      entry[roleOf(file)] += change
+    }
     this.data.days[day] = entry
     this.save()
   }

@@ -45,6 +45,33 @@ const base = EditorView.theme({
   '.cm-searchMatch': { backgroundColor: 'var(--search-match)' },
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--search-match-selected)' },
   '.cm-focus-dim': { opacity: '0.3', transition: 'opacity 120ms' },
+  // Notes blocks: a quieter, indented block under the text they belong to.
+  '.cm-notes-line': {
+    borderLeft: '3px solid var(--quote-bar)',
+    paddingLeft: '1em !important',
+    color: 'var(--muted)',
+    backgroundColor: 'color-mix(in srgb, var(--surface) 65%, transparent)',
+  },
+  '.cm-notes-top': { paddingTop: '0.3em !important' },
+  '.cm-notes-bottom': { paddingBottom: '0.3em !important' },
+  '.cm-notes-label': {
+    fontFamily: 'var(--font-ui)',
+    fontSize: '0.7em',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: 'var(--muted)',
+  },
+  '.cm-notes-close-collapsed': { height: '0.35em', lineHeight: '0', overflow: 'hidden', paddingBottom: '0 !important' },
+  // The notes view: notes read as plain text; headings inside them stay small next to the section headings.
+  '.cm-notes-flow.cm-md-heading': { fontSize: '1.1em', borderBottom: 'none' },
+  '.cm-notes-line.cm-md-heading': {
+    fontSize: '1.02em',
+    borderBottom: 'none',
+    paddingTop: '0.25em !important',
+    paddingBottom: '0 !important',
+    paddingLeft: '1em !important',
+    color: 'var(--text)',
+  },
 })
 
 const live = EditorView.theme({

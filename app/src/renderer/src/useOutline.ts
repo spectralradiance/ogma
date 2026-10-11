@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { type SectionSummary, summarizeSections } from '../../shared/document'
 import { EMPTY_FILE, type FileOutline, outlineFile, type OutlineSection } from '../../shared/outline'
 import { joinPath, samePath } from '../../shared/paths'
 import type { Heading } from '../../shared/text'
@@ -8,7 +9,7 @@ import type { OpenTarget } from './target'
 
 export type Outline =
   | { kind: 'document'; title: string; folder: string; sections: OutlineSection[] }
-  | { kind: 'file'; title: string; path: string; file: FileOutline }
+  | { kind: 'file'; title: string; path: string; file: FileOutline; sections: SectionSummary[] }
 
 async function readOutline(path: string): Promise<FileOutline> {
   const document = await window.ogma.files.read(path, { allowMissing: true }).catch(() => null)
@@ -18,7 +19,15 @@ async function readOutline(path: string): Promise<FileOutline> {
 async function loadOutline(target: OpenTarget): Promise<Outline | null> {
   if (target.kind === 'file') {
     const name = target.path.split(/[\\/]/).at(-1) ?? target.path
-    return { kind: 'file', title: name, path: target.path, file: await readOutline(target.path) }
+    const document = await window.ogma.files.read(target.path, { allowMissing: true }).catch(() => null)
+    const exists = document !== null && document.mtimeMs !== null
+    return {
+      kind: 'file',
+      title: name,
+      path: target.path,
+      file: exists ? outlineFile(document.text) : EMPTY_FILE,
+      sections: exists ? summarizeSections(document.text) : [],
+    }
   }
   const model = await window.ogma.folders.read(target.folder).catch(() => null)
   if (!model) return null
@@ -43,7 +52,7 @@ const targetKey = (target: OpenTarget | null) => (target ? (target.kind === 'fil
  */
 export function useOutline(
   target: OpenTarget | null,
-  live: { headings: Record<string, Heading[]>; words: Record<string, number | undefined> },
+  live: { headings: Record<string, Heading[]>; words: Record<string, number | undefined>; sections: Record<string, SectionSummary[]> },
   reloadToken: number,
 ): Outline | null {
   const key = targetKey(target)
@@ -72,7 +81,7 @@ export function useOutline(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  const { headings, words } = live
+  const { headings, words, sections: liveSections } = live
   return useMemo(() => {
     const outline = loaded.key === key ? loaded.outline : null
     if (!outline) return null
@@ -83,7 +92,10 @@ export function useOutline(
       // An open editor for a file that is not created yet reports no text; it only exists once typed in.
       return { ...file, exists: file.exists || count > 0, headings: headings[liveKey], words: count }
     }
-    if (outline.kind === 'file') return { ...outline, file: current(outline.path, outline.file) }
+    if (outline.kind === 'file') {
+      const sectionsKey = Object.keys(liveSections).find((candidate) => samePath(candidate, outline.path))
+      return { ...outline, file: current(outline.path, outline.file), sections: sectionsKey ? liveSections[sectionsKey] : outline.sections }
+    }
     return {
       ...outline,
       sections: outline.sections.map((section) => ({
@@ -92,5 +104,5 @@ export function useOutline(
         output: current(section.outputPath, section.output),
       })),
     }
-  }, [loaded, key, headings, words])
+  }, [loaded, key, headings, words, liveSections])
 }

@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url'
 
 import { marked } from 'marked'
 
+import { splitSections } from '../shared/document'
 import type { ExportOptions } from '../shared/ipc'
+import { stripNotes } from '../shared/notes'
 import { DEFAULT_PREFERENCES, type ExportPreferences } from '../shared/preferences'
 import { readTextDocument } from './fileService'
 import { readFolder } from './workspaceService'
@@ -84,6 +86,26 @@ export async function collectDocument(folder: string, options: ExportOptions): P
     else skipped.push(section.title)
   }
   return { sections, skipped }
+}
+
+/**
+ * A single-file document: the output is the text without its notes blocks; the
+ * notes export lists each section's notes under the section's heading.
+ */
+export async function collectFile(file: string, options: ExportOptions): Promise<{ sections: ExportSection[]; skipped: string[]; hasTitle: boolean }> {
+  const { text } = await readTextDocument(file, true)
+  if (options.content === 'output') {
+    const output = stripNotes(text)
+    return { sections: output.trim() ? [{ title: path.basename(file), text: output }] : [], skipped: [], hasTitle: /^\s*#\s+\S/.test(output) }
+  }
+  const sections: ExportSection[] = []
+  const skipped: string[] = []
+  for (const section of splitSections(text)) {
+    const title = section.title ?? path.basename(file)
+    if (section.notes.trim()) sections.push({ title, text: section.notes })
+    else skipped.push(title)
+  }
+  return { sections, skipped, hasTitle: false }
 }
 
 export async function writeExport(

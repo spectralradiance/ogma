@@ -34,6 +34,9 @@ export function StatusBar({ documentInfo, documentLabel, todayWords, panes, onSe
         <span className="status-document">
           {documentLabel && <span className="status-pane">{documentLabel}</span>}
           <span>{documentInfo.words.toLocaleString()} {documentInfo.words === 1 ? 'word' : 'words'}</span>
+          {documentInfo.notesWords > 0 && (
+            <span title="Words inside notes blocks, not counted above">{documentInfo.notesWords.toLocaleString()} in notes</span>
+          )}
           <span title="File encoding">{encodingLabel(documentInfo.format.encoding)}</span>
           <span title="Line endings">
             {lineEndingLabel(documentInfo.format.eol)}{documentInfo.format.mixedEol ? ' (mixed)' : ''}

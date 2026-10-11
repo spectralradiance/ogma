@@ -20,6 +20,8 @@ export interface TreeActions {
   renameFolder: (folder: string, name: string) => Promise<void>
   /** Deletes a section's files, offering Undo afterwards. */
   deleteSection: (folder: string, section: SectionInfo) => Promise<void>
+  /** Saves every open editor; false if something could not be saved. */
+  flush: () => Promise<boolean>
 }
 
 const TreeContext = createContext<TreeActions | null>(null)
@@ -172,7 +174,7 @@ function SectionRow({ folder: identity, section, depth, index, count, drag, onDr
   )
 }
 
-type Editing = 'section' | 'folder' | null
+type Editing = 'section' | 'folder' | 'document' | null
 
 function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemoveRoot }: {
   path: string
@@ -221,6 +223,39 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
       (reason: unknown) => window.alert(errorMessage(reason)),
     )
   }
+  const createDocument = (name: string) => {
+    setEditing(null)
+    const file = joinPath(path, /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`)
+    const title = name.replace(/\.(md|markdown|txt)$/i, '')
+    window.ogma.files.write({
+      path: file,
+      text: `# ${title}\n\n`,
+      format: { encoding: 'utf-8', eol: '\n', mixedEol: false },
+      expectedMtimeMs: null,
+    }).then(
+      (result) => {
+        if (!result.ok) throw new Error(`“${folderName(file)}” already exists here.`)
+        tree.open({ kind: 'file', path: file })
+      },
+      (reason: unknown) => window.alert(errorMessage(reason)),
+    )
+  }
+  /** Writes the folder's sections into one document file next to it, and opens that. */
+  const convert = async () => {
+    if (!(await tree.flush())) {
+      window.alert('Some changes could not be saved. Resolve that before converting.')
+      return
+    }
+    try {
+      const result = await window.ogma.folders.convert(path)
+      tree.open({ kind: 'file', path: result.path })
+      if (result.subfolders > 0) {
+        window.alert(`Converted ${result.sections} sections. The ${result.subfolders} nested folder(s) inside were not included.`)
+      }
+    } catch (reason) {
+      window.alert(errorMessage(reason))
+    }
+  }
   const createFolder = (name: string) => {
     setEditing(null)
     window.ogma.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
@@ -266,6 +301,10 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
         { label: 'Rename', onClick: () => setRenaming(true) },
         { label: 'New section', onClick: () => { expand(); setEditing('section') } },
         { label: 'New folder', onClick: () => { expand(); setEditing('folder') } },
+        { label: 'New document', onClick: () => { expand(); setEditing('document') } },
+        ...(model && model.sections.length > 0
+          ? ['separator' as const, { label: 'Convert to a single document', onClick: () => void convert(), title: 'Writes one Markdown file with a heading per section and the notes inline; the folder is kept' }]
+          : []),
         ...(onRemoveRoot ? ['separator' as const, { label: 'Remove from workspace', onClick: onRemoveRoot }] : []),
       ]}>
       <div className={`tree-row-wrap${depth === 0 ? ' tree-root' : ''}`}>
@@ -279,7 +318,10 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
             setOpen(true)
             void (async () => {
               const current = model ?? await window.ogma.folders.read(path).catch(() => null)
-              if (current && current.sections.length > 0) tree.open(openDocument(identity, null))
+              // Once a folder has been made into one document, that file is what opens.
+              const single = current && current.sections.length > 0 ? await window.ogma.folders.singleDocument(path).catch(() => null) : null
+              if (single) tree.open({ kind: 'file', path: single })
+              else if (current && current.sections.length > 0) tree.open(openDocument(identity, null))
               else if (wasOpen) setOpen(false)
             })()
           }}
@@ -313,6 +355,9 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
       {open && (
         <ul className="tree">
           {error && <li className="tree-note" style={indent(depth, 18)}>{error}</li>}
+          {editing === 'document' && (
+            <NameInput initial="" placeholder="Document name" depth={depth + 1} onSubmit={createDocument} onCancel={() => setEditing(null)} />
+          )}
           {editing === 'folder' && (
             <NameInput initial="" placeholder="Folder name" depth={depth + 1} onSubmit={createFolder} onCancel={() => setEditing(null)} />
           )}
@@ -323,7 +368,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
                 className={`tree-row tree-docnote${fileActive(name) ? ' selected' : ''}`}
                 style={indent(depth + 1, 18)}
                 onClick={() => tree.open({ kind: 'file', path: joinPath(path, name) })}
-                title="Notes for this whole document"
+                title="Open this file"
               >
                 <span className="tree-label">{name}</span>
               </button>

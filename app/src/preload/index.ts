@@ -42,6 +42,8 @@ const api: OgmaApi = {
     read: (path) => ipcRenderer.invoke(IPC.foldersRead, path),
     create: (parent, name) => ipcRenderer.invoke(IPC.foldersCreate, parent, name),
     rename: (path, name) => ipcRenderer.invoke(IPC.foldersRename, path, name),
+    convert: (path) => ipcRenderer.invoke(IPC.foldersConvert, path),
+    singleDocument: (path) => ipcRenderer.invoke(IPC.foldersSingleDocument, path),
   },
   dictionary: {
     status: () => ipcRenderer.invoke(IPC.dictionaryStatus),

@@ -3,9 +3,11 @@ import { type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, 
 import { folderName } from '../../shared/format'
 import type { TextDocument, TextFormat } from '../../shared/ipc'
 import { dirname } from '../../shared/paths'
-import { countWords, extractHeadings, type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
+import { replaceSectionOutput, type SectionSummary, sectionAtLine, splitSections, splitWordCounts, summarizeSections } from '../../shared/document'
+import { extractHeadings, type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
 import { onDiskChange, touchesFile } from './changes'
 import { MarkdownEditor, type MarkdownEditorHandle, type WordInContext } from './editor/MarkdownEditor'
+import type { NotesView } from './editor/notesBlocks'
 import { HistoryDialog } from './HistoryDialog'
 import { errorMessage } from './target'
 import { History, X } from 'lucide-react'
@@ -24,8 +26,19 @@ export const SAVE_LABEL: Record<SaveState, string> = {
 }
 
 export interface DocumentInfo {
+  /** Words outside notes blocks: the text itself. */
   words: number
+  /** Words inside notes blocks. */
+  notesWords: number
   format: TextFormat
+}
+
+/** The section at the cursor of a single-file document. */
+export interface CurrentSection {
+  index: number
+  title: string | null
+  output: string
+  notes: string
 }
 
 export interface DocumentPaneHandle {
@@ -37,6 +50,10 @@ export interface DocumentPaneHandle {
   getText(): string
   getSelection(): string
   replaceAll(text: string): void
+  /** The section the cursor is in (a heading and the text under it). */
+  currentSection(): CurrentSection | null
+  /** Replaces the output of the section at the cursor, keeping its heading and notes. */
+  replaceCurrentSectionOutput(text: string): boolean
   openHistory(): void
 }
 
@@ -53,9 +70,14 @@ interface DocumentPaneProps {
   className?: string
   live: boolean
   focusMode: boolean
+  /** Single-file documents: show the text alone, the notes alone, or both. */
+  notesView?: NotesView
+  onShowNotes?: () => void
   headerActions?: ReactNode
   onInfo: (info: DocumentInfo | null) => void
   onHeadings?: (headings: Heading[]) => void
+  /** The document's sections (split at its headings) with their sizes, as you type. */
+  onSections?: (sections: SectionSummary[]) => void
   onDirtyChange: (dirty: boolean) => void
   onFocus?: () => void
   onSelectWord?: (word: WordInContext) => void
@@ -75,8 +97,8 @@ interface DiskState {
 }
 
 export function DocumentPane({
-  ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, headerActions,
-  onInfo, onHeadings, onDirtyChange, onFocus, onSelectWord, onSaveState, onLeadingHeading, onClose,
+  ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, notesView, onShowNotes, headerActions,
+  onInfo, onHeadings, onSections, onDirtyChange, onFocus, onSelectWord, onSaveState, onLeadingHeading, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -103,9 +125,9 @@ export function DocumentPane({
 
   // The parent's latest callbacks, read through a ref so that their identity
   // changing on every parent render does not re-run the file load.
-  const parent = useRef({ onInfo, onHeadings, onDirtyChange, onSaveState, onLeadingHeading })
+  const parent = useRef({ onInfo, onHeadings, onSections, onDirtyChange, onSaveState, onLeadingHeading })
   useLayoutEffect(() => {
-    parent.current = { onInfo, onHeadings, onDirtyChange, onSaveState, onLeadingHeading }
+    parent.current = { onInfo, onHeadings, onSections, onDirtyChange, onSaveState, onLeadingHeading }
   })
 
   const updateState = useCallback((next: SaveState) => {
@@ -116,8 +138,10 @@ export function DocumentPane({
   /** Stats for the whole file (heading included), so they match what is on disk. */
   const reportStats = useCallback((body: string, format: TextFormat) => {
     const text = head.current + body
-    parent.current.onInfo({ words: countWords(text), format })
+    const counts = splitWordCounts(text)
+    parent.current.onInfo({ words: counts.output, notesWords: counts.notes, format })
     parent.current.onHeadings?.(extractHeadings(text))
+    parent.current.onSections?.(summarizeSections(text))
   }, [])
 
   const applyDocument = useCallback((loadedDocument: TextDocument) => {
@@ -200,7 +224,8 @@ export function DocumentPane({
         setExists(true)
         setSaveError(null)
         if (result.notice) setNotice(result.notice)
-        parent.current.onInfo({ words: countWords(text), format: result.format })
+        const counts = splitWordCounts(text)
+        parent.current.onInfo({ words: counts.output, notesWords: counts.notes, format: result.format })
         if (version.current === target) {
           updateState('saved')
         } else {
@@ -231,6 +256,24 @@ export function DocumentPane({
     getText: () => editor.current?.getText() ?? '',
     getSelection: () => editor.current?.getSelection() ?? '',
     replaceAll: (text) => editor.current?.replaceAll(text),
+    currentSection: () => {
+      const handle = editor.current
+      if (!handle) return null
+      const sections = splitSections(handle.getText())
+      const index = sectionAtLine(sections, handle.cursorLine())
+      const section = sections[index]
+      return section ? { index, title: section.title, output: section.output, notes: section.notes } : null
+    },
+    replaceCurrentSectionOutput: (text) => {
+      const handle = editor.current
+      if (!handle) return false
+      const current = handle.getText()
+      const sections = splitSections(current)
+      const next = replaceSectionOutput(current, sectionAtLine(sections, handle.cursorLine()), text)
+      if (next === null) return false
+      handle.replaceAll(next)
+      return true
+    },
     openHistory: () => setHistoryOpen(true),
   }), [save])
 
@@ -337,6 +380,8 @@ export function DocumentPane({
           autoHeight={compact}
           live={live}
           focusMode={focusMode}
+          notesView={notesView}
+          onShowNotes={onShowNotes}
           onDocChanged={onDocChanged}
           onSave={() => void save()}
           onBlur={() => void save()}
