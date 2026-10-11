@@ -1371,7 +1371,7 @@ button.primary {
   border-color: var(--accent);
 }
 
-/* Modals: draft review and AI settings */
+/* Modals: history and AI settings */
 
 .modal-backdrop {
   position: fixed;
@@ -1429,11 +1429,6 @@ button.primary {
   gap: 6px;
 }
 
-.review-count {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .review-body {
   flex: 1;
   min-height: 0;
@@ -1472,27 +1467,6 @@ button.primary {
 
 .review-after {
   background: color-mix(in srgb, var(--ok) 14%, transparent);
-}
-
-.review-change.rejected .review-after {
-  opacity: 0.35;
-  text-decoration: line-through;
-}
-
-.review-change.rejected .review-before {
-  color: var(--text);
-  text-decoration: none;
-  background: transparent;
-}
-
-.review-toggle {
-  display: flex;
-  flex: none;
-  gap: 4px;
-  align-items: center;
-  font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .settings {

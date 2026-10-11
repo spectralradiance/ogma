@@ -78,7 +78,7 @@ Open the **AI** panel (button in the document header, or Ctrl+J). It has two vie
 
 **Tools** are one-shot tasks:
 
-- **Draft output from notes** — for the focused section, drafts the output from its notes, its current output and the document notes (outline, sources). You review each changed paragraph and apply the ones you keep; applying is one undoable edit.
+- **Draft output from notes** — for the focused section, drafts the output from its notes, its current output and the document notes (outline, sources). When it finishes, the draft appears in that section's editor as suggested changes, word by word where a paragraph was edited and whole where it was rewritten. Deletions are struck through and insertions highlighted, each with ✓ / ✕; the bar above the editor has **Next**, **Reject all** and **Accept all**. Nothing changes until you accept, and Ctrl+Z undoes an accept or reject (bringing the suggestion back). Keep writing meanwhile: suggestions follow the text, and one you type over is dropped. The text as it was before the draft is saved to History first, labelled "Before AI: …". **Suggest again** in the AI panel re-places the draft if you dismissed it or the editor was closed.
 - **Analyze** — the selection or the focused file: local measurements (reading ease, sentence length and spread, repeated words) plus the model's notes on tone, structure, readability and style.
 - **Analyze structure** — order, balance, gaps and overlaps across the whole document, from its outline, section sizes and opening lines.
 - **Word choice** — alternatives for the word at the cursor; ↵ replaces it.
@@ -100,7 +100,7 @@ Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%
 
 - **Search** (sidebar tab, Ctrl+Shift+F) looks through every text file in the workspace folders. The index is built the first time you open Search and then kept current as files change. *Related to the current passage* lists paragraphs elsewhere that share the focused passage's key words.
 - **Export** (Settings → Export, Ctrl+,) writes the open document's outputs, or its notes, in section order as PDF, HTML or Markdown.
-- **History** (⟲ on any editor) lists earlier versions of that file — saved automatically at most every 10 minutes while you edit, plus snapshots you take — with a diff against the current text and Restore. Versions are kept in `%APPDATA%\Ogma\snapshots`, never in your folders.
+- **History** (⟲ on any editor) lists earlier versions of that file — saved automatically at most every 10 minutes while you edit, plus snapshots you take and a "Before AI" version whenever the AI suggests changes — with a diff against the current text and Restore. Versions are kept in `%APPDATA%\Ogma\snapshots`, never in your folders.
 - **Stats** (document header) shows notes and output word counts per section, an output goal with progress, and words written per day; today's net count is in the status bar.
 
 ## Editing safety

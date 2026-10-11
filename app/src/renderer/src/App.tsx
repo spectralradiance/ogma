@@ -444,6 +444,7 @@ export function App() {
           notes: current.notes,
           output: current.output,
           documentNotes: preface || '(none)',
+          target: { path: active!.path, index: current.index },
         }
       }
       const read = async (path: string) => panes.current.get(path)?.getText()
@@ -459,17 +460,13 @@ export function App() {
         const text = await read(joinPath(folder, name))
         return `### ${name}\n${text.slice(0, 12_000)}`
       }))
-      return { document: documentTitle, section: section.title, notes, output, documentNotes: documentNotes.join('\n\n') || '(none)' }
+      return {
+        document: documentTitle, section: section.title, notes, output, documentNotes: documentNotes.join('\n\n') || '(none)',
+        target: { path: section.outputPath, index: null },
+      }
     },
     currentWord: () => (active ? panes.current.get(active.path)?.currentWord() ?? null : null),
-    applyOutput: (text) => {
-      if (!active?.section) return active ? panes.current.get(active.path)?.replaceCurrentSectionOutput(text) ?? false : false
-      const path = active?.section?.outputPath
-      const handle = path ? panes.current.get(path) : undefined
-      if (!handle) return false
-      handle.replaceAll(text)
-      return true
-    },
+    suggestOutput: (target, text, label) => panes.current.get(target.path)?.propose(text, label, target.index) ?? null,
     replaceWord: (word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false),
     outline: outline?.kind === 'document'
       ? { title: outline.title, sections: outline.sections.length, markdown: () => outlineMarkdown(outline.title, outline.sections, { notes: true, leads: true }) }

@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { type ReactNode, useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from 'react'
 
 import type { AiEvent, AiMode, AiSettingsState, AiTask } from '../../shared/ai'
 import { PROVIDERS } from '../../shared/ai'
@@ -8,7 +8,6 @@ import type { WordInContext } from './editor/MarkdownEditor'
 import { AiServerLine } from './AiServer'
 import { chatStore } from './chatStore'
 import { readPref, writePref } from './prefs'
-import { SynthesisReview } from './SynthesisReview'
 import { errorMessage } from './target'
 import { Settings } from 'lucide-react'
 
@@ -18,6 +17,8 @@ export interface SectionMaterial {
   notes: string
   output: string
   documentNotes: string
+  /** Where the draft goes: an output file, or section `index` of a single-file document. */
+  target: { path: string; index: number | null }
 }
 
 /** What the AI panel can read from and write to, supplied by the app. */
@@ -27,7 +28,8 @@ export interface AiWorkspace {
   readActive(): { text: string; selection: string; document: string; section: string } | null
   readSection(): Promise<SectionMaterial | null>
   currentWord(): WordInContext | null
-  applyOutput(text: string): boolean
+  /** Shows a draft as suggested changes in that editor; how many, or null if it is no longer open. */
+  suggestOutput(target: SectionMaterial['target'], text: string, label: string): number | null
   replaceWord(word: string): boolean
   /** The open double document's outline, for structure analysis. */
   outline: { title: string; sections: number; markdown(): string } | null
@@ -45,6 +47,8 @@ interface RunState {
   metrics?: TextMetrics
   material?: SectionMaterial
   word?: string
+  /** A finished draft has been shown in its editor as suggestions. */
+  placed?: boolean
 }
 
 function reduce(state: RunState, event: AiEvent): RunState {
@@ -107,10 +111,11 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
   const [instruction, setInstruction] = useState<(typeof WORD_INSTRUCTIONS)[number]['id']>('vary')
   const [run, setRun] = useState<RunState | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [review, setReview] = useState(false)
   const [view, setViewState] = useState<PanelView>(() => (readPref('aiView') === 'chat' ? 'chat' : 'tools'))
   const log = useRef(new Map<string, AiEvent[]>())
   const current = useRef<string | null>(null)
+  // Draft runs still streaming, by run id: where their result goes once done.
+  const drafts = useRef(new Map<string, SectionMaterial>())
 
   const refreshSettings = useCallback(() => window.ogma.ai.settings().then(setSettings), [])
 
@@ -118,22 +123,48 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
     void refreshSettings()
   }, [refreshSettings])
 
+  /** Puts a finished draft into its editor as suggestions, after a restore point is saved to History. */
+  const placeDraft = (runId: string, material: SectionMaterial, text: string) => {
+    drafts.current.delete(runId)
+    const count = workspace.suggestOutput(material.target, `${text.trim()}\n`, `Draft output · ${material.section}`)
+    setRun((state) => (state && state.id === runId ? { ...state, placed: count !== null } : state))
+    setMessage(count === null
+      ? 'That editor is no longer open, so the draft is not shown there. Open it and click “Suggest in the editor”.'
+      : count === 0
+        ? 'The draft matches the current output; there is nothing to change.'
+        : `${count} suggested change${count === 1 ? '' : 's'} in the editor: ✓ or ✕ on each, or Accept all. The text before is in History.`)
+  }
+
+  const draftFinished = useEffectEvent((runId: string) => {
+    const material = drafts.current.get(runId)
+    const text = (log.current.get(runId) ?? []).map((event) => (event.type === 'text' ? event.text : '')).join('')
+    if (material && text.trim()) placeDraft(runId, material, text)
+  })
+
   // Events can arrive before run() resolves with the id, so every run's events are kept.
   useEffect(() => window.ogma.ai.onEvent((runId, event) => {
     const events = log.current.get(runId) ?? []
     events.push(event)
     log.current.set(runId, events)
-    if (runId === current.current) setRun((state) => (state && state.id === runId ? reduce(state, event) : state))
+    if (runId === current.current) {
+      setRun((state) => (state && state.id === runId ? reduce(state, event) : state))
+      if (event.type === 'done') draftFinished(runId)
+    }
   }), [])
 
   const start = async (task: AiTask, variables: Record<string, string>, extra: Partial<RunState>) => {
     setMessage(null)
-    setReview(false)
     try {
       const id = await window.ogma.ai.run({ task, variables, profileId: profileId || undefined })
       current.current = id
       const initial: RunState = { id, task, status: 'running', text: '', start: null, notices: [], error: null, usage: null, ...extra }
-      setRun((log.current.get(id) ?? []).reduce(reduce, initial))
+      const state = (log.current.get(id) ?? []).reduce(reduce, initial)
+      setRun(state)
+      if (extra.material) {
+        drafts.current.set(id, extra.material)
+        // A run that finished before its id came back missed the listener's hand-off.
+        if (state.status === 'done' && state.text.trim()) placeDraft(id, extra.material, state.text)
+      }
     } catch (error) {
       setMessage(errorMessage(error))
     }
@@ -149,7 +180,8 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
       setMessage('This section’s notes are empty, so there is nothing to draft from.')
       return
     }
-    void start('synthesize', { ...material }, { material })
+    const { document, section, notes, output, documentNotes } = material
+    void start('synthesize', { document, section, notes, output, documentNotes }, { material })
   }
 
   const analyze = () => {
@@ -258,7 +290,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
 
           <div className="ai-actions">
             <button type="button" onClick={() => void draftOutput()} disabled={running || !workspace.focus?.inSection}
-              title="Write this section’s output from its notes; you review every change before it is applied">
+              title="Write this section’s output from its notes; the changes appear in the editor as suggestions to accept or reject">
               Draft output from notes
             </button>
             <button type="button" onClick={analyze} disabled={running} title="Selection, or the whole focused file">
@@ -306,7 +338,10 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
               )}
 
               {run.task === 'synthesize' && run.status === 'done' && run.material && run.text.trim() && (
-                <button type="button" className="primary" onClick={() => setReview(true)}>Review changes…</button>
+                <button type="button" onClick={() => run.material && placeDraft(run.id, run.material, run.text)}
+                  title="Show the draft as suggested changes again, replacing any still waiting">
+                  {run.placed ? 'Suggest again' : 'Suggest in the editor'}
+                </button>
               )}
               {run.error && <p className="lexical-message status-error">{run.error}</p>}
               {run.usage && (run.usage.input !== null || run.usage.output !== null) && (
@@ -317,21 +352,6 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
         </div>
       )}
 
-      {review && run?.material && (
-        <SynthesisReview
-          title={run.material.section}
-          before={run.material.output}
-          after={run.text.trim() + '\n'}
-          provenance={provenance}
-          onClose={() => setReview(false)}
-          onApply={(text) => {
-            setReview(false)
-            setMessage(workspace.applyOutput(text)
-              ? 'Applied to the output. It saves automatically; Ctrl+Z in the output undoes it.'
-              : 'The output editor is no longer open, so nothing was applied.')
-          }}
-        />
-      )}
     </div>
   )
 }

@@ -52,8 +52,12 @@ export interface DocumentPaneHandle {
   replaceAll(text: string): void
   /** The section the cursor is in (a heading and the text under it). */
   currentSection(): CurrentSection | null
-  /** Replaces the output of the section at the cursor, keeping its heading and notes. */
-  replaceCurrentSectionOutput(text: string): boolean
+  /**
+   * Shows `text` as suggested changes to the whole file (or to section `index`'s output),
+   * after saving the current text as a "Before AI" version in History. Returns how many
+   * changes were suggested, or null if that section no longer exists.
+   */
+  propose(text: string, label: string, index?: number | null): number | null
   openHistory(): void
 }
 
@@ -264,18 +268,21 @@ export function DocumentPane({
       const section = sections[index]
       return section ? { index, title: section.title, output: section.output, notes: section.notes } : null
     },
-    replaceCurrentSectionOutput: (text) => {
+    propose: (text, label, index = null) => {
       const handle = editor.current
-      if (!handle) return false
+      if (!handle) return null
       const current = handle.getText()
-      const sections = splitSections(current)
-      const next = replaceSectionOutput(current, sectionAtLine(sections, handle.cursorLine()), text)
-      if (next === null) return false
-      handle.replaceAll(next)
-      return true
+      const next = index === null ? text : replaceSectionOutput(current, index, text)
+      if (next === null) return null
+      const count = handle.propose(next, label)
+      // A restore point from before the AI touched anything, in case the writer accepts and regrets it.
+      if (count > 0 && (head.current + current).trim()) {
+        void window.ogma.history.snapshot(path, head.current + current, `Before AI: ${label}`).catch(() => {})
+      }
+      return count
     },
     openHistory: () => setHistoryOpen(true),
-  }), [save])
+  }), [save, path])
 
   useEffect(() => {
     saveLater.current = () => {

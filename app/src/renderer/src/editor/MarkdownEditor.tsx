@@ -12,6 +12,7 @@ import { dictionaryHover } from './dictionaryHover'
 import { focusMode as focusModeExtension } from './focusMode'
 import { documentPath, livePreview } from './livePreview'
 import { addOrJumpToNotes, notesBlocks, notesView as notesViewFacet, type NotesView, revealSelection, SHOW_NOTES_EVENT } from './notesBlocks'
+import { proposeText, suggestions, suggestionsOf } from './suggestions'
 import { autoHeightTheme, editorTheme } from './theme'
 
 export interface MarkdownEditorHandle {
@@ -28,6 +29,10 @@ export interface MarkdownEditorHandle {
   replaceAll(text: string): void
   /** The 1-based line the cursor is on. */
   cursorLine(): number
+  /** Shows the edits that would turn the text into `text` as suggestions to accept or reject; returns how many. */
+  propose(text: string, label: string): number
+  /** How many suggestions are waiting. */
+  pendingSuggestions(): number
 }
 
 export interface WordInContext {
@@ -144,6 +149,8 @@ export function MarkdownEditor({
       const editor = view.current
       return editor ? editor.state.doc.lineAt(editor.state.selection.main.head).number : 1
     },
+    propose: (text, label) => (view.current ? proposeText(view.current, text, label) : 0),
+    pendingSuggestions: () => (view.current ? suggestionsOf(view.current.state).length : 0),
   }), [initialText])
 
   useLayoutEffect(() => {
@@ -163,6 +170,7 @@ export function MarkdownEditor({
         compartments.focus.of([]),
         compartments.notes.of([]),
         notesBlocks,
+        suggestions,
         editorTheme,
         autoHeight ? autoHeightTheme : ([] as Extension),
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off' }),
