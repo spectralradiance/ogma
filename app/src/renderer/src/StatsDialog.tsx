@@ -4,6 +4,8 @@ import type { DailyWords, DocumentStats } from '../../shared/ipc'
 import { errorMessage } from './target'
 import { X } from 'lucide-react'
 
+import { Modal } from './Modal'
+
 interface StatsDialogProps {
   folder: string
   title: string
@@ -53,14 +55,6 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
     void window.ogma.stats.daily(14).then(setDays)
   }, [folder])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const saveGoal = () => {
     const words = Number(goal.replace(/[^\d]/g, ''))
     window.ogma.stats.setGoal(folder, words > 0 ? words : null).then(setStats, (reason: unknown) => setError(errorMessage(reason)))
@@ -71,64 +65,62 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
   const today = days.at(-1)
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="modal stats-dialog" role="dialog" aria-label={`Statistics for ${title}`}>
-        <header className="modal-header">
-          <h2>Statistics · {title}</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
-        </header>
-        <div className="settings-body">
-          {error && <p className="lexical-message status-error">{error}</p>}
-          {stats && (
-            <div className="settings-section">
-              <div className="stats-summary">
-                <div><strong>{stats.outputWords.toLocaleString()}</strong><span>output words</span></div>
-                <div><strong>{stats.notesWords.toLocaleString()}</strong><span>notes words</span></div>
-                <div><strong>{stats.sections.filter((section) => section.outputWords > 0).length}/{stats.sections.length}</strong><span>sections with output</span></div>
-              </div>
-
-              <div className="stats-goal">
-                <label>
-                  Output goal
-                  <input value={goal} inputMode="numeric" placeholder="e.g. 5000" onChange={(event) => setGoal(event.target.value)}
-                    onBlur={saveGoal} onKeyDown={(event) => { if (event.key === 'Enter') saveGoal() }} />
-                  words
-                </label>
-                {progress !== null && (
-                  <div className="goal-bar" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
-                    <div style={{ width: `${progress * 100}%` }} />
-                    <span>{Math.round(progress * 100)}% · {Math.max(0, stats.goal! - stats.outputWords).toLocaleString()} to go</span>
-                  </div>
-                )}
-              </div>
-
-              <table className="settings-table stats-table">
-                <thead>
-                  <tr><th /><th>Section</th><th>Notes</th><th>Output</th><th>Last changed</th></tr>
-                </thead>
-                <tbody>
-                  {stats.sections.map((section) => (
-                    <tr key={section.stem}>
-                      <td className="section-ordinal">{section.ordinal}</td>
-                      <td><button type="button" className="link-button" onClick={() => onOpenSection(section.stem)}>{section.title}</button></td>
-                      <td>{section.notesWords.toLocaleString()}</td>
-                      <td>{section.outputWords ? section.outputWords.toLocaleString() : <span className="lexical-hint">none yet</span>}</td>
-                      <td className="lexical-hint">{section.modified ? new Date(section.modified).toLocaleDateString() : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <h3 className="stats-heading">Words written, last two weeks <span className="lexical-hint">(all documents)</span></h3>
-              <DailyChart days={days} />
-              <p className="lexical-hint">
-                Today {today ? `${today.notes + today.output >= 0 ? '+' : ''}${(today.notes + today.output).toLocaleString()}` : '0'} ·
-                {' '}last 7 days {week >= 0 ? '+' : ''}{week.toLocaleString()} (net: cuts count as negative)
-              </p>
+    <Modal label={`Statistics for ${title}`} className="stats-dialog" onClose={onClose}>
+      <header className="modal-header">
+        <h2>Statistics · {title}</h2>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
+      </header>
+      <div className="settings-body">
+        {error && <p className="lexical-message status-error">{error}</p>}
+        {stats && (
+          <div className="settings-section">
+            <div className="stats-summary">
+              <div><strong>{stats.outputWords.toLocaleString()}</strong><span>output words</span></div>
+              <div><strong>{stats.notesWords.toLocaleString()}</strong><span>notes words</span></div>
+              <div><strong>{stats.sections.filter((section) => section.outputWords > 0).length}/{stats.sections.length}</strong><span>sections with output</span></div>
             </div>
-          )}
-        </div>
-      </section>
-    </div>
+
+            <div className="stats-goal">
+              <label>
+                Output goal
+                <input value={goal} inputMode="numeric" placeholder="e.g. 5000" onChange={(event) => setGoal(event.target.value)}
+                  onBlur={saveGoal} onKeyDown={(event) => { if (event.key === 'Enter') saveGoal() }} />
+                words
+              </label>
+              {progress !== null && (
+                <div className="goal-bar" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+                  <div style={{ width: `${progress * 100}%` }} />
+                  <span>{Math.round(progress * 100)}% · {Math.max(0, stats.goal! - stats.outputWords).toLocaleString()} to go</span>
+                </div>
+              )}
+            </div>
+
+            <table className="settings-table stats-table">
+              <thead>
+                <tr><th /><th>Section</th><th>Notes</th><th>Output</th><th>Last changed</th></tr>
+              </thead>
+              <tbody>
+                {stats.sections.map((section) => (
+                  <tr key={section.stem}>
+                    <td className="section-ordinal">{section.ordinal}</td>
+                    <td><button type="button" className="link-button" onClick={() => onOpenSection(section.stem)}>{section.title}</button></td>
+                    <td>{section.notesWords.toLocaleString()}</td>
+                    <td>{section.outputWords ? section.outputWords.toLocaleString() : <span className="lexical-hint">none yet</span>}</td>
+                    <td className="lexical-hint">{section.modified ? new Date(section.modified).toLocaleDateString() : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <h3 className="stats-heading">Words written, last two weeks <span className="lexical-hint">(all documents)</span></h3>
+            <DailyChart days={days} />
+            <p className="lexical-hint">
+              Today {today ? `${today.notes + today.output >= 0 ? '+' : ''}${(today.notes + today.output).toLocaleString()}` : '0'} ·
+              {' '}last 7 days {week >= 0 ? '+' : ''}{week.toLocaleString()} (net: cuts count as negative)
+            </p>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }

@@ -4,6 +4,8 @@ import type { ExportOptions, ExportOutcome } from '../../shared/ipc'
 import { errorMessage } from './target'
 import { X } from 'lucide-react'
 
+import { Modal } from './Modal'
+
 interface ExportDialogProps {
   folder: string
   title: string
@@ -25,14 +27,6 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
     })))
   }, [])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const run = async () => {
     setBusy(true)
     setError(null)
@@ -48,48 +42,46 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="modal export-dialog" role="dialog" aria-label="Export document">
-        <header className="modal-header">
-          <h2>Export · {title}</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
-        </header>
-        <div className="settings-body">
-          <div className="settings-section">
-            <fieldset className="export-choice">
-              <legend>Content</legend>
-              <label><input type="radio" checked={options.content === 'output'} onChange={() => setOptions({ ...options, content: 'output' })} /> Output (the finished text)</label>
-              <label><input type="radio" checked={options.content === 'notes'} onChange={() => setOptions({ ...options, content: 'notes' })} /> Notes</label>
-            </fieldset>
-            <fieldset className="export-choice">
-              <legend>Format</legend>
-              <label><input type="radio" checked={options.format === 'pdf'} onChange={() => setOptions({ ...options, format: 'pdf' })} /> PDF</label>
-              <label><input type="radio" checked={options.format === 'html'} onChange={() => setOptions({ ...options, format: 'html' })} /> HTML page</label>
-              <label><input type="radio" checked={options.format === 'md'} onChange={() => setOptions({ ...options, format: 'md' })} /> Markdown</label>
-            </fieldset>
-            <label>
-              <input type="checkbox" checked={options.includeTitle} onChange={(event) => setOptions({ ...options, includeTitle: event.target.checked })} />
-              {' '}Start with the document title
-            </label>
-            <p className="lexical-hint">
-              Sections are joined in order; a section without a heading continues the one before (notes exports give every section its title).
-              Empty sections are left out. Fonts, page size and margins are in Settings → Export.
+    <Modal label="Export document" className="export-dialog" onClose={onClose}>
+      <header className="modal-header">
+        <h2>Export · {title}</h2>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
+      </header>
+      <div className="settings-body">
+        <div className="settings-section">
+          <fieldset className="export-choice">
+            <legend>Content</legend>
+            <label><input type="radio" checked={options.content === 'output'} onChange={() => setOptions({ ...options, content: 'output' })} /> Output (the finished text)</label>
+            <label><input type="radio" checked={options.content === 'notes'} onChange={() => setOptions({ ...options, content: 'notes' })} /> Notes</label>
+          </fieldset>
+          <fieldset className="export-choice">
+            <legend>Format</legend>
+            <label><input type="radio" checked={options.format === 'pdf'} onChange={() => setOptions({ ...options, format: 'pdf' })} /> PDF</label>
+            <label><input type="radio" checked={options.format === 'html'} onChange={() => setOptions({ ...options, format: 'html' })} /> HTML page</label>
+            <label><input type="radio" checked={options.format === 'md'} onChange={() => setOptions({ ...options, format: 'md' })} /> Markdown</label>
+          </fieldset>
+          <label>
+            <input type="checkbox" checked={options.includeTitle} onChange={(event) => setOptions({ ...options, includeTitle: event.target.checked })} />
+            {' '}Start with the document title
+          </label>
+          <p className="lexical-hint">
+            Sections are joined in order; a section without a heading continues the one before (notes exports give every section its title).
+            Empty sections are left out. Fonts, page size and margins are in Settings → Export.
+          </p>
+          {error && <p className="lexical-message status-error">{error}</p>}
+          {outcome && (
+            <p className="lexical-message">
+              Exported {outcome.sections} section{outcome.sections === 1 ? '' : 's'} to {outcome.path}
+              {outcome.skipped.length > 0 && <> (left out, nothing written yet: {outcome.skipped.join(', ')})</>}.{' '}
+              <button type="button" className="link-button" onClick={() => void window.ogma.exports.showInFolder(outcome.path)}>Show in folder</button>
             </p>
-            {error && <p className="lexical-message status-error">{error}</p>}
-            {outcome && (
-              <p className="lexical-message">
-                Exported {outcome.sections} section{outcome.sections === 1 ? '' : 's'} to {outcome.path}
-                {outcome.skipped.length > 0 && <> (left out, nothing written yet: {outcome.skipped.join(', ')})</>}.{' '}
-                <button type="button" className="link-button" onClick={() => void window.ogma.exports.showInFolder(outcome.path)}>Show in folder</button>
-              </p>
-            )}
-          </div>
+          )}
         </div>
-        <footer className="modal-footer">
-          <button type="button" onClick={onClose}>Close</button>
-          <button type="button" className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Exporting…' : 'Export…'}</button>
-        </footer>
-      </section>
-    </div>
+      </div>
+      <footer className="modal-footer">
+        <button type="button" onClick={onClose}>Close</button>
+        <button type="button" className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Exporting…' : 'Export…'}</button>
+      </footer>
+    </Modal>
   )
 }

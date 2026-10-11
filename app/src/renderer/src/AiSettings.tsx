@@ -7,6 +7,7 @@ import type { ProviderStatus, SidecarStatus } from '../../shared/ipc'
 import { AiServerSettings } from './AiServer'
 import { errorMessage } from './target'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
+import { Modal } from './Modal'
 
 type Tab = 'server' | 'keys' | 'profiles' | 'routing' | 'prompts'
 
@@ -34,14 +35,6 @@ export function AiSettings({ status, onClose }: AiSettingsProps) {
     void window.ogma.ai.settings().then(setState)
   }, [])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const guard = (promise: Promise<AiSettingsState>) => {
     setError(null)
     promise.then(setState, (reason: unknown) => setError(errorMessage(reason)))
@@ -49,36 +42,34 @@ export function AiSettings({ status, onClose }: AiSettingsProps) {
   const saveConfig = (config: AiConfig) => guard(window.ogma.ai.saveConfig(config))
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="modal settings" role="dialog" aria-label="AI settings">
-        <header className="modal-header">
-          <h2>AI settings</h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
-        </header>
-        <nav className="lexical-tabs" role="tablist">
-          {(['server', 'keys', 'profiles', 'routing', 'prompts'] as Tab[]).map((id) => (
-            <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
-              {{ server: 'Server', keys: 'Keys', profiles: 'Models', routing: 'Routing', prompts: 'Prompts' }[id]}
-            </button>
-          ))}
-        </nav>
-        <div className="settings-body">
-          {error && <p className="lexical-message status-error">{error}</p>}
-          {tab === 'server' && <AiServerSettings status={status} />}
-          {!state && tab !== 'server' && <p className="lexical-message">Loading…</p>}
-          {state && tab === 'keys' && <KeysTab state={state} onChange={guard} />}
-          {state && tab === 'profiles' && <ProfilesTab config={state.config} providers={providers} onSave={saveConfig} />}
-          {state && tab === 'routing' && <RoutingTab config={state.config} onSave={saveConfig} />}
-          {state && tab === 'prompts' && (
-            <div className="settings-section">
-              <p>Each AI task uses an editable Markdown template: the system prompt, a line <code>=== user ===</code>, then the message, with <code>{'{{placeholders}}'}</code> filled in. Delete a file to restore its default.</p>
-              <p className="lexical-hint">{state.promptsDir}</p>
-              <button type="button" onClick={() => void window.ogma.ai.openPrompts()}>Open prompts folder</button>
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
+    <Modal label="AI settings" className="settings" onClose={onClose}>
+      <header className="modal-header">
+        <h2>AI settings</h2>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={14} aria-hidden="true" /></button>
+      </header>
+      <nav className="lexical-tabs" role="tablist">
+        {(['server', 'keys', 'profiles', 'routing', 'prompts'] as Tab[]).map((id) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
+            {{ server: 'Server', keys: 'Keys', profiles: 'Models', routing: 'Routing', prompts: 'Prompts' }[id]}
+          </button>
+        ))}
+      </nav>
+      <div className="settings-body">
+        {error && <p className="lexical-message status-error">{error}</p>}
+        {tab === 'server' && <AiServerSettings status={status} />}
+        {!state && tab !== 'server' && <p className="lexical-message">Loading…</p>}
+        {state && tab === 'keys' && <KeysTab state={state} onChange={guard} />}
+        {state && tab === 'profiles' && <ProfilesTab config={state.config} providers={providers} onSave={saveConfig} />}
+        {state && tab === 'routing' && <RoutingTab config={state.config} onSave={saveConfig} />}
+        {state && tab === 'prompts' && (
+          <div className="settings-section">
+            <p>Each AI task uses an editable Markdown template: the system prompt, a line <code>=== user ===</code>, then the message, with <code>{'{{placeholders}}'}</code> filled in. Delete a file to restore its default.</p>
+            <p className="lexical-hint">{state.promptsDir}</p>
+            <button type="button" onClick={() => void window.ogma.ai.openPrompts()}>Open prompts folder</button>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
