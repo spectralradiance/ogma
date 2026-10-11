@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import type { AiEvent, AiMode, AiSettingsState, AiTask } from '../../shared/ai'
 import { PROVIDERS } from '../../shared/ai'
@@ -6,6 +6,8 @@ import type { SidecarStatus } from '../../shared/ipc'
 import { describeMetrics, measureText, type TextMetrics } from '../../shared/readability'
 import type { WordInContext } from './editor/MarkdownEditor'
 import { AiServerLine } from './AiServer'
+import { chatStore } from './chatStore'
+import { readPref, writePref } from './prefs'
 import { SynthesisReview } from './SynthesisReview'
 import { errorMessage } from './target'
 import { Settings } from 'lucide-react'
@@ -87,6 +89,11 @@ const MODES: { id: AiMode; label: string; title: string }[] = [
   { id: 'cloud', label: 'Cloud', title: 'Only cloud providers' },
 ]
 
+/** Focused text attached to a chat message, capped to keep prompts reasonable. */
+const CHAT_CONTEXT_CHARS = 24_000
+
+type PanelView = 'tools' | 'chat'
+
 interface AiPanelProps {
   workspace: AiWorkspace
   status: SidecarStatus | null
@@ -101,6 +108,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
   const [run, setRun] = useState<RunState | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [review, setReview] = useState(false)
+  const [view, setViewState] = useState<PanelView>(() => (readPref('aiView') === 'chat' ? 'chat' : 'tools'))
   const log = useRef(new Map<string, AiEvent[]>())
   const current = useRef<string | null>(null)
 
@@ -183,6 +191,11 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
     void start('lexical', { word: found.word, sentence: found.context, paragraph: found.context, instruction: chosen.text }, { word: found.word })
   }
 
+  const setView = (next: PanelView) => {
+    writePref('aiView', next)
+    setViewState(next)
+  }
+
   const setMode = (mode: AiMode) => {
     if (!settings) return
     void window.ogma.ai.saveConfig({ ...settings.config, mode }).then(setSettings)
@@ -199,6 +212,21 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
     ? `${run.start.provider_label} · ${run.start.model || 'default model'}${run.start.fallback ? ' · fallback' : ''}`
     : ''
 
+  const serverLine = <AiServerLine status={status} onOpen={onOpenSettings} />
+  const modelField = (
+    <label className="ai-field">
+      Model
+      <select value={profileId} onChange={(event) => setProfileId(event.target.value)}>
+        <option value="">Automatic (routing order)</option>
+        {profiles.map((profile) => (
+          <option key={profile.id} value={profile.id}>
+            {profile.label}{configured(profile.provider) ? '' : ' — not set up'}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+
   return (
     <div className="lexical-panel ai-panel" aria-label="AI">
       <header className="lexical-header ai-header">
@@ -212,80 +240,82 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
         <button type="button" className="icon-button ai-settings-button" onClick={onOpenSettings} title="AI settings: keys, models, routing, prompts" aria-label="AI settings"><Settings size={14} aria-hidden="true" /> Settings</button>
       </header>
 
-      <div className="lexical-body">
-        <AiServerLine status={status} onOpen={onOpenSettings} />
-        <label className="ai-field">
-          Model
-          <select value={profileId} onChange={(event) => setProfileId(event.target.value)}>
-            <option value="">Automatic (routing order)</option>
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.label}{configured(profile.provider) ? '' : ' — not set up'}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="lexical-hint">{workspace.focus ? `Working on: ${workspace.focus.label}` : 'Click into a document to work on it.'}</p>
-
-        <div className="ai-actions">
-          <button type="button" onClick={() => void draftOutput()} disabled={running || !workspace.focus?.inSection}
-            title="Write this section’s output from its notes; you review every change before it is applied">
-            Draft output from notes
+      <div className="lexical-tabs" role="tablist" aria-label="AI view">
+        {(['tools', 'chat'] as const).map((id) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)}>
+            {id === 'tools' ? 'Tools' : 'Chat'}
           </button>
-          <button type="button" onClick={analyze} disabled={running} title="Selection, or the whole focused file">
-            Analyze
-          </button>
-          <button type="button" onClick={analyzeStructure} disabled={running || !workspace.outline}
-            title="Order, balance and gaps across every section, from the document’s outline, sizes and opening lines">
-            Analyze structure
-          </button>
-          <div className="ai-word-row">
-            <button type="button" onClick={suggestWords} disabled={running} title="For the word at the cursor">Word choice</button>
-            <select value={instruction} onChange={(event) => setInstruction(event.target.value as typeof instruction)} aria-label="Kind of suggestions">
-              {WORD_INSTRUCTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
-          </div>
-        </div>
-
-        {message && <p className="lexical-message">{message}</p>}
-
-        {run && (
-          <section className="ai-result">
-            <div className="ai-provenance">
-              {run.start ? provenance : running ? 'Starting…' : ''}
-              {running && <button type="button" className="link-button" onClick={() => void window.ogma.ai.cancel(run.id)}>Cancel</button>}
-            </div>
-            {run.start && run.start.skipped.length > 0 && (
-              <p className="lexical-hint" title={run.start.skipped.join('\n')}>Skipped: {run.start.skipped.map((entry) => entry.split(':')[0]).join(', ')}</p>
-            )}
-            {run.notices.map((notice, index) => <p key={index} className="lexical-hint">{notice}</p>)}
-
-            {run.task === 'analyze' && run.metrics && <MetricsTable metrics={run.metrics} />}
-
-            {run.task === 'lexical' ? (
-              <div className="chips ai-suggestions">
-                {parseSuggestions(run.text).map((suggestion) => (
-                  <span key={suggestion.word} className="chip" title={suggestion.note}>
-                    <button type="button" onClick={() => setMessage(suggestion.note || suggestion.word)}>{suggestion.word}</button>
-                    <button type="button" className="chip-replace" title={`Replace “${run.word}” with “${suggestion.word}”`}
-                      onClick={() => setMessage(workspace.replaceWord(suggestion.word) ? null : 'Put the cursor back on the word to replace it.')}>↵</button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              run.text && <div className="ai-text">{run.text}</div>
-            )}
-
-            {run.task === 'synthesize' && run.status === 'done' && run.material && run.text.trim() && (
-              <button type="button" className="primary" onClick={() => setReview(true)}>Review changes…</button>
-            )}
-            {run.error && <p className="lexical-message status-error">{run.error}</p>}
-            {run.usage && (run.usage.input !== null || run.usage.output !== null) && (
-              <p className="lexical-hint">{run.usage.input ?? '?'} tokens in · {run.usage.output ?? '?'} out</p>
-            )}
-          </section>
-        )}
+        ))}
       </div>
+
+      {view === 'chat' ? (
+        <AiChat workspace={workspace} profileId={profileId} top={<>{serverLine}{modelField}</>} />
+      ) : (
+        <div className="lexical-body">
+          {serverLine}
+          {modelField}
+          <p className="lexical-hint">{workspace.focus ? `Working on: ${workspace.focus.label}` : 'Click into a document to work on it.'}</p>
+
+          <div className="ai-actions">
+            <button type="button" onClick={() => void draftOutput()} disabled={running || !workspace.focus?.inSection}
+              title="Write this section’s output from its notes; you review every change before it is applied">
+              Draft output from notes
+            </button>
+            <button type="button" onClick={analyze} disabled={running} title="Selection, or the whole focused file">
+              Analyze
+            </button>
+            <button type="button" onClick={analyzeStructure} disabled={running || !workspace.outline}
+              title="Order, balance and gaps across every section, from the document’s outline, sizes and opening lines">
+              Analyze structure
+            </button>
+            <div className="ai-word-row">
+              <button type="button" onClick={suggestWords} disabled={running} title="For the word at the cursor">Word choice</button>
+              <select value={instruction} onChange={(event) => setInstruction(event.target.value as typeof instruction)} aria-label="Kind of suggestions">
+                {WORD_INSTRUCTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {message && <p className="lexical-message">{message}</p>}
+
+          {run && (
+            <section className="ai-result">
+              <div className="ai-provenance">
+                {run.start ? provenance : running ? 'Starting…' : ''}
+                {running && <button type="button" className="link-button" onClick={() => void window.ogma.ai.cancel(run.id)}>Cancel</button>}
+              </div>
+              {run.start && run.start.skipped.length > 0 && (
+                <p className="lexical-hint" title={run.start.skipped.join('\n')}>Skipped: {run.start.skipped.map((entry) => entry.split(':')[0]).join(', ')}</p>
+              )}
+              {run.notices.map((notice, index) => <p key={index} className="lexical-hint">{notice}</p>)}
+
+              {run.task === 'analyze' && run.metrics && <MetricsTable metrics={run.metrics} />}
+
+              {run.task === 'lexical' ? (
+                <div className="chips ai-suggestions">
+                  {parseSuggestions(run.text).map((suggestion) => (
+                    <span key={suggestion.word} className="chip" title={suggestion.note}>
+                      <button type="button" onClick={() => setMessage(suggestion.note || suggestion.word)}>{suggestion.word}</button>
+                      <button type="button" className="chip-replace" title={`Replace “${run.word}” with “${suggestion.word}”`}
+                        onClick={() => setMessage(workspace.replaceWord(suggestion.word) ? null : 'Put the cursor back on the word to replace it.')}>↵</button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                run.text && <div className="ai-text">{run.text}</div>
+              )}
+
+              {run.task === 'synthesize' && run.status === 'done' && run.material && run.text.trim() && (
+                <button type="button" className="primary" onClick={() => setReview(true)}>Review changes…</button>
+              )}
+              {run.error && <p className="lexical-message status-error">{run.error}</p>}
+              {run.usage && (run.usage.input !== null || run.usage.output !== null) && (
+                <p className="lexical-hint">{run.usage.input ?? '?'} tokens in · {run.usage.output ?? '?'} out</p>
+              )}
+            </section>
+          )}
+        </div>
+      )}
 
       {review && run?.material && (
         <SynthesisReview
@@ -302,6 +332,97 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profileId: string; top: ReactNode }) {
+  const chat = useSyncExternalStore(chatStore.subscribe, chatStore.snapshot)
+  const [draft, setDraft] = useState('')
+  const [attach, setAttach] = useState(true)
+  const log = useRef<HTMLDivElement>(null)
+  const last = chat.turns[chat.turns.length - 1]
+  const busy = last?.status === 'running'
+
+  // Follow the reply as it streams in.
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight })
+  }, [chat.turns])
+
+  const send = () => {
+    const message = draft.trim()
+    if (!message || busy) return
+    const active = workspace.readActive()
+    const variables = { document: active?.document ?? '', section: active?.section ? `Section: ${active.section}` : '', context: '' }
+    let contextLabel: string | undefined
+    if (attach && active) {
+      const selected = active.selection.trim()
+      const text = selected || active.text
+      if (text.trim()) {
+        const capped = text.length > CHAT_CONTEXT_CHARS ? `${text.slice(0, CHAT_CONTEXT_CHARS)}\n[…cut for length]` : text
+        variables.context = `## ${selected ? 'Selected passage' : 'Focused text'}\n${capped}`
+        contextLabel = selected ? 'with the selection' : `with ${workspace.focus?.label ?? 'the focused text'}`
+      }
+    }
+    setDraft('')
+    void chatStore.send(message, variables, { profileId: profileId || undefined, contextLabel })
+  }
+
+  return (
+    <div className="ai-chat">
+      <div className="ai-chat-log" ref={log}>
+        {top}
+        {chat.turns.length === 0 && (
+          <p className="lexical-hint">
+            Ask about the text you are working on: feedback, ideas, wording. With “Attach focused text” on, each message
+            includes the selection, or the whole focused file.
+          </p>
+        )}
+        {chat.turns.map((turn, index) => (
+          <div key={index} className={`ai-chat-turn ai-chat-${turn.role}`}>
+            {turn.role === 'user' ? (
+              <>
+                <div className="ai-chat-bubble">{turn.text}</div>
+                {turn.context && <span className="ai-chat-meta">{turn.context}</span>}
+              </>
+            ) : (
+              <>
+                <span className="ai-chat-meta">
+                  {turn.provenance ?? (turn.status === 'running' ? 'Starting…' : '')}
+                  {turn.status === 'cancelled' && ' · stopped'}
+                </span>
+                {turn.text && <div className="ai-text">{turn.text}</div>}
+                {turn.status === 'error' && turn.error && <p className="lexical-message status-error">{turn.error}</p>}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <form className="ai-chat-composer" onSubmit={(event) => { event.preventDefault(); send() }}>
+        <textarea
+          value={draft}
+          rows={3}
+          placeholder="Message… (Enter to send, Shift+Enter for a new line)"
+          aria-label="Chat message"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              send()
+            }
+          }}
+        />
+        <div className="ai-chat-controls">
+          <label className="ai-chat-attach" title="Send the selection, or the whole focused file, with each message">
+            <input type="checkbox" checked={attach} onChange={(event) => setAttach(event.target.checked)} />
+            Attach focused text
+          </label>
+          {chat.turns.length > 0 && <button type="button" className="link-button" onClick={() => chatStore.clear()}>New chat</button>}
+          {busy
+            ? <button type="button" onClick={() => chatStore.cancel()}>Stop</button>
+            : <button type="submit" className="primary" disabled={!draft.trim()}>Send</button>}
+        </div>
+      </form>
     </div>
   )
 }

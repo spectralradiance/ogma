@@ -34,7 +34,7 @@ describe('prompt templates', () => {
 
   it('every built-in template has a user part', () => {
     for (const template of Object.values(DEFAULT_PROMPTS)) {
-      const rendered = renderTemplate(template, {})
+      const rendered = renderTemplate(template, { message: 'Hello' })
       expect(rendered.system.length).toBeGreaterThan(0)
       expect(rendered.messages[0].content.length).toBeGreaterThan(0)
     }
@@ -89,5 +89,6 @@ describe('normalizeAiConfig', () => {
     expect(config.profiles[0].label).toBe('claude')
     expect(config.routing.synthesize).toEqual(['claude'])
     expect(config.routing.analyze).toEqual(['claude'])
+    expect(config.routing.chat).toEqual(['claude'])
   })
 })

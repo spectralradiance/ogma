@@ -74,18 +74,23 @@ The Words panel (Ctrl+D) reads a local `wiktionary.db`. If none is found, click 
 
 ## AI
 
-Open the **AI** panel (button in the document header, or Ctrl+J):
+Open the **AI** panel (button in the document header, or Ctrl+J). It has two views, **Tools** and **Chat**, and remembers which one you last used.
+
+**Tools** are one-shot tasks:
 
 - **Draft output from notes** — for the focused section, drafts the output from its notes, its current output and the document notes (outline, sources). You review each changed paragraph and apply the ones you keep; applying is one undoable edit.
 - **Analyze** — the selection or the focused file: local measurements (reading ease, sentence length and spread, repeated words) plus the model's notes on tone, structure, readability and style.
+- **Analyze structure** — order, balance, gaps and overlaps across the whole document, from its outline, section sizes and opening lines.
 - **Word choice** — alternatives for the word at the cursor; ↵ replaces it.
+
+**Chat** is a conversation about your work: feedback, ideas, wording. **Enter** sends and **Shift+Enter** starts a new line. With **Attach focused text** on, each message includes the selection, or the whole focused file if nothing is selected (up to about 24,000 characters; inline notes blocks are left out), along with the document and section names. The model sees the last 30 turns. The conversation stays put when you switch drawers or close the panel, and keeps streaming meanwhile; **New chat** clears it, and so does reloading the window. Chat follows the same model picker, mode and routing as the tools.
 
 Set up providers under **⚙ AI settings**:
 
 - **Keys** — Anthropic, OpenAI, Gemini, and an optional OpenAI-compatible host (base URL + key; works for OpenRouter-style hosts or a local LM Studio/Ollama server). Keys are encrypted with Windows (DPAPI) and passed only to the local AI server.
 - **Models** — profiles (provider + model id). Claude defaults to `claude-opus-5`; OpenAI/Gemini/compatible profiles need a model id. **Test** checks one profile with no fallback.
 - **Routing** — the order each task tries models in. **Local / Hybrid / Cloud** filters that list; unavailable models are skipped, and a model that fails before writing anything falls back to the next.
-- **Prompts** — each task's prompt is an editable Markdown file.
+- **Prompts** — each task's prompt is an editable Markdown file. In `chat.md` the part above `=== user ===` is the system prompt (with `{{document}}`, `{{section}}` and `{{context}}`), and `{{message}}` is the message you type; earlier turns are sent before it.
 
 The local model needs PyTorch and the transformers stack: run `.\scripts\setup-sidecar.ps1` without `-NoTorch`. The first local run downloads the model (Qwen 2.5 7B by default, several GB) and needs an NVIDIA GPU; it loads in 4-bit and unloads after 10 idle minutes.
 

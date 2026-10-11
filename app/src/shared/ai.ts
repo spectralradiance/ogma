@@ -2,7 +2,7 @@
 
 export type AiMode = 'local' | 'cloud' | 'hybrid'
 export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'openai_compat' | 'local_hf'
-export type AiTask = 'analyze' | 'synthesize' | 'lexical' | 'structure'
+export type AiTask = 'analyze' | 'synthesize' | 'lexical' | 'structure' | 'chat'
 
 export interface AiProfile {
   id: string
@@ -30,6 +30,7 @@ export const AI_TASKS: { id: AiTask; label: string; description: string }[] = [
   { id: 'analyze', label: 'Analyze', description: 'Tone, structure, readability and style' },
   { id: 'lexical', label: 'Word choice', description: 'Alternatives for a word in context' },
   { id: 'structure', label: 'Structure', description: 'Order, balance and gaps across the whole document’s outline' },
+  { id: 'chat', label: 'Chat', description: 'A conversation about the focused text' },
 ]
 
 export const PROVIDERS: { id: AiProviderId; label: string; kind: 'cloud' | 'local'; keyName: string | null }[] = [
@@ -58,6 +59,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     analyze: ['local-qwen', 'claude', 'gemini', 'openai', 'open-host'],
     lexical: ['local-qwen', 'claude', 'gemini', 'openai', 'open-host'],
     structure: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
+    chat: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
     default: ['claude', 'local-qwen'],
   },
 }
@@ -72,6 +74,8 @@ export interface AiRunRequest {
   task: AiTask | 'test'
   /** Values for the task's prompt template placeholders. */
   variables: Record<string, string>
+  /** Earlier turns of a conversation, sent before the rendered user message (chat). */
+  history?: AiMessage[]
   profileId?: string
   /** Use only profileId, never fall back to another model (connection tests). */
   profileOnly?: boolean

@@ -65,7 +65,9 @@ export class AiBridge {
     }
 
     const config = this.deps.config()
-    const { system, messages } = renderTemplate(await this.deps.prompts.template(request.task), request.variables)
+    const rendered = renderTemplate(await this.deps.prompts.template(request.task), request.variables)
+    const system = rendered.system
+    const messages = [...(request.history ?? []), ...rendered.messages]
     const body = {
       task: request.task === 'test' ? 'default' : request.task,
       system,

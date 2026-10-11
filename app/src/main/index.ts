@@ -442,6 +442,10 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.aiRun, (_event, request: AiRunRequest) => {
     if (!request || typeof request.task !== 'string' || typeof request.variables !== 'object') throw new TypeError('Expected an AI run request.')
+    if (request.history !== undefined && (!Array.isArray(request.history)
+      || !request.history.every((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string'))) {
+      throw new TypeError('Expected the chat history as a list of messages.')
+    }
     return ai.start(request)
   })
   ipcMain.handle(IPC.aiCancel, (_event, runId: unknown) => ai.cancel(text(runId)))
