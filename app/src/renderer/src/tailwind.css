@@ -1,0 +1,29 @@
+/*
+ * Tailwind entry. Preflight (Tailwind's reset) is left out so the existing
+ * stylesheet keeps rendering as it does; that stylesheet sits in the
+ * `components` layer so utilities override it.
+ */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import './styles.css' layer(components);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* Utilities read the app's own tokens, so they follow light/dark and any future theme. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-idle: var(--idle);
+  --color-selection: var(--selection);
+  --font-ui: var(--font-ui);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+}

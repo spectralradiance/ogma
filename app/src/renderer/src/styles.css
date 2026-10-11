@@ -2343,19 +2343,3 @@ body.resizing {
 .dictionary-download p.status-error {
   color: var(--bad);
 }
-
-.undo-toast {
-  position: fixed;
-  left: 16px;
-  bottom: 40px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px 6px 14px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
-  font-size: 13px;
-}

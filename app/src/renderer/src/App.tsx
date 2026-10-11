@@ -566,7 +566,10 @@ export function App() {
         onSettings={() => setAppSettingsOpen(true)}
       />
       {undo && (
-        <div className="undo-toast" role="status">
+        <div
+          className="fixed bottom-10 left-4 z-20 flex items-center gap-2.5 rounded-md border border-border bg-raised py-1.5 pr-2 pl-3.5 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.22)]"
+          role="status"
+        >
           <span>Deleted “{undo.title}”.</span>
           <button type="button" onClick={undoDelete}>Undo</button>
           <button type="button" className="icon-button" onClick={() => setUndo(null)} aria-label="Dismiss">×</button>
