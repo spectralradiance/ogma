@@ -1881,12 +1881,6 @@ button.primary {
   font-size: 12px;
 }
 
-.menu-check {
-  display: inline-block;
-  width: 1.3em;
-  margin-left: -0.3em;
-}
-
 .outline-no-heading {
   color: var(--muted);
   font-style: italic;
@@ -1939,58 +1933,6 @@ button.primary {
 
 .section-menu-button.problem::after {
   background: var(--bad);
-}
-
-.section-menu {
-  position: absolute;
-  top: calc(100% + 2px);
-  right: 0;
-  z-index: 6;
-  display: grid;
-  min-width: 260px;
-  padding: 4px 0;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
-  font-size: 13px;
-}
-
-.section-menu > button {
-  padding: 5px 14px;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-
-.section-menu > button:hover:not(:disabled) {
-  background: var(--selection);
-}
-
-.context-menu {
-  position: fixed;
-  right: auto;
-  min-width: 170px;
-}
-
-.menu-separator {
-  margin: 4px 0;
-  border-top: 1px solid var(--border);
-}
-
-.menu-status {
-  display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 8px;
-  align-items: baseline;
-  padding: 3px 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.menu-status .save-saved {
-  color: var(--muted);
 }
 
 .doc-hidden {

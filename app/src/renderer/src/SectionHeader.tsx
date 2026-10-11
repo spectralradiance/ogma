@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import type { SectionInfo } from '../../shared/ipc'
 import type { LeadingHeading } from '../../shared/text'
+import { type MenuItem, DropdownMenu } from './menu'
 import { SAVE_LABEL, type SaveState } from './DocumentPane'
-import { Check, Ellipsis } from 'lucide-react'
+import { Ellipsis } from 'lucide-react'
 
 export interface PaneState {
   state: SaveState
@@ -50,28 +51,8 @@ const needsAttention = (pane: PaneState | undefined) => pane !== undefined && pa
 export function SectionHeader({
   section, notes, output, layout, previous, next, onLayout, onRename, onMove, onMerge, onDelete, onHistory, heading, onHeading, onMatchHeading,
 }: SectionHeaderProps) {
-  const [open, setOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [title, setTitle] = useState(section.title)
-  const root = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !root.current?.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', close)
-    window.addEventListener('keydown', close)
-    return () => {
-      window.removeEventListener('mousedown', close)
-      window.removeEventListener('keydown', close)
-    }
-  }, [open])
-
-  const act = (action: () => void) => () => {
-    setOpen(false)
-    action()
-  }
   const numbered = section.ordinal !== null
   const attention = needsAttention(notes) || needsAttention(output)
   const problem = [notes, output].some((pane) => pane?.state === 'conflict' || pane?.state === 'error')
@@ -79,8 +60,31 @@ export function SectionHeader({
   const shownTitle = heading?.text ?? section.title
   const mismatch = heading !== null && normalized(heading.text) !== normalized(section.title)
 
+  const items: MenuItem[] = [
+    { label: 'Edit section title', onClick: () => { setTitle(shownTitle); setRenaming(true) } },
+    {
+      label: 'Section heading',
+      checked: heading !== null,
+      onClick: () => onHeading(heading === null),
+      title: 'The title as a heading at the top of the output (its first line), so it appears in exports',
+    },
+    'separator',
+    { label: 'Swap with previous section', disabled: !numbered || !previous?.ordinal, onClick: () => onMove('up') },
+    { label: 'Swap with next section', disabled: !numbered || !next?.ordinal, onClick: () => onMove('down') },
+    { label: `Merge into previous${previous ? ` (${previous.title})` : ''}…`, disabled: !previous, onClick: () => onMerge('previous') },
+    { label: `Merge next${next ? ` (${next.title})` : ''} into this…`, disabled: !next, onClick: () => onMerge('next') },
+    'separator',
+    { label: layout.hideOutput ? 'Show output' : 'Hide output', onClick: () => onLayout({ ...layout, hideOutput: !layout.hideOutput }) },
+    { label: layout.hideNotes ? 'Show notes' : 'Hide notes', onClick: () => onLayout({ ...layout, hideNotes: !layout.hideNotes }) },
+    'separator',
+    { label: 'Delete section', onClick: onDelete },
+    'separator',
+    { label: 'Output history…', hint: statusText(output), disabled: !output?.exists, onClick: () => onHistory('output') },
+    { label: 'Notes history…', hint: statusText(notes), disabled: !notes?.exists, onClick: () => onHistory('notes') },
+  ]
+
   return (
-    <div className={`section-line${heading ? '' : ' no-heading'}`} ref={root}>
+    <div className={`section-line${heading ? '' : ' no-heading'}`}>
       {renaming ? (
         <input
           className="section-rename"
@@ -117,57 +121,19 @@ export function SectionHeader({
         </span>
       )}
       <hr className="section-line-rule" />
-      <button
-        type="button"
-        className={`icon-button section-menu-button${attention ? ' attention' : ''}${problem ? ' problem' : ''}`}
-        onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`Section menu for ${section.title}`}
-        title={attention ? `Section menu — notes: ${statusText(notes)}, output: ${statusText(output)}` : 'Section menu'}
-      >
-        <Ellipsis size={16} aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="section-menu" role="menu">
-          <button type="button" role="menuitem" onClick={act(() => { setTitle(shownTitle); setRenaming(true) })}>Edit section title</button>
-          <button type="button" role="menuitemcheckbox" aria-checked={heading !== null} onClick={act(() => onHeading(heading === null))}
-            title="The title as a heading at the top of the output (its first line), so it appears in exports">
-            <span className="menu-check" aria-hidden="true">{heading && <Check size={13} />}</span>Section heading
+      <DropdownMenu
+        items={items}
+        trigger={(
+          <button
+            type="button"
+            className={`icon-button section-menu-button${attention ? ' attention' : ''}${problem ? ' problem' : ''}`}
+            aria-label={`Section menu for ${section.title}`}
+            title={attention ? `Section menu — notes: ${statusText(notes)}, output: ${statusText(output)}` : 'Section menu'}
+          >
+            <Ellipsis size={16} aria-hidden="true" />
           </button>
-          <div className="menu-separator" />
-          <button type="button" role="menuitem" disabled={!numbered || !previous?.ordinal} onClick={act(() => onMove('up'))}>
-            Swap with previous section
-          </button>
-          <button type="button" role="menuitem" disabled={!numbered || !next?.ordinal} onClick={act(() => onMove('down'))}>
-            Swap with next section
-          </button>
-          <button type="button" role="menuitem" disabled={!previous} onClick={act(() => onMerge('previous'))}>
-            Merge into previous{previous ? ` (${previous.title})` : ''}…
-          </button>
-          <button type="button" role="menuitem" disabled={!next} onClick={act(() => onMerge('next'))}>
-            Merge next{next ? ` (${next.title})` : ''} into this…
-          </button>
-          <div className="menu-separator" />
-          <button type="button" role="menuitem" onClick={act(() => onLayout({ ...layout, hideOutput: !layout.hideOutput }))}>
-            {layout.hideOutput ? 'Show output' : 'Hide output'}
-          </button>
-          <button type="button" role="menuitem" onClick={act(() => onLayout({ ...layout, hideNotes: !layout.hideNotes }))}>
-            {layout.hideNotes ? 'Show notes' : 'Hide notes'}
-          </button>
-          <div className="menu-separator" />
-          <button type="button" role="menuitem" onClick={act(onDelete)}>Delete section</button>
-          <div className="menu-separator" />
-          <div className="menu-status">
-            <span>Output</span><span className={`save-${output?.state ?? 'saved'}`}>{statusText(output)}</span>
-            <button type="button" className="link-button" disabled={!output?.exists} onClick={act(() => onHistory('output'))}>History…</button>
-          </div>
-          <div className="menu-status">
-            <span>Notes</span><span className={`save-${notes?.state ?? 'saved'}`}>{statusText(notes)}</span>
-            <button type="button" className="link-button" disabled={!notes?.exists} onClick={act(() => onHistory('notes'))}>History…</button>
-          </div>
-        </div>
-      )}
+        )}
+      />
     </div>
   )
 }
