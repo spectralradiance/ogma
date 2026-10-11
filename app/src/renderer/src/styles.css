@@ -59,6 +59,95 @@
   }
 }
 
+/* Palettes: each overrides the core colors; the light set applies by default and the dark set in dark mode. */
+:root[data-palette='parchment'] {
+  --bg: #f5eedc;
+  --surface: #ece3cc;
+  --raised: #fbf7ea;
+  --border: #d8cba8;
+  --text: #3b3226;
+  --muted: #7a6e5c;
+  --accent: #8a5a2b;
+  --selection: #e6d3a8;
+  --syntax-mark: #b0a58c;
+  --quote-bar: #cdb88a;
+  --search-match: #f0d98a;
+  --search-match-selected: #e3bf55;
+}
+:root[data-palette='slate'] {
+  --bg: #eceff4;
+  --surface: #e1e6ee;
+  --raised: #ffffff;
+  --border: #cdd4e0;
+  --text: #2e3440;
+  --muted: #6a7488;
+  --accent: #4a6a9b;
+  --selection: #cfdaee;
+  --syntax-mark: #a3acbf;
+  --quote-bar: #b9c6dd;
+  --search-match: #ebdca0;
+  --search-match-selected: #e0c565;
+}
+:root[data-palette='mono'] {
+  --bg: #ffffff;
+  --surface: #f3f3f3;
+  --raised: #ffffff;
+  --border: #cfcfcf;
+  --text: #111111;
+  --muted: #5f5f5f;
+  --accent: #111111;
+  --selection: #dcdcdc;
+  --syntax-mark: #9a9a9a;
+  --quote-bar: #bdbdbd;
+  --search-match: #ffe58a;
+  --search-match-selected: #ffc83d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-palette='parchment'] {
+    --bg: #1e1a15;
+    --surface: #27221b;
+    --raised: #2e2820;
+    --border: #433b2f;
+    --text: #e8dfcc;
+    --muted: #a39682;
+    --accent: #d9a35f;
+    --selection: #4a3b25;
+    --syntax-mark: #7a6e5c;
+    --quote-bar: #6a5738;
+    --search-match: #5e4a1c;
+    --search-match-selected: #82652a;
+  }
+  :root[data-palette='slate'] {
+    --bg: #242933;
+    --surface: #2b313d;
+    --raised: #323946;
+    --border: #424b5c;
+    --text: #e5e9f0;
+    --muted: #9aa5b8;
+    --accent: #88a8d8;
+    --selection: #3b4a66;
+    --syntax-mark: #6c768a;
+    --quote-bar: #4c5f80;
+    --search-match: #5a5230;
+    --search-match-selected: #7a6b2c;
+  }
+  :root[data-palette='mono'] {
+    --bg: #121212;
+    --surface: #1b1b1b;
+    --raised: #232323;
+    --border: #3a3a3a;
+    --text: #eeeeee;
+    --muted: #a0a0a0;
+    --accent: #eeeeee;
+    --selection: #3a3a3a;
+    --syntax-mark: #707070;
+    --quote-bar: #555555;
+    --search-match: #5c4c10;
+    --search-match-selected: #8a6d12;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -2289,4 +2378,45 @@ body.resizing {
 
 .dictionary-download p.status-error {
   color: var(--bad);
+}
+
+.palette-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.palette-card {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 6px;
+  font-size: 12px;
+}
+
+.palette-card[aria-pressed='true'] {
+  background: var(--selection);
+  border-color: var(--accent);
+}
+
+.palette-swatch {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.palette-swatch > span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+}
+
+.palette-swatch i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }

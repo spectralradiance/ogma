@@ -16,4 +16,9 @@ describe('normalizePreferences', () => {
       .toBe(DEFAULT_PREFERENCES.appearance.textFont)
     expect(normalizePreferences({ appearance: { sourceFont: 'var(--font-serif)' } }).appearance.sourceFont).toBe('var(--font-serif)')
   })
+
+  it('keeps a known palette and falls back to the default for anything else', () => {
+    expect(normalizePreferences({ appearance: { palette: 'slate' } }).appearance.palette).toBe('slate')
+    expect(normalizePreferences({ appearance: { palette: 'neon' } }).appearance.palette).toBe(DEFAULT_PREFERENCES.appearance.palette)
+  })
 })

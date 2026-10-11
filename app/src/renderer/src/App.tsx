@@ -39,6 +39,7 @@ const storedWidth = (key: string, bounds: { initial: number; min: number; max: n
 function applyAppearance(preferences: Preferences) {
   const { appearance } = preferences
   const root = document.documentElement.style
+  document.documentElement.dataset.palette = appearance.palette
   root.setProperty('--font-serif', appearance.textFont)
   root.setProperty('--font-source', appearance.sourceFont)
   root.setProperty('--text-size', `${appearance.textSize}px`)

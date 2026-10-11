@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import {
-  type Appearance, type ExportPreferences, type FontChoice, type Preferences, SOURCE_FONTS, TEXT_FONTS, type ThemeChoice,
+  type Appearance, type ExportPreferences, type FontChoice, PALETTES, type Preferences, SOURCE_FONTS, TEXT_FONTS, type ThemeChoice,
 } from '../../shared/preferences'
 import { X } from 'lucide-react'
 
@@ -98,6 +98,23 @@ export function SettingsDialog({ preferences, onChange, onClose }: SettingsDialo
               <div className="segmented" role="group" aria-label="Color scheme">
                 {THEMES.map((theme) => (
                   <button key={theme.id} type="button" aria-pressed={a.theme === theme.id} onClick={() => appearance({ theme: theme.id })}>{theme.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Palette</span>
+              <div className="palette-picker" role="group" aria-label="Palette">
+                {PALETTES.map((palette) => (
+                  <button key={palette.id} type="button" className="palette-card" aria-pressed={a.palette === palette.id} onClick={() => appearance({ palette: palette.id })}>
+                    <span className="palette-swatch" aria-hidden="true">
+                      {([palette.light, palette.dark] as const).map(([bg, text, accent], index) => (
+                        <span key={index} style={{ background: bg, color: text }}>
+                          <i style={{ background: accent }} />Aa
+                        </span>
+                      ))}
+                    </span>
+                    {palette.label}
+                  </button>
                 ))}
               </div>
             </div>

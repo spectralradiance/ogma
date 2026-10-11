@@ -2,6 +2,16 @@
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
+/** A named set of colors. The values themselves live in styles.css under `[data-palette]`. */
+export const PALETTES = [
+  { id: 'ogma', label: 'Ogma', light: ['#f7f6f2', '#1f2421', '#3f6b5a'], dark: ['#1b1d1c', '#e4e6e1', '#8fbfa8'] },
+  { id: 'parchment', label: 'Parchment', light: ['#f5eedc', '#3b3226', '#8a5a2b'], dark: ['#1e1a15', '#e8dfcc', '#d9a35f'] },
+  { id: 'slate', label: 'Slate', light: ['#eceff4', '#2e3440', '#4a6a9b'], dark: ['#242933', '#e5e9f0', '#88a8d8'] },
+  { id: 'mono', label: 'Mono', light: ['#ffffff', '#111111', '#111111'], dark: ['#121212', '#eeeeee', '#eeeeee'] },
+] as const
+
+export type PaletteId = (typeof PALETTES)[number]['id']
+
 export interface FontChoice {
   label: string
   /** A CSS font-family list. */
@@ -27,7 +37,10 @@ export const SOURCE_FONTS: FontChoice[] = [
 ]
 
 export interface Appearance {
+  /** Light, dark, or follow Windows. */
   theme: ThemeChoice
+  /** The color palette; each has a light and a dark variant. */
+  palette: PaletteId
   /** Font for writing (live view) and section titles. */
   textFont: string
   /** Pixels. */
@@ -61,6 +74,7 @@ export interface Preferences {
 export const DEFAULT_PREFERENCES: Preferences = {
   appearance: {
     theme: 'system',
+    palette: 'ogma',
     textFont: TEXT_FONTS[0].value,
     textSize: 17,
     lineHeight: 1.75,
@@ -100,6 +114,7 @@ export function normalizePreferences(raw: unknown): Preferences {
   return {
     appearance: {
       theme: oneOf(a.theme, ['system', 'light', 'dark'], da.theme),
+      palette: oneOf(a.palette, PALETTES.map((palette) => palette.id), da.palette),
       textFont: fontList(a.textFont, da.textFont),
       textSize: clamp(a.textSize, 12, 28, da.textSize),
       lineHeight: clamp(a.lineHeight, 1.2, 2.4, da.lineHeight),
