@@ -60,17 +60,17 @@ export function LexicalPanel({ query, onLookup, onReplace }: LexicalPanelProps) 
     writePref('lexicalTab', next)
   }
 
-  const refreshLexicon = useCallback(() => window.oisin.lexicon.list().then(setLexicon, () => setLexicon([])), [])
+  const refreshLexicon = useCallback(() => window.ogma.lexicon.list().then(setLexicon, () => setLexicon([])), [])
 
   useEffect(() => {
-    void window.oisin.dictionary.status().then(setStatus)
+    void window.ogma.dictionary.status().then(setStatus)
     void refreshLexicon()
   }, [refreshLexicon])
 
   useEffect(() => {
     if (!word || !status?.available) return
     let active = true
-    window.oisin.dictionary.lookup(word).then(
+    window.ogma.dictionary.lookup(word).then(
       (result) => {
         if (!active) return
         setEntries(result)
@@ -121,7 +121,7 @@ export function LexicalPanel({ query, onLookup, onReplace }: LexicalPanelProps) 
         {status && !status.available && tab !== 'lexicon' && tab !== 'external' && (
           <div className="lexical-message">
             <p>{status.error}</p>
-            <button type="button" onClick={() => void window.oisin.dictionary.choose().then(setStatus)}>Choose wiktionary.db…</button>
+            <button type="button" onClick={() => void window.ogma.dictionary.choose().then(setStatus)}>Choose wiktionary.db…</button>
           </div>
         )}
         {!word && tab !== 'lexicon' && status?.available && (
@@ -176,7 +176,7 @@ function SearchBox({ word, onLookup, enabled }: { word: string | null; onLookup:
     if (!enabled || trimmed.length < 2 || trimmed === word) return
     let active = true
     const timer = window.setTimeout(() => {
-      window.oisin.dictionary.search(trimmed, 8).then((results) => { if (active) setSuggestions(results) }, () => {})
+      window.ogma.dictionary.search(trimmed, 8).then((results) => { if (active) setSuggestions(results) }, () => {})
     }, 200)
     return () => {
       active = false
@@ -341,11 +341,11 @@ function LexiconTab({ query, entries, saved, lexicon, onLookup, onChanged }: {
   const [location, setLocation] = useState('')
 
   useEffect(() => {
-    void window.oisin.lexicon.location().then(setLocation)
+    void window.ogma.lexicon.location().then(setLocation)
   }, [])
 
   const importAisling = () => {
-    window.oisin.lexicon.importAisling().then((result) => {
+    window.ogma.lexicon.importAisling().then((result) => {
       if (!result) return
       setMessage(`Imported ${result.imported} word${result.imported === 1 ? '' : 's'}; skipped ${result.skipped}.`)
       onChanged()
@@ -403,7 +403,7 @@ function SaveForm({ query, entries, saved, onSaved }: {
   const save = () => {
     setBusy(true)
     const word = saved?.word ?? entries?.[0]?.word ?? query.word
-    window.oisin.lexicon.save({
+    window.ogma.lexicon.save({
       word,
       definition,
       tags: splitList(tags),
@@ -420,7 +420,7 @@ function SaveForm({ query, entries, saved, onSaved }: {
 
   const remove = () => {
     if (!saved || !window.confirm(`Move “${saved.word}” to the Recycle Bin?`)) return
-    window.oisin.lexicon.remove(saved.word).then(() => onSaved(`Removed “${saved.word}”.`), (error: unknown) => onSaved(errorMessage(error)))
+    window.ogma.lexicon.remove(saved.word).then(() => onSaved(`Removed “${saved.word}”.`), (error: unknown) => onSaved(errorMessage(error)))
   }
 
   return (

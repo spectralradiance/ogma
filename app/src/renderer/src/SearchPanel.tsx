@@ -44,9 +44,9 @@ export function SearchPanel({ roots, relatedSource, onOpen, autoFocus }: SearchP
   const input = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const unsubscribe = window.oisin.search.onProgress(setStatus)
+    const unsubscribe = window.ogma.search.onProgress(setStatus)
     // Building the index reads every text file once; later passes only re-read changed files.
-    window.oisin.search.sync().then(setStatus, (reason: unknown) => setError(errorMessage(reason)))
+    window.ogma.search.sync().then(setStatus, (reason: unknown) => setError(errorMessage(reason)))
     return unsubscribe
   }, [roots])
 
@@ -59,7 +59,7 @@ export function SearchPanel({ roots, relatedSource, onOpen, autoFocus }: SearchP
     if (!text) return
     let active = true
     const timer = window.setTimeout(() => {
-      window.oisin.search.query(text).then(
+      window.ogma.search.query(text).then(
         (hits) => { if (active) setResults({ title: `${hits.length}${hits.length === 100 ? '+' : ''} matches`, hits }) },
         (reason: unknown) => { if (active) setError(errorMessage(reason)) },
       )
@@ -77,7 +77,7 @@ export function SearchPanel({ roots, relatedSource, onOpen, autoFocus }: SearchP
       return
     }
     setError(null)
-    window.oisin.search.related(source.text, source.exclude).then(
+    window.ogma.search.related(source.text, source.exclude).then(
       (hits) => setResults({ title: `Related to ${source.label}`, hits }),
       (reason: unknown) => setError(errorMessage(reason)),
     )

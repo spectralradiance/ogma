@@ -135,7 +135,7 @@ export function DocumentPane({
     reportStats(document.text, document.format)
   }, [reportStats, updateState, splitsHeading])
 
-  const load = useCallback(() => window.oisin.files.read(path, { allowMissing }).then(
+  const load = useCallback(() => window.ogma.files.read(path, { allowMissing }).then(
     applyDocument,
     (error: unknown) => {
       setLoadError(errorMessage(error))
@@ -165,7 +165,7 @@ export function DocumentPane({
     if (!touchesFile(paths, path)) return
     void (async () => {
       if (inFlight.current) await inFlight.current
-      const document = await window.oisin.files.read(path, { allowMissing: true }).catch(() => null)
+      const document = await window.ogma.files.read(path, { allowMissing: true }).catch(() => null)
       const known = disk.current
       if (!document || !known || document.mtimeMs === known.mtimeMs) return // our own save, or no change
       if (state.current === 'saved') applyDocument(document)
@@ -187,7 +187,7 @@ export function DocumentPane({
     updateState('saving')
     const run = (async () => {
       try {
-        const result = await window.oisin.files.write({
+        const result = await window.ogma.files.write({
           path, text, format: meta.format, expectedMtimeMs: meta.mtimeMs, force,
         })
         if (!result.ok) {
@@ -308,7 +308,7 @@ export function DocumentPane({
 
       {saveState === 'conflict' && (
         <div className="banner banner-warn" role="alert">
-          <span>This file was changed outside Oisín while you had unsaved edits.</span>
+          <span>This file was changed outside Ogma while you had unsaved edits.</span>
           <button type="button" onClick={reloadFromDisk}>Load disk version</button>
           <button type="button" onClick={() => void save(true)}>Keep mine</button>
         </div>

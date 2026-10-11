@@ -30,17 +30,13 @@ import {
 } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
-if (process.env.OISIN_USER_DATA) {
-  app.setPath('userData', process.env.OISIN_USER_DATA)
+if (process.env.OGMA_USER_DATA) {
+  app.setPath('userData', process.env.OGMA_USER_DATA)
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.exit(0)
 }
-
-// The default user agent embeds the product name "Oisín"; the non-ASCII "í" makes
-// protocol.handle reject every request header set, so keep the header ASCII.
-app.userAgentFallback = app.userAgentFallback.replace(/Ois[^/\s]*\//, 'Oisin/')
 
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
 const secrets = new SecretStore(join(app.getPath('userData'), 'keys.json'), {
@@ -50,7 +46,7 @@ const secrets = new SecretStore(join(app.getPath('userData'), 'keys.json'), {
 })
 const sidecar = new SidecarManager(resolveSidecarPaths(app.getAppPath(), process.env, process.platform), () => ({
   ...secrets.env(),
-  ...(settings.get().compatBaseUrl ? { OISIN_COMPAT_BASE_URL: settings.get().compatBaseUrl } : {}),
+  ...(settings.get().compatBaseUrl ? { OGMA_COMPAT_BASE_URL: settings.get().compatBaseUrl } : {}),
 }))
 const prompts = new PromptStore(join(app.getPath('userData'), 'prompts'))
 const snapshots = new SnapshotStore(join(app.getPath('userData'), 'snapshots'))
@@ -106,7 +102,7 @@ function aiSettingsState(): AiSettingsState {
 
 /** Renders HTML to PDF in a hidden window with scripts disabled. */
 async function printToPdf(html: string): Promise<Buffer> {
-  const file = join(app.getPath('temp'), `oisin-export-${randomUUID()}.html`)
+  const file = join(app.getPath('temp'), `ogma-export-${randomUUID()}.html`)
   await writeFile(file, html, 'utf8')
   const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } })
   try {
@@ -132,7 +128,7 @@ function lexicon(): LexiconStore {
 function dictionaryCandidates(): string[] {
   return [
     settings.get().dictionaryPath,
-    process.env.OISIN_DICTIONARY_DB,
+    process.env.OGMA_DICTIONARY_DB,
     resolve(app.getAppPath(), '..', '..', 'ogma', 'data', 'wiktionary.db'),
   ].filter((candidate): candidate is string => Boolean(candidate))
 }
@@ -195,7 +191,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 720,
     minHeight: 480,
-    title: 'Oisín',
+    title: 'Ogma',
     show: false,
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d1c' : '#f7f6f2',

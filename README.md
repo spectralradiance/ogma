@@ -1,4 +1,4 @@
-# Oisín
+# Ogma
 
 A section-based Markdown editor for writing, vocabulary and linguistic research. See [PLAN.md](PLAN.md) for the design and roadmap.
 
@@ -48,13 +48,13 @@ Set up providers under **⚙ AI settings**:
 
 The local model needs PyTorch and the transformers stack: run `.\scripts\setup-sidecar.ps1` without `-NoTorch`. The first local run downloads the model (Qwen 2.5 7B by default, several GB) and needs an NVIDIA GPU; it loads in 4-bit and unloads after 10 idle minutes.
 
-Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%\Oisín\ai-history\<month>.jsonl`.
+Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%\Ogma\ai-history\<month>.jsonl`.
 
 ## Finding, exporting and tracking
 
 - **Search** (sidebar tab, Ctrl+Shift+F) looks through every text file in the workspace folders. The index is built the first time you open Search and then kept current as files change. *Related to the current passage* lists paragraphs elsewhere that share the focused passage's key words.
 - **Export…** (document header) writes a double document's outputs, or its notes, in section order as PDF, HTML or Markdown.
-- **History** (⟲ on any editor) lists earlier versions of that file — saved automatically at most every 10 minutes while you edit, plus snapshots you take — with a diff against the current text and Restore. Versions are kept in `%APPDATA%\Oisín\snapshots`, never in your folders.
+- **History** (⟲ on any editor) lists earlier versions of that file — saved automatically at most every 10 minutes while you edit, plus snapshots you take — with a diff against the current text and Restore. Versions are kept in `%APPDATA%\Ogma\snapshots`, never in your folders.
 - **Stats** (document header) shows notes and output word counts per section, an output goal with progress, and words written per day; today's net count is in the status bar.
 
 ## Editing safety
@@ -63,10 +63,12 @@ Files are edited in place, so saving is careful:
 
 - The encoding (UTF-8, UTF-8 BOM, UTF-16, Windows-1252) and line endings are detected on open and restored on save. Unchanged files round-trip byte for byte. If you type a character Windows-1252 can't store, the file is saved as UTF-8 and a notice says so.
 - Saves are atomic (temp file + rename) and autosave runs 1.2 s after you stop typing, on blur, when switching files and on close.
-- Before Oisín first overwrites a file in a session, it copies the original to `%APPDATA%\Oisín\backups\<session>\`. Backups older than 30 days are pruned.
-- If the file changed on disk since it was opened, Oisín stops and asks: load the disk version, or keep yours.
+- Before Ogma first overwrites a file in a session, it copies the original to `%APPDATA%\Ogma\backups\<session>\`. Backups older than 30 days are pruned.
+- If the file changed on disk since it was opened, Ogma stops and asks: load the disk version, or keep yours.
 
-Set `OISIN_USER_DATA` to a folder to run against a throwaway profile (settings, backups) instead of your real one.
+Set `OGMA_USER_DATA` to a folder to run against a throwaway profile (settings, backups) instead of your real one.
+
+Ogma uses its own `%APPDATA%\Ogma` profile. Existing Oisín data is left untouched; set `OGMA_USER_DATA` to the old profile folder to keep using it. App-specific environment variables now use the `OGMA_` prefix.
 
 ## Checks
 
@@ -81,4 +83,4 @@ cd sidecar; .\.venv\Scripts\python.exe -m pytest -q
 - Every sidecar route requires the token. The renderer never talks to the sidecar directly; it goes through the main process over IPC.
 - The sidecar is given the app's process id and exits when the app does, so it cannot outlive the app, even after a crash.
 - If the sidecar dies or fails three health checks, the app restarts it with backoff, up to three attempts, then shows the error and logs.
-- `OISIN_PYTHON` and `OISIN_SIDECAR_DIR` override the Python and sidecar locations.
+- `OGMA_PYTHON` and `OGMA_SIDECAR_DIR` override the Python and sidecar locations.

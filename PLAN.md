@@ -1,12 +1,12 @@
-# Oisín — Project Plan
+# Ogma — Project Plan
 
-Oisín is a desktop writing workspace with three parts: a Markdown editor that renders as you type (like Typora), documents split into sections where each section has a **notes** file and an **output** file, and lexical and AI tools that work on the text you have selected.
+Ogma is a desktop writing workspace with three parts: a Markdown editor that renders as you type (like Typora), documents split into sections where each section has a **notes** file and an **output** file, and lexical and AI tools that work on the text you have selected.
 
 ---
 
 ## 1. What we can reuse
 
-| Source | What it has | How Oisín uses it |
+| Source | What it has | How Ogma uses it |
 |---|---|---|
 | **ogma/frontend** (React 19, TS, Vite, CodeMirror 6) | `editor/liveMarkdown.ts` (live render built on regexes, one line at a time), `MarkdownEditor.tsx`, `dictionaryHover.ts`, `DictionaryInspector.tsx`, `WorkspaceEditor.tsx` (file tree, Ctrl+S, atomic saves) | Starting point for the editor. We rebuild the live renderer on the Lezer syntax tree (see Phase 1). Hover and inspector patterns carry over. |
 | **ogma/frontend/src/lib/dictionary** + `scripts/setup-wiktionary.ts` | Kaikki Wiktionary to SQLite with FTS5. `ogma/data/wiktionary.db` (~900 MB) is **already built** and stores senses, examples, IPA, **etymology, synonyms, antonyms, derived and related terms** | Copy the module as is. It covers the offline dictionary, etymology and most of the thesaurus with no network calls. |
@@ -103,14 +103,14 @@ class Provider(Protocol):
 **A workspace is a set of external folders edited in place. Nothing is copied.**
 
 ```
-Workspace file  (e.g. Documents/Oisin/writing.oisin-workspace — like a VS Code .code-workspace)
+Workspace file  (e.g. Documents/Ogma/writing.ogma-workspace — like a VS Code .code-workspace)
 {
   "roots": [
     "C:/Users/snowb/Programs/text editors/ogma/data/input/outlines_notes",
     "D:/writing/poetry"
   ],
-  "lexicon": "C:/Users/snowb/Documents/Oisin/lexicon",
-  "promptsDir": "C:/Users/snowb/Documents/Oisin/prompts"
+  "lexicon": "C:/Users/snowb/Documents/Ogma/lexicon",
+  "promptsDir": "C:/Users/snowb/Documents/Ogma/prompts"
 }
 ```
 
@@ -126,29 +126,29 @@ Workspace file  (e.g. Documents/Oisin/writing.oisin-workspace — like a VS Code
 **Editing in place safely:**
 - Atomic saves: write to a temp file in the same folder, then rename.
 - **Preserve encoding and line endings.** Old `.txt` notes may be cp1252 or UTF-8 with a BOM, and may use CRLF. The file is detected on open and written back in the same format.
-- The file watcher detects edits made outside Oisín (VS Code, sync tools). A clean buffer reloads silently. A buffer with unsaved changes shows a merge or keep-mine prompt.
-- **Backup on first write:** the first time a file is modified in a session, its original is copied to `<appData>/Oisin/backups/<date>/…`. Backups are pruned after N days.
+- The file watcher detects edits made outside Ogma (VS Code, sync tools). A clean buffer reloads silently. A buffer with unsaved changes shows a merge or keep-mine prompt.
+- **Backup on first write:** the first time a file is modified in a session, its original is copied to `<appData>/Ogma/backups/<date>/…`. Backups are pruned after N days.
 - Delete moves files to the OS trash, never deletes them permanently.
 
-**App-owned data stays out of your folders by default.** It lives in `<appData>/Oisin/`:
+**App-owned data stays out of your folders by default.** It lives in `<appData>/Ogma/`:
 - Per-document metadata (manual order overrides, collapsed state, custom section titles), keyed by path.
 - AI run history.
-- A "store metadata in folder" option per root writes an `.oisin/` folder into that root instead, for roots you sync between machines.
+- A "store metadata in folder" option per root writes an `.ogma/` folder into that root instead, for roots you sync between machines.
 
 The lexicon and prompt templates live in the folders named in the workspace file, as Markdown files with front-matter, so they can be read and edited outside the app.
 
 ---
 
-## 3a. Repository layout (this `oisin/` folder)
+## 3a. Repository layout (this `ogma/` folder)
 
 ```
-oisin/
+ogma/
   app/                  # Electron + React + TS (electron-vite)
     src/main/           # workspace, dictionary, lexicon, sidecar manager, IPC
     src/preload/
     src/renderer/       # React UI, CodeMirror extensions
   sidecar/              # Python FastAPI AI server
-    oisin_ai/
+    ogma_ai/
       main.py           # routes: /health, /providers, /ai/run (SSE), /jobs, /embed
       router.py         # task → profile → provider, mode filtering, fallback
       types.py          # GenerateRequest, StreamEvent, ProviderError kinds
@@ -184,7 +184,7 @@ Also landed early from Phase 2 because in-place editing needed them: a lazy file
 
 ### Phase 2 — Workspace, documents & sections (~1 week) ✅ done 2026-09-25
 What shipped differs from the spec below in four places:
-- Roots live in the app's settings; the separate `.oisin-workspace` file (several named workspaces) is deferred until it is needed.
+- Roots live in the app's settings; the separate `.ogma-workspace` file (several named workspaces) is deferred until it is needed.
 - Reordering is ↑/↓ (swapping ordinals, both files renamed together) rather than drag and drop.
 - Scroll sync between panes is deferred.
 - The watcher uses Node's recursive `fs.watch`; on folders it cannot watch (possibly some cloud-drive mounts) the tree only refreshes when a folder is reopened, but edits still never overwrite outside changes, because every save checks the file's mtime.
@@ -238,7 +238,7 @@ Shipped: search across all roots (SQLite FTS5 index, Ctrl+Shift+F), keyword-base
 - Word-count goals and writing statistics for each section.
 
 **Deferred (not planned for now):**
-- LM Studio / Bionic integration. Its models could be used through `openai_compat` with no new code. An Oisín MCP server that lets Bionic or Claude work on the workspace (with edits as reviewable proposals) could be revisited later.
+- LM Studio / Bionic integration. Its models could be used through `openai_compat` with no new code. An Ogma MCP server that lets Bionic or Claude work on the workspace (with edits as reviewable proposals) could be revisited later.
 
 ---
 
@@ -249,7 +249,7 @@ Shipped: search across all roots (SQLite FTS5 index, Ctrl+Shift+F), keyword-base
 - AI runs through a provider abstraction: a local model (ogma-style transformers/bitsandbytes), plus Claude, OpenAI, Gemini and any OpenAI-compatible host. The modes are Local, Cloud and Hybrid.
 - LM Studio / Bionic is deferred.
 - A workspace is a set of external folders edited in place, with no copying.
-- The code lives in this `oisin/` folder. The scope is the features listed here and nothing more.
+- The code lives in this `ogma/` folder. The scope is the features listed here and nothing more.
 
 **Still open (defaults in bold; nothing blocks Phase 0):**
 1. Reordering sections: **renumber the filename prefixes** or store the order only in metadata.

@@ -15,11 +15,11 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from oisin_ai.ai_types import ChatMessage, GenerateRequest, Profile, ProviderError
-from oisin_ai.providers.claude import FALLBACK_BETA, ClaudeProvider
-from oisin_ai.providers.gemini import GeminiProvider
-from oisin_ai.providers.local_hf import LocalHFProvider
-from oisin_ai.providers.openai_chat import compat_provider, openai_provider
+from ogma_ai.ai_types import ChatMessage, GenerateRequest, Profile, ProviderError
+from ogma_ai.providers.claude import FALLBACK_BETA, ClaudeProvider
+from ogma_ai.providers.gemini import GeminiProvider
+from ogma_ai.providers.local_hf import LocalHFProvider
+from ogma_ai.providers.openai_chat import compat_provider, openai_provider
 
 REQUEST = GenerateRequest(
     system="You are terse.",
@@ -158,7 +158,7 @@ def test_openai_streams_through_chat_completions(server: str) -> None:
 
 
 def test_openai_compatible_host_needs_only_a_base_url(server: str) -> None:
-    provider = compat_provider({"OISIN_COMPAT_BASE_URL": f"{server}/v1"})
+    provider = compat_provider({"OGMA_COMPAT_BASE_URL": f"{server}/v1"})
     assert provider.health().configured
     text, _ = collect(provider, Profile("open", "openai_compat", "open-model"))
     assert text == "Hello"

@@ -32,8 +32,8 @@ describe('queries', () => {
 })
 
 async function workspace() {
-  const root = await mkdtemp(path.join(tmpdir(), 'oisin-search-'))
-  const index = new SearchIndex(path.join(await mkdtemp(path.join(tmpdir(), 'oisin-searchdb-')), 'search.db'))
+  const root = await mkdtemp(path.join(tmpdir(), 'ogma-search-'))
+  const index = new SearchIndex(path.join(await mkdtemp(path.join(tmpdir(), 'ogma-searchdb-')), 'search.db'))
   await mkdir(path.join(root, 'Night Sky'))
   await mkdir(path.join(root, '.git'))
   await writeFile(path.join(root, 'Night Sky', '1 planets-notes.md'), 'planets wander against the fixed stars\n\nretrograde motion')

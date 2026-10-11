@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run Oisín for development.
+    Run Ogma for development.
 
 .DESCRIPTION
     By default starts the Electron app in dev mode; the app launches the Python
@@ -25,7 +25,7 @@ if (-not (Test-Path $python)) {
 
 if ($SidecarOnly) {
     Push-Location $sidecarDir
-    try { & $python -m oisin_ai --port $Port } finally { Pop-Location }
+    try { & $python -m ogma_ai --port $Port } finally { Pop-Location }
     return
 }
 

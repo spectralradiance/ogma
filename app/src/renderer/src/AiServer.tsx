@@ -42,7 +42,7 @@ export function AiServerSettings({ status }: { status: SidecarStatus | null }) {
   const index = chosenIndex ?? suggestCudaIndex(health?.gpu.devices[0]?.driver_version)
 
   const refreshLogs = useCallback(() => {
-    void window.oisin.sidecar.getLogs().then(setLogs)
+    void window.ogma.sidecar.getLogs().then(setLogs)
   }, [])
 
   // Refresh on every state change, and follow the log while installing.
@@ -62,7 +62,7 @@ export function AiServerSettings({ status }: { status: SidecarStatus | null }) {
   const installTorch = () => {
     const question = `Install PyTorch (${index}) into the AI server’s Python environment?\n\n`
       + 'This downloads about 3 GB and stops the AI server until it finishes. The local model needs it; cloud models do not.'
-    if (window.confirm(question)) act(() => window.oisin.sidecar.installTorch(index))
+    if (window.confirm(question)) act(() => window.ogma.sidecar.installTorch(index))
   }
 
   const torch = health?.torch
@@ -77,13 +77,13 @@ export function AiServerSettings({ status }: { status: SidecarStatus | null }) {
         <strong>{SERVER_STATE_LABEL[state]}</strong>
         <span className="ai-server-actions">
           {(state === 'stopped' || state === 'error') && (
-            <button type="button" onClick={() => act(() => window.oisin.sidecar.restart())} disabled={busy}>Start</button>
+            <button type="button" onClick={() => act(() => window.ogma.sidecar.restart())} disabled={busy}>Start</button>
           )}
           {(state === 'online' || state === 'starting') && (
             <>
-              <button type="button" onClick={() => act(() => window.oisin.sidecar.restart())} disabled={busy}
+              <button type="button" onClick={() => act(() => window.ogma.sidecar.restart())} disabled={busy}
                 title="Stop and start the AI server (picks up new keys and packages)">Restart</button>
-              <button type="button" onClick={() => act(() => window.oisin.sidecar.stop())} disabled={busy}
+              <button type="button" onClick={() => act(() => window.ogma.sidecar.stop())} disabled={busy}
                 title="Stop the AI server; AI features are unavailable until it is started">Stop</button>
             </>
           )}
@@ -125,7 +125,7 @@ export function AiServerSettings({ status }: { status: SidecarStatus | null }) {
               <>
                 {loaded.join(', ')} · in GPU memory{' '}
                 <button type="button" className="link-button" disabled={busy}
-                  onClick={() => act(() => window.oisin.ai.unloadLocal())} title="Free the GPU memory now; it reloads on next use">Unload</button>
+                  onClick={() => act(() => window.ogma.ai.unloadLocal())} title="Free the GPU memory now; it reloads on next use">Unload</button>
               </>
             ) : torch?.installed && torch.cuda_available ? 'none loaded (loads on first use, unloads when idle)' : 'unavailable without PyTorch (CUDA)'}
           </dd>

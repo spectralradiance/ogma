@@ -15,8 +15,8 @@ import {
 } from './fileService'
 
 async function workspace() {
-  const root = await mkdtemp(path.join(tmpdir(), 'oisin-files-'))
-  const backups = path.join(await mkdtemp(path.join(tmpdir(), 'oisin-backups-')), 'backups')
+  const root = await mkdtemp(path.join(tmpdir(), 'ogma-files-'))
+  const backups = path.join(await mkdtemp(path.join(tmpdir(), 'ogma-backups-')), 'backups')
   const guard = new PathGuard(() => [root])
   return { root, backups, guard, store: new BackupStore(backups, guard) }
 }

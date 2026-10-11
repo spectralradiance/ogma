@@ -5,18 +5,18 @@ import { suggestCudaIndex } from '../shared/torch'
 
 describe('resolveSidecarPaths', () => {
   it('uses the sibling sidecar venv on Windows', () => {
-    const paths = resolveSidecarPaths('C:\\code\\oisin\\app', {}, 'win32')
-    expect(paths.sidecarDir.replaceAll('\\', '/')).toMatch(/oisin\/sidecar$/)
+    const paths = resolveSidecarPaths('C:\\code\\ogma\\app', {}, 'win32')
+    expect(paths.sidecarDir.replaceAll('\\', '/')).toMatch(/ogma\/sidecar$/)
     expect(paths.python.replaceAll('\\', '/')).toMatch(/sidecar\/\.venv\/Scripts\/python\.exe$/)
   })
 
   it('uses bin/python elsewhere', () => {
-    const paths = resolveSidecarPaths('/code/oisin/app', {}, 'linux')
+    const paths = resolveSidecarPaths('/code/ogma/app', {}, 'linux')
     expect(paths.python.replaceAll('\\', '/')).toMatch(/sidecar\/\.venv\/bin\/python$/)
   })
 
   it('honours environment overrides', () => {
-    const paths = resolveSidecarPaths('/x', { OISIN_SIDECAR_DIR: '/s', OISIN_PYTHON: '/py' }, 'linux')
+    const paths = resolveSidecarPaths('/x', { OGMA_SIDECAR_DIR: '/s', OGMA_PYTHON: '/py' }, 'linux')
     expect(paths).toEqual({ sidecarDir: '/s', python: '/py' })
   })
 })
@@ -61,7 +61,7 @@ describe('suggestCudaIndex', () => {
 
 describe('torchInstallCommands', () => {
   it('installs torch from the chosen index, then the local-model libraries', () => {
-    const [torch, local] = torchInstallCommands('C:\\oisin\\sidecar', 'cu128')
+    const [torch, local] = torchInstallCommands('C:\\ogma\\sidecar', 'cu128')
     expect(torch.slice(-3)).toEqual(['torch', '--index-url', 'https://download.pytorch.org/whl/cu128'])
     expect(local.at(-1)).toMatch(/requirements-local\.txt$/)
     expect(() => torchInstallCommands('x', 'cu999; rm -rf')).toThrow(/Unknown/)

@@ -11,7 +11,7 @@ let unsubscribe: (() => void) | null = null
  */
 export function onDiskChange(listener: Listener): () => void {
   listeners.add(listener)
-  unsubscribe ??= window.oisin.files.onChanged((paths) => {
+  unsubscribe ??= window.ogma.files.onChanged((paths) => {
     for (const current of [...listeners]) current(paths)
   })
   return () => {

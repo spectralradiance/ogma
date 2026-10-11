@@ -103,14 +103,14 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
   const log = useRef(new Map<string, AiEvent[]>())
   const current = useRef<string | null>(null)
 
-  const refreshSettings = useCallback(() => window.oisin.ai.settings().then(setSettings), [])
+  const refreshSettings = useCallback(() => window.ogma.ai.settings().then(setSettings), [])
 
   useEffect(() => {
     void refreshSettings()
   }, [refreshSettings])
 
   // Events can arrive before run() resolves with the id, so every run's events are kept.
-  useEffect(() => window.oisin.ai.onEvent((runId, event) => {
+  useEffect(() => window.ogma.ai.onEvent((runId, event) => {
     const events = log.current.get(runId) ?? []
     events.push(event)
     log.current.set(runId, events)
@@ -121,7 +121,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
     setMessage(null)
     setReview(false)
     try {
-      const id = await window.oisin.ai.run({ task, variables, profileId: profileId || undefined })
+      const id = await window.ogma.ai.run({ task, variables, profileId: profileId || undefined })
       current.current = id
       const initial: RunState = { id, task, status: 'running', text: '', start: null, notices: [], error: null, usage: null, ...extra }
       setRun((log.current.get(id) ?? []).reduce(reduce, initial))
@@ -184,7 +184,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
 
   const setMode = (mode: AiMode) => {
     if (!settings) return
-    void window.oisin.ai.saveConfig({ ...settings.config, mode }).then(setSettings)
+    void window.ogma.ai.saveConfig({ ...settings.config, mode }).then(setSettings)
   }
 
   const configured = (providerId: string) => providers.find((provider) => provider.id === providerId)?.configured ?? false
@@ -252,7 +252,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
           <section className="ai-result">
             <div className="ai-provenance">
               {run.start ? provenance : running ? 'Starting…' : ''}
-              {running && <button type="button" className="link-button" onClick={() => void window.oisin.ai.cancel(run.id)}>Cancel</button>}
+              {running && <button type="button" className="link-button" onClick={() => void window.ogma.ai.cancel(run.id)}>Cancel</button>}
             </div>
             {run.start && run.start.skipped.length > 0 && (
               <p className="lexical-hint" title={run.start.skipped.join('\n')}>Skipped: {run.start.skipped.map((entry) => entry.split(':')[0]).join(', ')}</p>

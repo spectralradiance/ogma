@@ -83,29 +83,29 @@ export function App() {
     let alive = true
     let pushed = false
     // Subscribe first so a status pushed while the initial fetch is in flight is not overwritten.
-    const unsubscribe = window.oisin.sidecar.onStatus((next) => {
+    const unsubscribe = window.ogma.sidecar.onStatus((next) => {
       pushed = true
       setStatus(next)
     })
-    void window.oisin.sidecar.getStatus().then((initial) => {
+    void window.ogma.sidecar.getStatus().then((initial) => {
       if (alive && !pushed) setStatus(initial)
     })
-    void window.oisin.preferences.get().then((stored) => {
+    void window.ogma.preferences.get().then((stored) => {
       if (!alive) return
       applyAppearance(stored)
       setPreferences(stored)
     })
-    void window.oisin.workspace.get().then((initial) => {
+    void window.ogma.workspace.get().then((initial) => {
       if (alive) setWorkspace(initial)
     })
     const today = (days: { notes: number; output: number }[]) => {
       const last = days.at(-1)
       return last ? last.notes + last.output : 0
     }
-    void window.oisin.stats.daily(1).then((days) => {
+    void window.ogma.stats.daily(1).then((days) => {
       if (alive) setTodayWords(today(days))
     })
-    const unsubscribeStats = window.oisin.stats.onChanged((days) => setTodayWords(today(days)))
+    const unsubscribeStats = window.ogma.stats.onChanged((days) => setTodayWords(today(days)))
     return () => {
       alive = false
       unsubscribe()
@@ -176,7 +176,7 @@ export function App() {
     setPreferences(next)
     // Sliders change many times a second; write once they settle.
     window.clearTimeout(savePreferencesTimer.current)
-    savePreferencesTimer.current = window.setTimeout(() => void window.oisin.preferences.save(next), 300)
+    savePreferencesTimer.current = window.setTimeout(() => void window.ogma.preferences.save(next), 300)
   }, [])
 
   const toggleLeft = useCallback(() => {
@@ -296,7 +296,7 @@ export function App() {
   /** Opens a file at a line: its double document scrolled to the section, or the file itself. */
   const openAt = useCallback(async (hit: { path: string; line: number }) => {
     const folder = dirname(hit.path)
-    const model = await window.oisin.folders.read(folder).catch(() => null)
+    const model = await window.ogma.folders.read(folder).catch(() => null)
     const section = model?.sections.find((candidate) =>
       [candidate.notes, candidate.output].some((name) => name !== null && samePath(joinPath(folder, name), hit.path)))
     const existing = panes.current.get(hit.path)
@@ -321,8 +321,8 @@ export function App() {
     }
   }, [open, view, changeView])
 
-  const addRoot = () => void window.oisin.workspace.addRoot().then(setWorkspace)
-  const removeRoot = (path: string) => void window.oisin.workspace.removeRoot(path).then(setWorkspace)
+  const addRoot = () => void window.ogma.workspace.addRoot().then(setWorkspace)
+  const removeRoot = (path: string) => void window.ogma.workspace.removeRoot(path).then(setWorkspace)
 
   const activePath = active?.path ?? null
   const liveWords = useMemo(
@@ -352,14 +352,14 @@ export function App() {
       const folder = active?.folder
       if (!section || !folder) return null
       const read = async (path: string) => panes.current.get(path)?.getText()
-        ?? window.oisin.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
+        ?? window.ogma.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
       // An open output editor already leaves out the section heading; match that when reading from disk.
       const [notes, output] = await Promise.all([
         read(section.notesPath),
         read(section.outputPath).then((text) => (panes.current.has(section.outputPath) ? text : splitLeadingHeading(text).body)),
       ])
       // Document-wide notes (outline, sources) give the draft its context; capped to keep prompts reasonable.
-      const model = await window.oisin.folders.read(folder).catch(() => null)
+      const model = await window.ogma.folders.read(folder).catch(() => null)
       const documentNotes = await Promise.all((model?.documentNotes ?? []).slice(0, 4).map(async (name) => {
         const text = await read(joinPath(folder, name))
         return `### ${name}\n${text.slice(0, 12_000)}`
@@ -464,7 +464,7 @@ export function App() {
         )}
         {!target && (
           <div className="placeholder">
-            <h1 className="wordmark">Oisín</h1>
+            <h1 className="wordmark">Ogma</h1>
             <p>{workspace.roots.length > 0 ? 'Choose a document or file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
           </div>
         )}

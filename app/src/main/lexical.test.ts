@@ -11,7 +11,7 @@ import { Dictionary, lookupVariants, prefixQuery } from './dictionary'
 import { LexiconStore } from './lexicon'
 
 async function fixtureDictionary(): Promise<string> {
-  const file = path.join(await mkdtemp(path.join(tmpdir(), 'oisin-dict-')), 'wiktionary.db')
+  const file = path.join(await mkdtemp(path.join(tmpdir(), 'ogma-dict-')), 'wiktionary.db')
   const db = new DatabaseSync(file)
   db.exec(`
     CREATE TABLE entries (id INTEGER PRIMARY KEY, word TEXT NOT NULL, pos TEXT, etymology TEXT, data JSON NOT NULL);
@@ -124,7 +124,7 @@ describe('lexicon files', () => {
 
 describe('LexiconStore', () => {
   it('saves, lists, replaces and imports Aisling vocabulary', async () => {
-    const store = new LexiconStore(path.join(await mkdtemp(path.join(tmpdir(), 'oisin-lexicon-')), 'lexicon'))
+    const store = new LexiconStore(path.join(await mkdtemp(path.join(tmpdir(), 'ogma-lexicon-')), 'lexicon'))
     expect(await store.list()).toEqual([])
     await store.save(entry)
     await store.save({ ...entry, definition: 'Updated.', tags: ['mood', 'mood', ' '] })
@@ -132,7 +132,7 @@ describe('LexiconStore', () => {
     expect(listed).toHaveLength(1)
     expect(listed[0]).toMatchObject({ definition: 'Updated.', tags: ['mood'] })
 
-    const aisling = await mkdtemp(path.join(tmpdir(), 'oisin-aisling-'))
+    const aisling = await mkdtemp(path.join(tmpdir(), 'ogma-aisling-'))
     await cp('C:\\Users\\snowb\\Programs\\text editors\\aisling\\Aisling\\Vocabulary', aisling, { recursive: true })
       .catch(async () => {
         await writeFile(path.join(aisling, 'Calm.json'), JSON.stringify({ word: 'Calm', definition: 'Still.', tags: 'emotion, peace', synonyms: 'peaceful, tranquil' }))

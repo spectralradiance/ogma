@@ -48,7 +48,7 @@ function FontPicker({ value, fonts, onChange, sample }: { value: string; fonts: 
           onKeyDown={(event) => { if (event.key === 'Enter' && custom.trim()) onChange(`'${custom.trim().replace(/['"]/g, '')}', serif`) }}
         />
       )}
-      {sample && <span className="font-sample" style={{ fontFamily: value }}>The night sky, Oisín</span>}
+      {sample && <span className="font-sample" style={{ fontFamily: value }}>The night sky, Ogma</span>}
     </span>
   )
 }

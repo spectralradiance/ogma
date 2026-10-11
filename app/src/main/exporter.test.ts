@@ -29,7 +29,7 @@ describe('renderHtml', () => {
 
 describe('collectDocument and writeExport', () => {
   it('takes each section’s output (or notes) in order and reports what was skipped', async () => {
-    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-export-'))
+    const folder = await mkdtemp(path.join(tmpdir(), 'ogma-export-'))
     await writeFile(path.join(folder, '01 First Light-notes.md'), 'notes one')
     await writeFile(path.join(folder, '01 First Light-output.md'), '## First Light\n\nOutput one.')
     await writeFile(path.join(folder, '02 Wanderers-notes.md'), 'notes two')

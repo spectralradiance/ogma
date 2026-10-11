@@ -124,8 +124,8 @@ describe('rename planning', () => {
 })
 
 describe('isIgnoredChange', () => {
-  it('ignores Oisín temp files and tool folders', () => {
-    expect(isIgnoredChange('C:\\n\\.a.md.oisin-1a2b.tmp')).toBe(true)
+  it('ignores Ogma temp files and tool folders', () => {
+    expect(isIgnoredChange('C:\\n\\.a.md.ogma-1a2b.tmp')).toBe(true)
     expect(isIgnoredChange('C:\\n\\.git\\index')).toBe(true)
     expect(isIgnoredChange('C:\\n\\1 the first era')).toBe(false)
   })
@@ -133,7 +133,7 @@ describe('isIgnoredChange', () => {
 
 describe('workspace operations on disk', () => {
   async function folderWith(...names: string[]) {
-    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-sections-'))
+    const folder = await mkdtemp(path.join(tmpdir(), 'ogma-sections-'))
     for (const name of names) await writeFile(path.join(folder, name), name)
     return folder
   }
@@ -175,7 +175,7 @@ describe('workspace operations on disk', () => {
 
 describe('mergeSections', () => {
   it('appends the later section to the earlier one, keeping its encoding, then trashes the later files', async () => {
-    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-merge-'))
+    const folder = await mkdtemp(path.join(tmpdir(), 'ogma-merge-'))
     await writeFile(path.join(folder, '1 first'), Buffer.from([0x49, 0x92, 0x6d, 0x0d, 0x0a]))
     await writeFile(path.join(folder, '2 second'), 'second notes\n')
     await writeFile(path.join(folder, '2 second-output.md'), 'Second output.\n')
@@ -195,7 +195,7 @@ describe('mergeSections', () => {
 
 describe('section headings', () => {
   async function setup() {
-    const folder = await mkdtemp(path.join(tmpdir(), 'oisin-heading-'))
+    const folder = await mkdtemp(path.join(tmpdir(), 'ogma-heading-'))
     await writeFile(path.join(folder, '02 Starlight-notes.md'), 'notes\n')
     await writeFile(path.join(folder, '02 Starlight-output.md'), '# Starrlight\r\n\r\nLight is fast.\r\n')
     const backups = new BackupStore(path.join(folder, '..', `backups-${path.basename(folder)}`), new PathGuard(() => [folder]))

@@ -11,7 +11,7 @@ export type Outline =
   | { kind: 'file'; title: string; path: string; file: FileOutline }
 
 async function readOutline(path: string): Promise<FileOutline> {
-  const document = await window.oisin.files.read(path, { allowMissing: true }).catch(() => null)
+  const document = await window.ogma.files.read(path, { allowMissing: true }).catch(() => null)
   return document && document.mtimeMs !== null ? outlineFile(document.text) : EMPTY_FILE
 }
 
@@ -20,7 +20,7 @@ async function loadOutline(target: OpenTarget): Promise<Outline | null> {
     const name = target.path.split(/[\\/]/).at(-1) ?? target.path
     return { kind: 'file', title: name, path: target.path, file: await readOutline(target.path) }
   }
-  const model = await window.oisin.folders.read(target.folder).catch(() => null)
+  const model = await window.ogma.folders.read(target.folder).catch(() => null)
   if (!model) return null
   const sections = await Promise.all(model.sections.map(async (section) => {
     const notesPath = joinPath(target.folder, section.notesName)

@@ -1,6 +1,6 @@
 // Contracts shared by the main process, preload script and renderer.
 
-/** Mirrors sidecar/oisin_ai/schemas.py. */
+/** Mirrors sidecar/ogma_ai/schemas.py. */
 export interface GpuDevice {
   index: number
   name: string
@@ -240,8 +240,8 @@ export interface SearchStatus {
   ready: boolean
 }
 
-/** Exposed to the renderer as `window.oisin` by the preload script. */
-export interface OisinApi {
+/** Exposed to the renderer as `window.ogma` by the preload script. */
+export interface OgmaApi {
   preferences: {
     get(): Promise<Preferences>
     save(preferences: Preferences): Promise<Preferences>
@@ -398,4 +398,4 @@ export const MATCH_START = '\u0002'
 export const MATCH_END = '\u0003'
 
 /** Custom protocol that serves images from inside workspace roots to the editor. */
-export const LOCAL_FILE_SCHEME = 'oisin-file'
+export const LOCAL_FILE_SCHEME = 'ogma-file'

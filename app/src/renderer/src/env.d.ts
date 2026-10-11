@@ -1,8 +1,8 @@
-import type { OisinApi } from '../../shared/ipc'
+import type { OgmaApi } from '../../shared/ipc'
 
 declare global {
   interface Window {
-    oisin: OisinApi
+    ogma: OgmaApi
   }
 }
 

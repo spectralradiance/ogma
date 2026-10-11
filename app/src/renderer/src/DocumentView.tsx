@@ -112,13 +112,13 @@ export function DocumentView({
   const sections = useRef(new Map<string, HTMLElement>())
   const body = useRef<HTMLDivElement>(null)
 
-  const load = useCallback(() => window.oisin.folders.read(folder).then(
+  const load = useCallback(() => window.ogma.folders.read(folder).then(
     async (next) => {
       // Section headings for every section, including those whose output is not shown.
       const found = await Promise.all(next.sections.map(async (section): Promise<[string, LeadingHeading | null]> => {
         const path = joinPath(folder, section.outputName)
         if (!section.output) return [path, null]
-        const document = await window.oisin.files.read(path, { allowMissing: true }).catch(() => null)
+        const document = await window.ogma.files.read(path, { allowMissing: true }).catch(() => null)
         return [path, document ? splitLeadingHeading(document.text).heading : null]
       }))
       setLeading(Object.fromEntries(found))
@@ -235,7 +235,7 @@ export function DocumentView({
   }
 
   const setHeading = (section: SectionInfo, heading: LeadingHeading | null) => {
-    void onSectionOperation(folder, section.stem, () => window.oisin.sections.setHeading(folder, section.stem, heading))
+    void onSectionOperation(folder, section.stem, () => window.ogma.sections.setHeading(folder, section.stem, heading))
   }
   // New headings follow the level the document's other section headings use.
   const headingLevel = Object.values(leading).find((heading) => heading)?.level ?? 1
@@ -249,7 +249,7 @@ export function DocumentView({
       + `Its notes and output are added to the end of “${earlier.title}”'s, and its files go to the Recycle Bin. `
       + 'The files that change are backed up first.'
     if (!window.confirm(question)) return
-    void onSectionOperation(folder, later.stem, () => window.oisin.sections.merge(folder, earlier.stem, later.stem))
+    void onSectionOperation(folder, later.stem, () => window.ogma.sections.merge(folder, earlier.stem, later.stem))
   }
 
   const [left, right]: [Role, Role] = swaps.split ? ['output', 'notes'] : ['notes', 'output']
@@ -350,8 +350,8 @@ export function DocumentView({
               previous={model.sections[index - 1] ?? null}
               next={model.sections[index + 1] ?? null}
               onLayout={(layout) => setLayout(section, layout)}
-              onRename={(title) => void onSectionOperation(folder, section.stem, () => window.oisin.sections.rename(folder, section.stem, title))}
-              onMove={(direction) => void onSectionOperation(folder, section.stem, () => window.oisin.sections.move(folder, section.stem, direction))}
+              onRename={(title) => void onSectionOperation(folder, section.stem, () => window.ogma.sections.rename(folder, section.stem, title))}
+              onMove={(direction) => void onSectionOperation(folder, section.stem, () => window.ogma.sections.move(folder, section.stem, direction))}
               onMerge={(direction) => merge(section, direction)}
               onHistory={(role) => handles.current.get(pathOf(section, role))?.openHistory()}
               heading={leading[pathOf(section, 'output')] ?? null}
@@ -360,7 +360,7 @@ export function DocumentView({
                 const heading = leading[pathOf(section, 'output')]
                 if (!heading) return
                 if (use === 'title') setHeading(section, { ...heading, text: section.title })
-                else void onSectionOperation(folder, section.stem, () => window.oisin.sections.rename(folder, section.stem, heading.text))
+                else void onSectionOperation(folder, section.stem, () => window.ogma.sections.rename(folder, section.stem, heading.text))
               }}
             />
             {view === 'column' && (swaps.column ? (

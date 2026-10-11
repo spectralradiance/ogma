@@ -1,6 +1,6 @@
 // Per-machine view preferences. Storage can be unavailable, so every access is guarded.
 
-const PREFIX = 'oisin.'
+const PREFIX = 'ogma.'
 
 export function readPref(key: string): string | null {
   try {

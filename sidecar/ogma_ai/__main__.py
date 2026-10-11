@@ -1,6 +1,6 @@
-"""Run the sidecar: python -m oisin_ai --port 8765 [--parent-pid PID]
+"""Run the sidecar: python -m ogma_ai --port 8765 [--parent-pid PID]
 
-The desktop app sets OISIN_SIDECAR_TOKEN and passes its own process id as
+The desktop app sets OGMA_SIDECAR_TOKEN and passes its own process id as
 --parent-pid. When run by hand without a token, one is generated and printed so
 the API can still be exercised.
 """
@@ -66,7 +66,7 @@ def watch_parent(pid: int, on_exit: Callable[[], None]) -> threading.Thread:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="oisin_ai", description=__doc__)
+    parser = argparse.ArgumentParser(prog="ogma_ai", description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--parent-pid", type=int, default=None, help="exit when this process exits")
@@ -75,10 +75,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.host not in LOOPBACK_HOSTS:
         parser.error("the sidecar only binds to loopback addresses")
 
-    token = os.environ.get("OISIN_SIDECAR_TOKEN", "")
+    token = os.environ.get("OGMA_SIDECAR_TOKEN", "")
     if not token:
         token = secrets.token_hex(32)
-        print(f"OISIN_SIDECAR_TOKEN not set; token for this session: {token}", flush=True)
+        print(f"OGMA_SIDECAR_TOKEN not set; token for this session: {token}", flush=True)
 
     server: uvicorn.Server | None = None
 

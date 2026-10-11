@@ -90,7 +90,7 @@ function SectionRow({ folder: identity, section, depth, index, count, onChanged 
         onCancel={() => setRenaming(false)}
         onSubmit={(title) => {
           setRenaming(false)
-          if (title !== section.title) run(() => window.oisin.sections.rename(folder, section.stem, title))
+          if (title !== section.title) run(() => window.ogma.sections.rename(folder, section.stem, title))
         }}
       />
     )
@@ -119,9 +119,9 @@ function SectionRow({ folder: identity, section, depth, index, count, onChanged 
           {numbered && (
             <>
               <button type="button" className="icon-button" disabled={index === 0} title="Move up"
-                onClick={() => run(() => window.oisin.sections.move(folder, section.stem, 'up'))}>↑</button>
+                onClick={() => run(() => window.ogma.sections.move(folder, section.stem, 'up'))}>↑</button>
               <button type="button" className="icon-button" disabled={index === count - 1} title="Move down"
-                onClick={() => run(() => window.oisin.sections.move(folder, section.stem, 'down'))}>↓</button>
+                onClick={() => run(() => window.ogma.sections.move(folder, section.stem, 'down'))}>↓</button>
             </>
           )}
           <button type="button" className="icon-button" title="Rename" onClick={() => setRenaming(true)}>✎</button>
@@ -133,7 +133,7 @@ function SectionRow({ folder: identity, section, depth, index, count, onChanged 
               const files = [section.notes, section.output].filter(Boolean).join('” and “')
               if (window.confirm(`Move “${files}” to the Recycle Bin?`)) {
                 run(async () => {
-                  await window.oisin.sections.trash(folder, section.stem)
+                  await window.ogma.sections.trash(folder, section.stem)
                   return null
                 })
               }
@@ -163,7 +163,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Editing>(null)
 
-  const load = useCallback(() => window.oisin.folders.read(path).then(
+  const load = useCallback(() => window.ogma.folders.read(path).then(
     (next) => {
       setModel(next)
       setError(null)
@@ -186,7 +186,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   const identity: FolderIdentity = { path, title, ordinal: ordinal ?? null }
   const createSection = (name: string) => {
     setEditing(null)
-    window.oisin.sections.create(path, name).then(
+    window.ogma.sections.create(path, name).then(
       (section) => {
         void load()
         tree.open(openDocument(identity, section.stem))
@@ -196,7 +196,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
   }
   const createFolder = (name: string) => {
     setEditing(null)
-    window.oisin.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
+    window.ogma.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
   }
 
   const documentOpen = tree.target?.kind === 'document' && samePath(tree.target.folder, path)
@@ -215,7 +215,7 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
             const wasOpen = open
             setOpen(true)
             void (async () => {
-              const current = model ?? await window.oisin.folders.read(path).catch(() => null)
+              const current = model ?? await window.ogma.folders.read(path).catch(() => null)
               if (current && current.sections.length > 0) tree.open(openDocument(identity, null))
               else if (wasOpen) setOpen(false)
             })()

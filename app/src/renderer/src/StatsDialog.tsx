@@ -45,11 +45,11 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    window.oisin.stats.document(folder).then((result) => {
+    window.ogma.stats.document(folder).then((result) => {
       setStats(result)
       setGoal(result.goal ? String(result.goal) : '')
     }, (reason: unknown) => setError(errorMessage(reason)))
-    void window.oisin.stats.daily(14).then(setDays)
+    void window.ogma.stats.daily(14).then(setDays)
   }, [folder])
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
 
   const saveGoal = () => {
     const words = Number(goal.replace(/[^\d]/g, ''))
-    window.oisin.stats.setGoal(folder, words > 0 ? words : null).then(setStats, (reason: unknown) => setError(errorMessage(reason)))
+    window.ogma.stats.setGoal(folder, words > 0 ? words : null).then(setStats, (reason: unknown) => setError(errorMessage(reason)))
   }
 
   const progress = stats?.goal ? Math.min(1, stats.outputWords / stats.goal) : null

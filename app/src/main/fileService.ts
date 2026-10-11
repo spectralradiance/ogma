@@ -66,7 +66,7 @@ export class PathGuard {
   }
 }
 
-/** Copies each file's original bytes once per app session before Oisín first overwrites it. */
+/** Copies each file's original bytes once per app session before Ogma first overwrites it. */
 export class BackupStore {
   private readonly sessionDir: string
   private readonly backedUp = new Set<string>()
@@ -88,7 +88,7 @@ export class BackupStore {
     this.backedUp.add(key)
   }
 
-  /** Removes session folders older than `days`. Only touches Oisín's own backup copies. */
+  /** Removes session folders older than `days`. Only touches Ogma's own backup copies. */
   static async prune(backupsDir: string, days: number, now = Date.now()): Promise<void> {
     let entries
     try {
@@ -163,7 +163,7 @@ export async function writeTextDocument(
   const encoded = encodeText(request.text, request.format)
   const temporary = path.join(
     path.dirname(target),
-    `.${path.basename(target)}.oisin-${randomBytes(4).toString('hex')}.tmp`,
+    `.${path.basename(target)}.ogma-${randomBytes(4).toString('hex')}.tmp`,
   )
   await writeFile(temporary, encoded.bytes, { flag: 'wx' })
   try {

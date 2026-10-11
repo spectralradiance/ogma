@@ -27,7 +27,7 @@ function findSection(model: FolderModel, stem: string): SectionInfo {
  */
 export async function applyRenames(folder: string, steps: RenameStep[]): Promise<void> {
   const tag = randomBytes(4).toString('hex')
-  const staged = steps.map((step, index) => ({ ...step, temporary: `.${step.from}.oisin-rename-${tag}-${index}` }))
+  const staged = steps.map((step, index) => ({ ...step, temporary: `.${step.from}.ogma-rename-${tag}-${index}` }))
   const done: RenameStep[] = []
   try {
     for (const step of staged) {

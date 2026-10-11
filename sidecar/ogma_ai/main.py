@@ -66,7 +66,7 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="Oisín AI sidecar",
+        title="Ogma AI sidecar",
         version=__version__,
         lifespan=lifespan,
         docs_url=None,

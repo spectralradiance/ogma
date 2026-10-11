@@ -3,11 +3,11 @@ import path from 'node:path'
 
 const DEBOUNCE_MS = 250
 
-/** Oisín's own temporary files, plus folders that are never part of a document. */
+/** Ogma's own temporary files, plus folders that are never part of a document. */
 export function isIgnoredChange(changed: string): boolean {
   const parts = changed.split(/[\\/]/)
   const name = parts.at(-1) ?? ''
-  if (name.startsWith('.') && name.includes('.oisin-')) return true
+  if (name.startsWith('.') && name.includes('.ogma-')) return true
   return parts.some((part) => part === '.git' || part === 'node_modules' || part === '__pycache__')
 }
 

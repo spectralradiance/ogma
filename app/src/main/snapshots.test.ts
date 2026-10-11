@@ -7,7 +7,7 @@ import { SnapshotStore } from './snapshots'
 
 async function store(start = Date.parse('2026-09-25T10:00:00Z')) {
   let now = start
-  const snapshots = new SnapshotStore(path.join(await mkdtemp(path.join(tmpdir(), 'oisin-snap-')), 'snapshots'), () => now)
+  const snapshots = new SnapshotStore(path.join(await mkdtemp(path.join(tmpdir(), 'ogma-snap-')), 'snapshots'), () => now)
   return { snapshots, advance: (minutes: number) => { now += minutes * 60_000 } }
 }
 

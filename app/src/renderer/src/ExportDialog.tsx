@@ -19,7 +19,7 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
 
   // Start from the defaults in Settings → Export.
   useEffect(() => {
-    void window.oisin.preferences.get().then((preferences) => setOptions((current) => ({
+    void window.ogma.preferences.get().then((preferences) => setOptions((current) => ({
       ...current, format: preferences.export.format, includeTitle: preferences.export.includeTitle,
     })))
   }, [])
@@ -37,7 +37,7 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
     setError(null)
     try {
       if (!(await flush())) throw new Error('Some edits could not be saved; resolve that before exporting.')
-      const result = await window.oisin.exports.document(folder, title, options)
+      const result = await window.ogma.exports.document(folder, title, options)
       if (result) setOutcome(result)
     } catch (reason) {
       setError(errorMessage(reason))
@@ -79,7 +79,7 @@ export function ExportDialog({ folder, title, flush, onClose }: ExportDialogProp
               <p className="lexical-message">
                 Exported {outcome.sections} section{outcome.sections === 1 ? '' : 's'} to {outcome.path}
                 {outcome.skipped.length > 0 && <> (left out, nothing written yet: {outcome.skipped.join(', ')})</>}.{' '}
-                <button type="button" className="link-button" onClick={() => void window.oisin.exports.showInFolder(outcome.path)}>Show in folder</button>
+                <button type="button" className="link-button" onClick={() => void window.ogma.exports.showInFolder(outcome.path)}>Show in folder</button>
               </p>
             )}
           </div>

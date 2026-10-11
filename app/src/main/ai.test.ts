@@ -41,7 +41,7 @@ describe('prompt templates', () => {
   })
 
   it('are copied for editing without overwriting the user’s edits', async () => {
-    const store = new PromptStore(path.join(await mkdtemp(path.join(tmpdir(), 'oisin-prompts-')), 'prompts'))
+    const store = new PromptStore(path.join(await mkdtemp(path.join(tmpdir(), 'ogma-prompts-')), 'prompts'))
     await store.ensureDefaults()
     await writeFile(path.join(store.location, 'analyze.md'), 'Mine.\n=== user ===\n{{text}}')
     await store.ensureDefaults()
@@ -59,7 +59,7 @@ const cipher: Cipher = {
 
 describe('SecretStore', () => {
   it('stores keys encrypted, reports only whether they are set, and clears them', async () => {
-    const file = path.join(await mkdtemp(path.join(tmpdir(), 'oisin-keys-')), 'keys.json')
+    const file = path.join(await mkdtemp(path.join(tmpdir(), 'ogma-keys-')), 'keys.json')
     const store = new SecretStore(file, cipher)
     store.set('ANTHROPIC_API_KEY', '  sk-ant-secret  ')
     expect(await readFile(file, 'utf8')).not.toContain('sk-ant-secret')
@@ -70,7 +70,7 @@ describe('SecretStore', () => {
   })
 
   it('refuses to store keys when the OS cannot encrypt', async () => {
-    const file = path.join(await mkdtemp(path.join(tmpdir(), 'oisin-keys-')), 'keys.json')
+    const file = path.join(await mkdtemp(path.join(tmpdir(), 'ogma-keys-')), 'keys.json')
     const store = new SecretStore(file, { ...cipher, available: () => false })
     expect(() => store.set('OPENAI_API_KEY', 'sk-x')).toThrow(/cannot encrypt/)
   })

@@ -2,7 +2,7 @@
 fastapi>=0.115.0
 uvicorn>=0.30.0
 
-# AI providers (official SDKs, behind oisin_ai.ai_types.Provider)
+# AI providers (official SDKs, behind ogma_ai.ai_types.Provider)
 anthropic>=1.8,<2
 openai>=3.19,<4
 google-genai>=2.25,<3

@@ -36,12 +36,12 @@ export const PROVIDERS: { id: AiProviderId; label: string; kind: 'cloud' | 'loca
   { id: 'anthropic', label: 'Anthropic (Claude)', kind: 'cloud', keyName: 'ANTHROPIC_API_KEY' },
   { id: 'openai', label: 'OpenAI', kind: 'cloud', keyName: 'OPENAI_API_KEY' },
   { id: 'gemini', label: 'Google Gemini', kind: 'cloud', keyName: 'GEMINI_API_KEY' },
-  { id: 'openai_compat', label: 'OpenAI-compatible host', kind: 'cloud', keyName: 'OISIN_COMPAT_API_KEY' },
+  { id: 'openai_compat', label: 'OpenAI-compatible host', kind: 'cloud', keyName: 'OGMA_COMPAT_API_KEY' },
   { id: 'local_hf', label: 'Local model (GPU)', kind: 'local', keyName: null },
 ]
 
 /** Secrets the app stores (encrypted) and passes to the sidecar as environment variables. */
-export const SECRET_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'OISIN_COMPAT_API_KEY'] as const
+export const SECRET_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'OGMA_COMPAT_API_KEY'] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 
 export const DEFAULT_AI_CONFIG: AiConfig = {
