@@ -1,6 +1,6 @@
 # Ogma — Project Plan
 
-Ogma is a desktop writing workspace with three parts: a Markdown editor that renders as you type (like Typora), documents split into sections where each section has a **notes** file and an **output** file, and lexical and AI tools that work on the text you have selected.
+Ogma is a desktop writing workspace with three parts: a Markdown editor that renders as you type (like Typora), documents that are one Markdown file each, split into sections by their `#` headings, with each section's **notes** kept inline beside its **output** (the text itself), and lexical and AI tools that work on the text you have selected.
 
 ---
 
@@ -21,8 +21,8 @@ Ogma is a desktop writing workspace with three parts: a Markdown editor that ren
 
 ```
 Renderer (React + TS + Vite)
- ├─ Sidebar: workspace roots → documents → sections
- ├─ Dual pane: notes | output (two CodeMirror 6 instances)
+ ├─ Sidebar: workspace roots → folders → documents; Outline: the open document's sections
+ ├─ Editor: one CodeMirror 6 instance per document, showing Output / Notes / Both
  └─ Right drawer: Dictionary / Etymology / Thesaurus / Lexicon / AI
         ▲  typed IPC (contextBridge)
 Electron main process (Node)
@@ -114,14 +114,12 @@ Workspace file  (e.g. Documents/Ogma/writing.ogma-workspace — like a VS Code .
 }
 ```
 
-**Section discovery** (so existing folders work without renaming anything):
-- Any folder containing text files is a **document**. Nested folders show as nested documents (chapters) in the sidebar.
+**Documents** (changed 2026-10-11; the earlier folder-of-sections format, with a `-notes` and an `-output` file per section, was removed):
+- A **document is one Markdown file**. Folders are just folders, shown in the sidebar with their subfolders and documents.
 - Text files are `.md`, `.markdown`, `.txt`, `.text`, and files with no extension, the same rules as ogma's indexer.
-- The section name is the filename without any `-notes` or `-output` suffix and without the extension:
-  - `1 the first era` → its notes file is `1 the first era`
-  - `02 intro-notes.md` + `02 intro-output.md` → one section with both files
-- The output file is created the first time you write output for a section, as `<name>-output.md` next to the notes file. Existing notes files are never renamed.
-- A leading number (`1`, `1.2`, `02`) sets the order. Files with no number (for example `outline` or `random`) appear in a pinned **Document notes** group above the sections.
+- Each `#` heading starts a **section**; `##` and deeper stay inside it. A file with no `#` heading splits at its shallowest heading level. Sections are reordered, merged and renamed by editing the text.
+- A section's **notes** sit in Pandoc-style fenced blocks, `::: notes` … `:::`, usually under its text. Notes before the first heading are notes for the whole document (outline, sources). Headings inside notes never start a section.
+- One editor shows the file as **Output** (the text, notes hidden), **Notes** (all notes as one flow under the section headings) or **Both**.
 
 **Editing in place safely:**
 - Atomic saves: write to a temp file in the same folder, then rename.
@@ -199,6 +197,9 @@ What shipped differs from the spec below in four places:
 ### Phase 2b — Whole-document views ✅ done 2026-09-25
 A double document (folder of sections) opens whole, in four views: **Column** (each section's output, then its notes as a background block), **Side by side** (aligned rows), **Output** only and **Notes** only. Single files open as regular documents.
 
+### Phase 2c — One file per document ✅ done 2026-10-11
+Replaced the folder-of-sections format (Phases 2 and 2b) with the one-file format in §3: sections from `#` headings, inline notes blocks, and Output / Notes / Both views of one editor. The section files, section operations (rename, move, merge, delete) and the per-section view are gone; the sidebar lists plain folders and documents, with rename and undoable delete for files. Stats, export, search and AI drafting work on the single file.
+
 ### Phase 3 — Lexical tools (~1 week, mostly reuse) ✅ done 2026-09-25
 Uses Node's built-in `node:sqlite` (no native module) over ogma's `wiktionary.db`, with indexed case-variant lookups (the original `COLLATE NOCASE` query scanned all 1.5M rows, ~10 s). Not done: underlining lexicon words in the text.
 
@@ -251,6 +252,4 @@ Shipped: search across all roots (SQLite FTS5 index, Ctrl+Shift+F), keyword-base
 - A workspace is a set of external folders edited in place, with no copying.
 - The code lives in this `ogma/` folder. The scope is the features listed here and nothing more.
 
-**Still open (defaults in bold; nothing blocks Phase 0):**
-1. Reordering sections: **renumber the filename prefixes** or store the order only in metadata.
-2. Output file naming for existing notes: **`<name>-output.md` next to the notes file**, or a separate `output/` subfolder in each document.
+- A document is one Markdown file: `#` headings make the sections and notes are inline (§3). This settles the earlier open questions about reordering sections and naming output files.
