@@ -80,7 +80,7 @@ const SEARCH_RESULTS = 20
 export interface ToolOutcome {
   content: string
   isError: boolean
-  /** One line for the chat, e.g. "Read 02 Stars-output.md". */
+  /** One line for the chat, e.g. "Read Night Sky.md". */
   summary: string
 }
 

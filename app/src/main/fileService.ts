@@ -3,10 +3,14 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile
 import path from 'node:path'
 
 import type { TextDocument, WriteRequest, WriteResult } from '../shared/ipc'
-import type { FolderEntryName } from './sections'
 import { decodeText, encodeText } from './textFile'
 
 type PathApi = typeof path.win32
+
+export interface FolderEntryName {
+  name: string
+  kind: 'file' | 'dir'
+}
 
 const TEXT_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.text'])
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '__pycache__'])

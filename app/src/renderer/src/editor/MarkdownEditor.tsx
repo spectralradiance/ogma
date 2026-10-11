@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState } from '@codemirror/state'
 import { drawSelection, dropCursor, EditorView, keymap, placeholder as placeholderText } from '@codemirror/view'
 import { type Ref, useEffectEvent, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
@@ -13,7 +13,7 @@ import { focusMode as focusModeExtension } from './focusMode'
 import { documentPath, livePreview } from './livePreview'
 import { addOrJumpToNotes, notesBlocks, notesView as notesViewFacet, type NotesView, revealSelection, SHOW_NOTES_EVENT } from './notesBlocks'
 import { proposeRangeSpec, proposeText, suggestions, suggestionsOf } from './suggestions'
-import { autoHeightTheme, editorTheme } from './theme'
+import { editorTheme } from './theme'
 
 export interface MarkdownEditorHandle {
   getText(): string
@@ -60,8 +60,6 @@ interface MarkdownEditorProps {
   path: string
   initialText: string
   placeholder?: string
-  /** Grow with the content instead of scrolling, for editors stacked in one scrolling document. */
-  autoHeight?: boolean
   live: boolean
   focusMode: boolean
   /** Show the text alone, the notes alone, or both (see notesBlocks). */
@@ -83,7 +81,7 @@ const noop = () => {}
  * instead of receiving it on every keystroke, which keeps large notes fast.
  */
 export function MarkdownEditor({
-  ref, path, initialText, placeholder, autoHeight = false, live, focusMode, notesView = 'all', onShowNotes, onDocChanged, onSave, onBlur, onFocus, onSelectWord,
+  ref, path, initialText, placeholder, live, focusMode, notesView = 'all', onShowNotes, onDocChanged, onSave, onBlur, onFocus, onSelectWord,
 }: MarkdownEditorProps) {
   const container = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -181,7 +179,6 @@ export function MarkdownEditor({
         notesBlocks,
         suggestions,
         editorTheme,
-        autoHeight ? autoHeightTheme : ([] as Extension),
         EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off' }),
         placeholder ? placeholderText(placeholder) : [],
         dictionaryHover,
@@ -218,7 +215,7 @@ export function MarkdownEditor({
       editor.destroy()
       view.current = null
     }
-  }, [path, initialText, placeholder, autoHeight, compartments])
+  }, [path, initialText, placeholder, compartments])
 
   useLayoutEffect(() => {
     view.current?.dispatch({ effects: compartments.live.reconfigure(live ? livePreview : []) })

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell, type OpenDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
-import { rm, stat, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,10 +9,9 @@ import { type AiConfig, type AiMessage, type AiRunRequest, type AiSettingsState,
 import { type DictionaryDownload, type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
 import { MARGIN_INCHES, normalizePreferences } from '../shared/preferences'
-import type { LeadingHeading } from '../shared/text'
 import { AiBridge } from './aiBridge'
 import { Dictionary } from './dictionary'
-import { buildExportMarkdown, collectDocument, collectFile, writeExport } from './exporter'
+import { exportMarkdown, writeExport } from './exporter'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
 import { DEFAULT_PROMPTS, PromptStore, renderTemplate } from './prompts'
@@ -27,7 +26,7 @@ import { buildWiktionary } from './wiktionaryBuilder'
 import { WorkspaceWatcher } from './watcher'
 import { addRoot, removeRoot, samePath } from './workspaceRoots'
 import {
-  convertToSingleDocument, createFolder, singleDocumentTarget, createSection, renameFolder, restoreSection, mergeSections, moveSection, readFolder, renameSection, setSectionHeading, trashSection, type TrashedFile,
+  createFolder, readFolder, renameFile, renameFolder, restoreFile, trashFile, type TrashedFile,
 } from './workspaceService'
 
 // Lets tests and experiments run against a throwaway profile instead of the real one.
@@ -156,8 +155,8 @@ function dictionaryStatus(): DictionaryStatus {
   return { available: dictionary !== null, path: dictionary ? settings.get().dictionaryPath : null, error: dictionary ? null : dictionaryError }
 }
 
-/** Recently deleted sections, held so Undo can write them back. */
-const trashedSections = new Map<string, { folder: string; files: TrashedFile[] }>()
+/** Recently deleted files, held so Undo can write them back. */
+const trashedFiles = new Map<string, TrashedFile>()
 
 let dictionaryDownload: AbortController | null = null
 
@@ -299,7 +298,7 @@ function registerIpc(): void {
     const result = await writeTextDocument(target, request, backups)
     if (result.ok) {
       void snapshots.afterSave(target, request.text).catch(() => {})
-      writingStats.recordSave(target, before, request.text)
+      writingStats.recordSave(before, request.text)
       mainWindow?.webContents.send(IPC.statsChanged, writingStats.daily())
     }
     return result
@@ -326,32 +325,9 @@ function registerIpc(): void {
     }
     return target
   })
-  // A folder's one-file document: inside it for a workspace root, otherwise next to it.
-  const singleDocumentFor = (folder: string) =>
-    singleDocumentTarget(folder, settings.get().workspaceRoots.some((root) => samePath(root, folder, process.platform)))
-  ipcMain.handle(IPC.foldersSingleDocument, (_event, folder: unknown) => {
-    const target = singleDocumentFor(guard.resolve(folder))
-    return existsSync(target) ? target : null
-  })
-  ipcMain.handle(IPC.foldersConvert, async (_event, folder: unknown) => {
-    const source = guard.resolve(folder)
-    const target = singleDocumentFor(source)
-    if (existsSync(target)) return { path: target, created: false, sections: 0, subfolders: 0 }
-    return convertToSingleDocument(source, target)
-  })
   ipcMain.handle(IPC.foldersRead, (_event, folder: unknown) => readFolder(guard.resolve(folder)))
   ipcMain.handle(IPC.foldersCreate, (_event, parent: unknown, name: unknown) =>
     createFolder(guard.resolve(parent), text(name)))
-  ipcMain.handle(IPC.sectionsCreate, (_event, folder: unknown, title: unknown) =>
-    createSection(guard.resolve(folder), text(title)))
-  ipcMain.handle(IPC.sectionsRename, (_event, folder: unknown, stem: unknown, title: unknown) =>
-    renameSection(guard.resolve(folder), text(stem), text(title), backups))
-  ipcMain.handle(IPC.sectionsSetHeading, (_event, folder: unknown, stem: unknown, heading: unknown) =>
-    setSectionHeading(guard.resolve(folder), text(stem), leadingHeading(heading), backups))
-  ipcMain.handle(IPC.sectionsMove, (_event, folder: unknown, stem: unknown, direction: unknown) => {
-    if (direction !== 'up' && direction !== 'down') throw new TypeError('direction must be up or down')
-    return moveSection(guard.resolve(folder), text(stem), direction)
-  })
   ipcMain.handle(IPC.dictionaryStatus, () => (dictionary ? dictionaryStatus() : openDictionary()))
   ipcMain.handle(IPC.dictionaryChoose, async (event) => {
     const options: OpenDialogOptions = {
@@ -398,14 +374,10 @@ function registerIpc(): void {
     const owner = BrowserWindow.fromWebContents(event.sender)
     const choice = owner ? await dialog.showSaveDialog(owner, dialogOptions) : await dialog.showSaveDialog(dialogOptions)
     if (choice.canceled || !choice.filePath) return null
-    // A single-file document is exported from the file itself; a folder from its sections.
-    const single = (await stat(source)).isFile()
-    const { sections, skipped, hasTitle } = single
-      ? await collectFile(source, options)
-      : { ...(await collectDocument(source, options)), hasTitle: false }
-    const markdown = buildExportMarkdown(text(title), sections, options.includeTitle && !hasTitle, options.content === 'notes')
-    await writeExport(choice.filePath, options.format, markdown, text(title), single ? dirname(source) : source, printToPdf, settings.get().preferences.export)
-    return { path: choice.filePath, sections: sections.length, skipped }
+    const { text: content } = await readTextDocument(source)
+    const { markdown, sections, skipped } = exportMarkdown(content, text(title), options)
+    await writeExport(choice.filePath, options.format, markdown, text(title), dirname(source), printToPdf, settings.get().preferences.export)
+    return { path: choice.filePath, sections, skipped }
   })
   ipcMain.handle(IPC.exportShow, (_event, file: unknown) => shell.showItemInFolder(text(file)))
 
@@ -461,29 +433,20 @@ function registerIpc(): void {
     await fetch(`${connection.baseUrl}/ai/local/unload`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}` } })
   })
 
-  ipcMain.handle(IPC.sectionsMerge, (_event, folder: unknown, stem: unknown, laterStem: unknown) =>
-    mergeSections(guard.resolve(folder), text(stem), text(laterStem), backups, (file) => shell.trashItem(guard.resolve(file))))
-  ipcMain.handle(IPC.sectionsTrash, async (_event, folder: unknown, stem: unknown) => {
-    const resolved = guard.resolve(folder)
-    const files = await trashSection(resolved, text(stem), (file) => shell.trashItem(guard.resolve(file)))
+  ipcMain.handle(IPC.filesRename, (_event, file: unknown, name: unknown) => renameFile(guard.resolve(file), text(name)))
+  ipcMain.handle(IPC.filesTrash, async (_event, file: unknown) => {
+    const trashed = await trashFile(guard.resolve(file), (target) => shell.trashItem(target))
     const undoId = randomUUID()
-    trashedSections.set(undoId, { folder: resolved, files })
-    if (trashedSections.size > 20) trashedSections.delete(trashedSections.keys().next().value as string)
+    trashedFiles.set(undoId, trashed)
+    if (trashedFiles.size > 20) trashedFiles.delete(trashedFiles.keys().next().value as string)
     return { undoId }
   })
-  ipcMain.handle(IPC.sectionsRestore, async (_event, undoId: unknown) => {
-    const entry = trashedSections.get(text(undoId))
+  ipcMain.handle(IPC.filesRestore, async (_event, undoId: unknown) => {
+    const entry = trashedFiles.get(text(undoId))
     if (!entry) throw new Error('That deletion can no longer be undone.')
-    await restoreSection(entry.folder, entry.files)
-    trashedSections.delete(text(undoId))
+    await restoreFile(entry)
+    trashedFiles.delete(text(undoId))
   })
-}
-
-function leadingHeading(value: unknown): LeadingHeading | null {
-  if (value === null) return null
-  const candidate = value as Partial<LeadingHeading> | undefined
-  if (typeof candidate?.level !== 'number' || typeof candidate.text !== 'string') throw new TypeError('Expected a heading or null.')
-  return { level: candidate.level, text: candidate.text }
 }
 
 function text(value: unknown): string {

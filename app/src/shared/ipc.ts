@@ -92,31 +92,10 @@ export interface WriteRequest {
   force?: boolean
 }
 
-export interface SectionInfo {
-  /** File name without the -notes/-output suffix and extension, e.g. "1 the first era". */
-  stem: string
-  ordinal: string | null
-  separator: string
-  title: string
-  /** Existing file names (in the document folder), or null when not created yet. */
-  notes: string | null
-  output: string | null
-  /** The names to use, whether or not the files exist yet. */
-  notesName: string
-  outputName: string
-}
-
-export interface SubdocumentInfo {
-  name: string
-  ordinal: string | null
-  title: string
-}
-
-/** One document folder: its sub-documents, ordered sections, and document-wide notes. */
-export interface FolderModel {
-  subdocuments: SubdocumentInfo[]
-  sections: SectionInfo[]
-  documentNotes: string[]
+/** A folder's contents for the sidebar: subfolders and text files, in display order. */
+export interface FolderListing {
+  folders: string[]
+  files: string[]
 }
 
 export type WriteResult =
@@ -180,7 +159,6 @@ export interface LexiconEntry {
 
 import type { AiConfig, AiEvent, AiMessage, AiRunRequest, AiSettingsState, SecretName } from './ai'
 import type { Preferences } from './preferences'
-import type { LeadingHeading } from './text'
 
 export interface SearchHit {
   path: string
@@ -199,19 +177,22 @@ export interface DailyWords {
 }
 
 export interface SectionStats {
-  stem: string
-  ordinal: string | null
-  title: string
+  /** The section's heading; null for text before the first heading. */
+  title: string | null
+  /** 1-based line of the heading. */
+  line: number
+  /** Whether the section has any text besides its heading and notes. */
+  hasText: boolean
   notesWords: number
   outputWords: number
-  /** ISO time either file last changed. */
-  modified: string | null
 }
 
 export interface DocumentStats {
   sections: SectionStats[]
   notesWords: number
   outputWords: number
+  /** ISO time the file last changed. */
+  modified: string | null
   /** Output word goal, if set. */
   goal: number | null
 }
@@ -228,25 +209,15 @@ export interface SnapshotEntry {
 
 export interface ExportOptions {
   format: 'md' | 'html' | 'pdf'
-  /** Which file of each section to include. */
+  /** The text itself, or only the notes. */
   content: 'output' | 'notes'
   includeTitle: boolean
-}
-
-export interface ConvertOutcome {
-  /** The single-file document. */
-  path: string
-  /** False when it already existed and was left as it is. */
-  created: boolean
-  sections: number
-  /** Nested documents inside the folder, which are not included. */
-  subfolders: number
 }
 
 export interface ExportOutcome {
   path: string
   sections: number
-  /** Sections left out because that file is empty or missing. */
+  /** Sections left out because they have nothing to export. */
   skipped: string[]
 }
 
@@ -282,18 +253,19 @@ export interface OgmaApi {
   files: {
     read(path: string, options?: { allowMissing?: boolean }): Promise<TextDocument>
     write(request: WriteRequest): Promise<WriteResult>
+    /** Renames a file in its folder (keeping its extension when `name` has none) and returns the new path. */
+    rename(path: string, name: string): Promise<string>
+    /** Moves a file to the Recycle Bin; the result can be passed to `restore`. */
+    trash(path: string): Promise<{ undoId: string }>
+    restore(undoId: string): Promise<void>
     /** Paths changed on disk under any workspace root (debounced). */
     onChanged(listener: (paths: string[]) => void): () => void
   }
   folders: {
     /** Renames the folder and returns its new path. */
     rename(path: string, name: string): Promise<string>
-    read(path: string): Promise<FolderModel>
+    read(path: string): Promise<FolderListing>
     create(parent: string, name: string): Promise<string>
-    /** Writes the folder's sections into one Markdown file next to it (the folder is kept) and returns it. */
-    convert(path: string): Promise<ConvertOutcome>
-    /** The folder's single-file document, if it has been made; null otherwise. */
-    singleDocument(path: string): Promise<string | null>
   }
   dictionary: {
     status(): Promise<DictionaryStatus>
@@ -330,8 +302,8 @@ export interface OgmaApi {
     unloadLocal(): Promise<void>
   }
   stats: {
-    document(folder: string): Promise<DocumentStats>
-    setGoal(folder: string, words: number | null): Promise<DocumentStats>
+    document(file: string): Promise<DocumentStats>
+    setGoal(file: string, words: number | null): Promise<DocumentStats>
     daily(days?: number): Promise<DailyWords[]>
     /** Fires after each save that changed the word count, with the last 14 days. */
     onChanged(listener: (days: DailyWords[]) => void): () => void
@@ -344,7 +316,7 @@ export interface OgmaApi {
   }
   exports: {
     /** Asks where to save, then writes the document; null if cancelled. */
-    document(folder: string, title: string, options: ExportOptions): Promise<ExportOutcome | null>
+    document(file: string, title: string, options: ExportOptions): Promise<ExportOutcome | null>
     showInFolder(path: string): Promise<void>
   }
   search: {
@@ -354,18 +326,6 @@ export interface OgmaApi {
     query(text: string): Promise<SearchHit[]>
     related(text: string, exclude: string[]): Promise<SearchHit[]>
     onProgress(listener: (status: SearchStatus) => void): () => void
-  }
-  sections: {
-    create(folder: string, title: string): Promise<SectionInfo>
-    rename(folder: string, stem: string, title: string): Promise<SectionInfo>
-    move(folder: string, stem: string, direction: 'up' | 'down'): Promise<SectionInfo>
-    /** Moves the section's files to the Recycle Bin; the result can be passed to `restore`. */
-    trash(folder: string, stem: string): Promise<{ undoId: string }>
-    restore(undoId: string): Promise<void>
-    /** Appends `laterStem`'s notes and output to `stem`'s, then removes `laterStem`. */
-    merge(folder: string, stem: string, laterStem: string): Promise<SectionInfo>
-    /** Sets (or with null removes) the heading on the first line of the section's output. */
-    setHeading(folder: string, stem: string, heading: LeadingHeading | null): Promise<SectionInfo>
   }
 }
 
@@ -384,18 +344,12 @@ export const IPC = {
   filesRead: 'files:read',
   filesWrite: 'files:write',
   filesChanged: 'files:changed',
+  filesRename: 'files:rename',
+  filesTrash: 'files:trash',
+  filesRestore: 'files:restore',
   foldersRead: 'folders:read',
   foldersCreate: 'folders:create',
   foldersRename: 'folders:rename',
-  foldersConvert: 'folders:convert',
-  foldersSingleDocument: 'folders:single-document',
-  sectionsCreate: 'sections:create',
-  sectionsRename: 'sections:rename',
-  sectionsMove: 'sections:move',
-  sectionsTrash: 'sections:trash',
-  sectionsRestore: 'sections:restore',
-  sectionsMerge: 'sections:merge',
-  sectionsSetHeading: 'sections:set-heading',
   dictionaryStatus: 'dictionary:status',
   dictionaryChoose: 'dictionary:choose',
   dictionaryDownload: 'dictionary:download',

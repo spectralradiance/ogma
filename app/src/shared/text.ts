@@ -90,27 +90,3 @@ export function matchCase(original: string, replacement: string): string {
   }
   return replacement
 }
-
-export interface LeadingHeading {
-  level: number
-  text: string
-}
-
-/**
- * Splits off a heading on a file's first non-blank line: in a double document
- * that heading is the section's heading, shown on the section line rather than
- * in the editor. `head` is the heading line and the blank lines after it, so
- * `head + body` is always the original text.
- */
-export function splitLeadingHeading(text: string): { head: string; body: string; heading: LeadingHeading | null } {
-  const match = /^(?:[ \t]*\r?\n)*[ \t]{0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*(?:\r?\n|$)(?:[ \t]*(?:\r?\n|$))*/.exec(text)
-  if (!match || !match[2].trim()) return { head: '', body: text, heading: null }
-  return { head: match[0], body: text.slice(match[0].length), heading: { level: match[1].length, text: match[2].trim() } }
-}
-
-/** Replaces or adds (at `level`) the leading heading, or removes it when `heading` is null. */
-export function withLeadingHeading(text: string, heading: LeadingHeading | null): string {
-  const { body } = splitLeadingHeading(text)
-  if (!heading) return body
-  return body.trim() ? `${'#'.repeat(heading.level)} ${heading.text}\n\n${body}` : `${'#'.repeat(heading.level)} ${heading.text}\n`
-}

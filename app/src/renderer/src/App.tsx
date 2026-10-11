@@ -2,37 +2,44 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { type SectionSummary, splitSections } from '../../shared/document'
 import { folderName } from '../../shared/format'
-import type { SectionInfo, SidecarStatus, WorkspaceState } from '../../shared/ipc'
+import type { SidecarStatus, WorkspaceState } from '../../shared/ipc'
 import { stripNotes } from '../../shared/notes'
-import { fileOutlineMarkdown, outlineMarkdown } from '../../shared/outline'
+import { outlineMarkdown } from '../../shared/outline'
 import { DEFAULT_PREFERENCES, type Preferences } from '../../shared/preferences'
-import { splitLeadingHeading } from '../../shared/text'
-import { dirname, joinPath, samePath } from '../../shared/paths'
-import type { Heading } from '../../shared/text'
+import { samePath } from '../../shared/paths'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import { ExportDialog } from './ExportDialog'
 import { type AiWorkspace, AiPanel } from './AiPanel'
 import { AiSettings } from './AiSettings'
-import { type Drawer, DocumentView, ModeToggles, NotesViewSwitch, type PaneCallbacks } from './DocumentView'
+import type { WordInContext } from './editor/MarkdownEditor'
 import type { NotesView } from './editor/notesBlocks'
-import { SidePanel } from './SidePanel'
+import { type Drawer, SidePanel } from './SidePanel'
 import { type LexicalQuery, LexicalPanel } from './LexicalPanel'
 import { readPref, writePref } from './prefs'
+import { StatsDialog } from './StatsDialog'
 import { StatusBar } from './StatusBar'
-import {
-  type ActivePane, errorMessage, isOpenDocument, type OpenTarget, parseTarget, parseViewMode, sameTarget, type ViewMode,
-} from './target'
+import { type ActivePane, errorMessage, type OpenTarget, parseTarget, sameTarget } from './target'
+import { IconButton, ModeToggles, NotesViewSwitch } from './Toolbar'
 import { SearchPanel } from './SearchPanel'
 import { ResizeHandle } from './ResizeHandle'
 import { SettingsDialog } from './SettingsDialog'
 import { OutlinePanel } from './OutlinePanel'
 import { useOutline } from './useOutline'
 import { type SidebarTab, WorkspaceTree } from './WorkspaceTree'
-import { X } from 'lucide-react'
+import { ChartColumn, X } from 'lucide-react'
 
 const LEFT_WIDTH = { initial: 260, min: 180, max: 560 }
 const RIGHT_WIDTH = { initial: 340, min: 260, max: 720 }
 const RAIL_WIDTH = 40
+
+/** How the open editor reports back to the app; panes are identified by file path. */
+interface PaneCallbacks {
+  bindPane: (path: string, handle: DocumentPaneHandle | null) => void
+  onInfo: (path: string, info: DocumentInfo | null) => void
+  onSections: (path: string, sections: SectionSummary[]) => void
+  onDirtyChange: (path: string, dirty: boolean) => void
+  onSelectWord: (path: string, word: WordInContext) => void
+}
 
 const storedWidth = (key: string, bounds: { initial: number; min: number; max: number }) => {
   const value = Number(readPref(key))
@@ -55,12 +62,10 @@ export function App() {
   const [status, setStatus] = useState<SidecarStatus | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceState>({ roots: [] })
   const [target, setTarget] = useState<OpenTarget | null>(() => parseTarget(readPref('openTarget')))
-  const [view, setView] = useState<ViewMode>(() => parseViewMode(readPref('documentView')))
   const [live, setLive] = useState(() => readPref('live') !== 'false')
   const [focusMode, setFocusMode] = useState(false)
   const [active, setActive] = useState<ActivePane | null>(null)
   const [infos, setInfos] = useState<Record<string, DocumentInfo | null>>({})
-  const [headings, setHeadings] = useState<Record<string, Heading[]>>({})
   const [docSections, setDocSections] = useState<Record<string, SectionSummary[]>>({})
   const [notesView, setNotesView] = useState<NotesView>(() => {
     const stored = readPref('notesView')
@@ -74,6 +79,7 @@ export function App() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [showStats, setShowStats] = useState(false)
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES)
   const savePreferencesTimer = useRef<number | undefined>(undefined)
@@ -133,44 +139,17 @@ export function App() {
   const changeTarget = useCallback((next: OpenTarget | null) => {
     setTarget(next)
     writePref('openTarget', next ? JSON.stringify(next) : null)
-    setActive(next?.kind === 'file' ? { path: next.path, folder: null, stem: null } : null)
+    setActive(next ? { path: next.path } : null)
   }, [])
 
   const open = useCallback(async (next: OpenTarget) => {
-    // Scrolling within the open document needs no save.
-    if (next.kind === 'document' && sameTarget(target, next)) {
-      changeTarget(next)
-      return
-    }
     if (sameTarget(target, next)) return
     const saved = await flushAll()
     if (!saved && !window.confirm('Some changes could not be saved. Open the other file anyway and lose them?')) return
     changeTarget(next)
   }, [target, flushAll, changeTarget])
 
-  const runSectionOperation = useCallback(async (
-    folder: string,
-    stem: string,
-    operation: () => Promise<SectionInfo | null>,
-  ) => {
-    const affectsOpen = isOpenDocument(target, folder)
-    if (affectsOpen && !(await flushAll())) {
-      window.alert('The open document has unsaved changes that could not be saved. Resolve that first.')
-      return
-    }
-    try {
-      const result = await operation()
-      if (affectsOpen && target?.kind === 'document') {
-        const followed = target.focusStem?.toLowerCase() === stem.toLowerCase()
-        if (followed) changeTarget({ ...target, focusStem: result?.stem ?? null })
-        setReloadToken((token) => token + 1)
-      }
-    } catch (error) {
-      window.alert(errorMessage(error))
-    }
-  }, [target, flushAll, changeTarget])
-
-  const [undo, setUndo] = useState<{ undoId: string; title: string } | null>(null)
+  const [undo, setUndo] = useState<{ undoId: string; title: string; path: string } | null>(null)
 
   useEffect(() => {
     if (!undo) return
@@ -178,23 +157,30 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [undo])
 
-  const deleteSection = useCallback(async (folder: string, section: SectionInfo) => {
-    const deleted = { undoId: null as string | null }
-    await runSectionOperation(folder, section.stem, async () => {
-      deleted.undoId = (await window.ogma.sections.trash(folder, section.stem)).undoId
-      return null
-    })
-    if (deleted.undoId) setUndo({ undoId: deleted.undoId, title: section.title })
-  }, [runSectionOperation])
+  /** Moves a file to the Recycle Bin (closing it first if it is open) and offers Undo. */
+  const deleteFile = useCallback(async (file: string) => {
+    const isOpen = target !== null && samePath(target.path, file)
+    if (isOpen && !(await flushAll())) {
+      window.alert('The document has unsaved changes that could not be saved. Resolve that first.')
+      return
+    }
+    try {
+      const { undoId } = await window.ogma.files.trash(file)
+      if (isOpen) changeTarget(null)
+      setUndo({ undoId, title: folderName(file).replace(/\.md$/i, ''), path: file })
+    } catch (error) {
+      window.alert(errorMessage(error))
+    }
+  }, [target, flushAll, changeTarget])
 
   const undoDelete = useCallback(() => {
     if (!undo) return
     setUndo(null)
-    window.ogma.sections.restore(undo.undoId).then(
-      () => setReloadToken((token) => token + 1),
+    window.ogma.files.restore(undo.undoId).then(
+      () => changeTarget({ path: undo.path }),
       (error: unknown) => window.alert(errorMessage(error)),
     )
-  }, [undo])
+  }, [undo, changeTarget])
 
   const renameFolder = useCallback(async (folder: string, name: string) => {
     if (!(await flushAll())) {
@@ -209,12 +195,7 @@ export function App() {
         const inside = path.length > folder.length && samePath(path.slice(0, folder.length), folder) && /[\\/]/.test(path[folder.length])
         return inside ? renamed + path.slice(folder.length) : path
       }
-      if (target?.kind === 'document') {
-        const same = samePath(target.folder, folder)
-        changeTarget({ ...target, folder: remap(target.folder), ...(same ? { title: name.trim(), ordinal: null } : {}) })
-      } else if (target?.kind === 'file') {
-        changeTarget({ ...target, path: remap(target.path) })
-      }
+      if (target) changeTarget({ path: remap(target.path) })
       setWorkspace(await window.ogma.workspace.get())
       setReloadToken((token) => token + 1)
     } catch (error) {
@@ -222,10 +203,19 @@ export function App() {
     }
   }, [target, flushAll, changeTarget])
 
-  const changeView = useCallback((next: ViewMode) => {
-    setView(next)
-    writePref('documentView', next)
-  }, [])
+  const renameFile = useCallback(async (file: string, name: string) => {
+    const isOpen = target !== null && samePath(target.path, file)
+    if (isOpen && !(await flushAll())) {
+      window.alert('The document has unsaved changes that could not be saved. Resolve that before renaming it.')
+      return
+    }
+    try {
+      const renamed = await window.ogma.files.rename(file, name)
+      if (isOpen) changeTarget({ path: renamed })
+    } catch (error) {
+      window.alert(errorMessage(error))
+    }
+  }, [target, flushAll, changeTarget])
 
   const toggleLive = useCallback(() => {
     setLive((value) => {
@@ -350,24 +340,18 @@ export function App() {
       }
     },
     onInfo: (path, info) => setInfos((current) => ({ ...current, [path]: info })),
-    onHeadings: (path, list) => setHeadings((current) => ({ ...current, [path]: list })),
     onSections: (path, list) => setDocSections((current) => ({ ...current, [path]: list })),
     onDirtyChange: (path, dirty) => {
       if (dirty) dirtyPanes.current.add(path)
       else dirtyPanes.current.delete(path)
     },
-    onActivePane: setActive,
     onSelectWord: (path, word) => {
       if (drawerRef.current === 'words') setLexicalQuery({ ...word, source: path })
     },
   }), [])
 
-  /** Opens a file at a line: its double document scrolled to the section, or the file itself. */
+  /** Opens a file at a line (a search result or an outline entry). */
   const openAt = useCallback(async (hit: { path: string; line: number }) => {
-    const folder = dirname(hit.path)
-    const model = await window.ogma.folders.read(folder).catch(() => null)
-    const section = model?.sections.find((candidate) =>
-      [candidate.notes, candidate.output].some((name) => name !== null && samePath(joinPath(folder, name), hit.path)))
     const existing = panes.current.get(hit.path)
     if (existing) {
       pendingReveal.current = null
@@ -375,49 +359,23 @@ export function App() {
     } else {
       pendingReveal.current = { path: hit.path, line: hit.line }
     }
-    if (section) {
-      // Make sure the current view shows the file the hit is in.
-      const isNotes = section.notes !== null && samePath(joinPath(folder, section.notes), hit.path)
-      if ((isNotes && view === 'output') || (!isNotes && view === 'notes')) changeView('split')
-      const name = folderName(folder)
-      const numbered = /^(\d+(?:\.\d+)*)[\s._-]+(.+)$/.exec(name)
-      await open({
-        kind: 'document', folder, title: numbered ? numbered[2] : name, ordinal: numbered ? numbered[1] : null,
-        focusStem: section.stem, nonce: Date.now(),
-      })
-    } else {
-      await open({ kind: 'file', path: hit.path })
-    }
-  }, [open, view, changeView])
+    await open({ path: hit.path })
+  }, [open])
 
   const addRoot = () => void window.ogma.workspace.addRoot().then(setWorkspace)
   const removeRoot = (path: string) => void window.ogma.workspace.removeRoot(path).then(setWorkspace)
 
   const activePath = active?.path ?? null
-  const liveWords = useMemo(
-    () => Object.fromEntries(Object.entries(infos).map(([path, info]) => [path, info?.words])),
-    [infos],
-  )
-  const outline = useOutline(target, { headings, words: liveWords, sections: docSections }, reloadToken)
+  const outline = useOutline(target, docSections, reloadToken)
   const activeInfo = activePath ? infos[activePath] ?? null : null
-  const activeLabel = active?.stem && activePath
-    ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
-    : ''
   const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
-  // What Settings → Export exports: the open document or file. Notes are left out of the output.
-  const exportTarget = target?.kind === 'document'
-    ? { path: target.folder, title: target.title }
-    : target?.kind === 'file' ? { path: target.path, title: folderName(target.path).replace(/\.[^.]+$/, '') } : null
+  const documentTitle = target ? folderName(target.path).replace(/\.[^.]+$/, '') : ''
+  // What Settings → Export exports: the open document. Notes are left out of the output.
+  const exportTarget = target ? { path: target.path, title: documentTitle } : null
   const shownDrawer = focusMode ? null : drawer
-  const documentTitle = target?.kind === 'document' ? target.title : target?.kind === 'file' ? folderName(target.path) : ''
 
   const aiWorkspace: AiWorkspace = {
-    focus: active
-      ? {
-        label: active.section ? `${active.section.title} (${activeLabel.toLowerCase()})` : folderName(active.path),
-        inSection: Boolean(active.section) || (target?.kind === 'file' && samePath(target.path, active.path)),
-      }
-      : null,
+    focus: active ? { label: folderName(active.path), inSection: true } : null,
     readActive: () => {
       const handle = active ? panes.current.get(active.path) : undefined
       if (!active || !handle) return null
@@ -426,53 +384,30 @@ export function App() {
         text: stripNotes(handle.getText()),
         selection: handle.getSelection(),
         document: documentTitle,
-        section: active.section?.title ?? handle.currentSection()?.title ?? '',
+        section: handle.currentSection()?.title ?? '',
       }
     },
     readSection: async () => {
-      const section = active?.section
-      const folder = active?.folder
-      if (!section || !folder) {
-        // A single-file document: the section under the cursor, its notes blocks being the notes.
-        const handle = active ? panes.current.get(active.path) : undefined
-        const current = handle?.currentSection()
-        if (!handle || !current) return null
-        const preface = splitSections(handle.getText()).find((candidate) => candidate.title === null)?.notes
-        return {
-          document: documentTitle,
-          section: current.title ?? documentTitle,
-          notes: current.notes,
-          output: current.output,
-          documentNotes: preface || '(none)',
-          target: { path: active!.path, index: current.index },
-        }
-      }
-      const read = async (path: string) => panes.current.get(path)?.getText()
-        ?? window.ogma.files.read(path, { allowMissing: true }).then((document) => document.text, () => '')
-      // An open output editor already leaves out the section heading; match that when reading from disk.
-      const [notes, output] = await Promise.all([
-        read(section.notesPath),
-        read(section.outputPath).then((text) => (panes.current.has(section.outputPath) ? text : splitLeadingHeading(text).body)),
-      ])
-      // Document-wide notes (outline, sources) give the draft its context; capped to keep prompts reasonable.
-      const model = await window.ogma.folders.read(folder).catch(() => null)
-      const documentNotes = await Promise.all((model?.documentNotes ?? []).slice(0, 4).map(async (name) => {
-        const text = await read(joinPath(folder, name))
-        return `### ${name}\n${text.slice(0, 12_000)}`
-      }))
+      // The section under the cursor; its notes blocks are the notes.
+      const handle = active ? panes.current.get(active.path) : undefined
+      const current = handle?.currentSection()
+      if (!active || !handle || !current) return null
+      const preface = splitSections(handle.getText()).find((candidate) => candidate.title === null)?.notes
       return {
-        document: documentTitle, section: section.title, notes, output, documentNotes: documentNotes.join('\n\n') || '(none)',
-        target: { path: section.outputPath, index: null },
+        document: documentTitle,
+        section: current.title ?? documentTitle,
+        notes: current.notes,
+        output: current.output,
+        documentNotes: preface || '(none)',
+        target: { path: active.path, index: current.index },
       }
     },
     currentWord: () => (active ? panes.current.get(active.path)?.currentWord() ?? null : null),
     suggestOutput: (target, text, label) => panes.current.get(target.path)?.propose(text, label, target.index) ?? null,
     replaceWord: (word) => (active ? panes.current.get(active.path)?.replaceWord(word) ?? false : false),
-    outline: outline?.kind === 'document'
-      ? { title: outline.title, sections: outline.sections.length, markdown: () => outlineMarkdown(outline.title, outline.sections, { notes: true, leads: true }) }
-      : outline?.kind === 'file' && outline.sections.some((section) => section.title !== null)
-        ? { title: outline.title, sections: outline.sections.length, markdown: () => fileOutlineMarkdown(outline.title, outline.sections) }
-        : null,
+    outline: outline && outline.sections.some((section) => section.title !== null)
+      ? { title: outline.title, sections: outline.sections.length, markdown: () => outlineMarkdown(outline.title, outline.sections) }
+      : null,
     agent: {
       openFiles: () => [...panes.current].map(([path, handle]) => ({
         path, focused: active ? samePath(active.path, path) : false, text: handle.getText(),
@@ -507,12 +442,10 @@ export function App() {
           onAddRoot={addRoot}
           onRemoveRoot={removeRoot}
           target={target}
-          active={active}
           open={(next) => void open(next)}
-          runSectionOperation={runSectionOperation}
           renameFolder={renameFolder}
-          deleteSection={deleteSection}
-          flush={flushAll}
+          renameFile={renameFile}
+          deleteFile={deleteFile}
           tab={sidebarTab}
           onTab={setSidebarTab}
           collapsed={!leftOpen}
@@ -522,14 +455,7 @@ export function App() {
               onResize={resizeLeft} onReset={() => resizeLeft(LEFT_WIDTH.initial)} />
           )}
           outline={(
-            <OutlinePanel
-              outline={outline}
-              activePath={activePath}
-              onOpenSection={(stem) => {
-                if (target?.kind === 'document') void open({ ...target, focusStem: stem, nonce: Date.now() })
-              }}
-              onReveal={(path, line) => void openAt({ path, line })}
-            />
+            <OutlinePanel outline={outline} onReveal={(path, line) => void openAt({ path, line })} />
           )}
           search={(
             <SearchPanel
@@ -541,30 +467,14 @@ export function App() {
                 const handle = active ? panes.current.get(active.path) : undefined
                 if (!active || !handle) return null
                 const text = handle.getSelection().trim() || handle.getText()
-                const exclude = active.section ? [active.section.notesPath, active.section.outputPath] : [active.path]
-                return { label: active.section?.title ?? folderName(active.path), text, exclude }
+                return { label: folderName(active.path), text, exclude: [active.path] }
               }}
             />
           )}
         />
       )}
       <main className="stage">
-        {target?.kind === 'document' && (
-          <DocumentView
-            key={target.folder}
-            target={target}
-            view={view}
-            onView={changeView}
-            reloadToken={reloadToken}
-            flush={flushAll}
-            onSectionOperation={runSectionOperation}
-            onDeleteSection={deleteSection}
-            callbacks={callbacks}
-            onOpenFile={(path) => void open({ kind: 'file', path })}
-            {...mode}
-          />
-        )}
-        {target?.kind === 'file' && (
+        {target && (
           <DocumentPane
             key={target.path}
             ref={(handle) => callbacks.bindPane(target.path, handle)}
@@ -575,15 +485,15 @@ export function App() {
             onShowNotes={() => changeNotesView('notes')}
             headerActions={(
               <>
+                <IconButton icon={ChartColumn} label="Statistics" title="Word counts per section, goal and daily progress" onClick={() => setShowStats(true)} />
                 <NotesViewSwitch view={notesView} onView={changeNotesView} />
                 <ModeToggles {...mode} />
               </>
             )}
             onInfo={(next) => callbacks.onInfo(target.path, next)}
-            onHeadings={(list) => callbacks.onHeadings(target.path, list)}
-            onSections={(list) => callbacks.onSections?.(target.path, list)}
+            onSections={(list) => callbacks.onSections(target.path, list)}
             onDirtyChange={(dirty) => callbacks.onDirtyChange(target.path, dirty)}
-            onFocus={() => setActive({ path: target.path, folder: null, stem: null })}
+            onFocus={() => setActive({ path: target.path })}
             onSelectWord={(word) => callbacks.onSelectWord(target.path, word)}
             onClose={() => changeTarget(null)}
           />
@@ -591,7 +501,7 @@ export function App() {
         {!target && (
           <div className="placeholder">
             <h1 className="wordmark">Ogma</h1>
-            <p>{workspace.roots.length > 0 ? 'Choose a document or file from the sidebar.' : 'Add a folder of notes to begin.'}</p>
+            <p>{workspace.roots.length > 0 ? 'Choose a document from the sidebar.' : 'Add a folder to begin.'}</p>
           </div>
         )}
       </main>
@@ -626,10 +536,20 @@ export function App() {
       {exporting && exportTarget && (
         <ExportDialog folder={exportTarget.path} title={exportTarget.title} flush={flushAll} onClose={() => setExporting(false)} />
       )}
+      {showStats && target && (
+        <StatsDialog
+          path={target.path}
+          title={documentTitle}
+          onClose={() => setShowStats(false)}
+          onOpenSection={(line) => {
+            setShowStats(false)
+            void openAt({ path: target.path, line })
+          }}
+        />
+      )}
       {settingsOpen && <AiSettings status={status} onClose={() => setSettingsOpen(false)} />}
       <StatusBar
         documentInfo={activeInfo}
-        documentLabel={activeLabel}
         todayWords={todayWords}
         panes={focusMode ? null : {
           left: leftOpen,

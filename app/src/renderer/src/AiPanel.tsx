@@ -18,8 +18,8 @@ export interface SectionMaterial {
   notes: string
   output: string
   documentNotes: string
-  /** Where the draft goes: an output file, or section `index` of a single-file document. */
-  target: { path: string; index: number | null }
+  /** Where the draft goes: section `index` of the document at `path`. */
+  target: { path: string; index: number }
 }
 
 /** What the AI panel can read from and write to, supplied by the app. */
@@ -32,7 +32,7 @@ export interface AiWorkspace {
   /** Shows a draft as suggested changes in that editor; how many, or null if it is no longer open. */
   suggestOutput(target: SectionMaterial['target'], text: string, label: string): number | null
   replaceWord(word: string): boolean
-  /** The open double document's outline, for structure analysis. */
+  /** The open document's outline, for structure analysis. */
   outline: { title: string; sections: number; markdown(): string } | null
   /** What the chat's agent mode can read and suggest edits to. */
   agent: AgentHost
@@ -180,7 +180,7 @@ export function AiPanel({ workspace, status, onOpenSettings }: AiPanelProps) {
   const draftOutput = async () => {
     const material = await workspace.readSection()
     if (!material) {
-      setMessage('Click into a section’s notes or output first.')
+      setMessage('Click into a document first.')
       return
     }
     if (!material.notes.trim()) {

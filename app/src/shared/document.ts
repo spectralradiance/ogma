@@ -2,14 +2,14 @@
 // hold notes (`::: notes` blocks, see notes.ts) alongside its output text.
 
 import { classifyLines, NOTES_CLOSE_LINE, NOTES_OPEN_LINE } from './notes'
-import { countWords, extractHeadings, type Heading, splitLeadingHeading } from './text'
+import { countWords, extractHeadings, type Heading } from './text'
 
 /** A section without its text, for outlines. */
-export type SectionSummary = Pick<DocSection, 'title' | 'level' | 'line' | 'endLine' | 'outputWords' | 'notesWords' | 'headings'>
+export type SectionSummary = Pick<DocSection, 'title' | 'level' | 'line' | 'endLine' | 'hasText' | 'outputWords' | 'notesWords' | 'headings'>
 
 export function summarizeSections(text: string): SectionSummary[] {
-  return splitSections(text).map(({ title, level, line, endLine, outputWords, notesWords, headings }) => (
-    { title, level, line, endLine, outputWords, notesWords, headings }
+  return splitSections(text).map(({ title, level, line, endLine, hasText, outputWords, notesWords, headings }) => (
+    { title, level, line, endLine, hasText, outputWords, notesWords, headings }
   ))
 }
 
@@ -21,8 +21,12 @@ export interface DocSection {
   line: number
   /** 1-based last line of the section, inclusive. */
   endLine: number
+  /** The section's text, without its heading and notes. */
   output: string
   notes: string
+  /** Whether there is any text under the heading (besides notes). */
+  hasText: boolean
+  /** Words in the heading and the text, so the sections add up to the document's count. */
   outputWords: number
   notesWords: number
   /** Headings inside the section, below the section level. */
@@ -70,7 +74,8 @@ export function splitSections(text: string): DocSection[] {
       endLine: to,
       output: outputText,
       notes: notesText,
-      outputWords: countWords(outputText),
+      hasText: outputText.length > 0,
+      outputWords: countWords(outputText) + (title === null ? 0 : countWords(lines[headingLine - 1])),
       notesWords: countWords(notesText),
       headings: headings.filter((heading) => heading.line > headingLine && heading.line <= to && heading.level > level),
     }
@@ -183,18 +188,6 @@ export function replaceSectionOutput(text: string, index: number, output: string
   return [...before, replacement, ...(after.length ? ['', ...after] : [''])].join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
-/** Where a folder of sections is written as one document: `<title>.md` next to it, without the folder's number. */
-export function singleDocumentName(folderName: string): string {
-  const numbered = /^\d+(?:\.\d+)*[\s._-]+(.+)$/.exec(folderName)
-  return `${numbered ? numbered[1] : folderName}.md`
-}
-
-export interface SourceSection {
-  title: string
-  output: string
-  notes: string
-}
-
 /** Moves every heading down so none is shallower than `minimum` (so it cannot start a section). */
 export function demoteHeadings(text: string, minimum: number): string {
   const headings = extractHeadings(text)
@@ -207,25 +200,4 @@ export function demoteHeadings(text: string, minimum: number): string {
       `${space}${'#'.repeat(Math.min(6, marks.length + shift))}`)
   }
   return lines.join('\n')
-}
-
-/**
- * Builds a single-file document: each section as a `#` heading, its output and
- * its notes block. The file name is the document's title; `preface` (notes for the
- * whole document) goes in a notes block before the first section.
- */
-export function buildSingleDocument(preface: string, sections: readonly SourceSection[]): string {
-  const parts: string[] = []
-  const prefaceText = preface.trim()
-  if (prefaceText) parts.push(`${NOTES_OPEN_LINE}\n\n${prefaceText}\n\n${NOTES_CLOSE_LINE}`)
-  for (const section of sections) {
-    // The section's own heading (the first line of its output) becomes its `#` heading; any others move below it.
-    const { heading, body: rest } = splitLeadingHeading(section.output)
-    const output = demoteHeadings((heading ? rest : section.output).trim(), 2)
-    const notes = section.notes.trim()
-    parts.push(`# ${heading?.text ?? section.title}`)
-    if (output) parts.push(output)
-    if (notes) parts.push(`${NOTES_OPEN_LINE}\n\n${notes}\n\n${NOTES_CLOSE_LINE}`)
-  }
-  return `${parts.join('\n\n')}\n`
 }

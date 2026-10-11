@@ -1,27 +1,23 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react'
 
 import { folderName } from '../../shared/format'
-import type { FolderModel, SectionInfo } from '../../shared/ipc'
+import type { FolderListing } from '../../shared/ipc'
 import { joinPath, samePath } from '../../shared/paths'
 import { onDiskChange, touchesFolder } from './changes'
 import { FilesIcon, OutlineIcon, PaneIcon, SearchIcon } from './icons'
 import { ContextMenu } from './menu'
-import { type ActivePane, errorMessage, type OpenTarget } from './target'
+import { errorMessage, type OpenTarget } from './target'
 import { ChevronDown, ChevronRight, FilePlus, FolderPlus, X } from 'lucide-react'
 
 export interface TreeActions {
   target: OpenTarget | null
-  /** The editor last typed in; its section is highlighted. */
-  active: ActivePane | null
   open: (target: OpenTarget) => void
-  /** Runs a rename/move/trash, saving the open section first if it is affected. */
-  runSectionOperation: (folder: string, stem: string, operation: () => Promise<SectionInfo | null>) => Promise<void>
   /** Renames a folder on disk, keeping whatever is open inside it open. */
   renameFolder: (folder: string, name: string) => Promise<void>
-  /** Deletes a section's files, offering Undo afterwards. */
-  deleteSection: (folder: string, section: SectionInfo) => Promise<void>
-  /** Saves every open editor; false if something could not be saved. */
-  flush: () => Promise<boolean>
+  /** Renames a file on disk, keeping it open if it is. */
+  renameFile: (file: string, name: string) => Promise<void>
+  /** Moves a file to the Recycle Bin, offering Undo afterwards. */
+  deleteFile: (file: string) => Promise<void>
 }
 
 const TreeContext = createContext<TreeActions | null>(null)
@@ -34,9 +30,11 @@ function useTree(): TreeActions {
 
 const indent = (depth: number, extra = 0) => ({ paddingLeft: `${8 + depth * 14 + extra}px` })
 
-function NameInput({ initial, placeholder, depth, ordinal, onSubmit, onCancel }: {
+/** A document's name in the tree: the file name without a .md extension. */
+const documentName = (file: string) => file.replace(/\.md$/i, '')
+
+function NameInput({ initial, placeholder, depth, onSubmit, onCancel }: {
   initial: string
-  ordinal?: string | null
   placeholder: string
   depth: number
   onSubmit: (value: string) => void
@@ -45,7 +43,6 @@ function NameInput({ initial, placeholder, depth, ordinal, onSubmit, onCancel }:
   const [value, setValue] = useState(initial)
   return (
     <li className="tree-input-row" style={indent(depth, 18)}>
-      {ordinal && <span className="tree-ordinal">{ordinal}</span>}
       <input
         className="tree-input"
         autoFocus
@@ -63,138 +60,68 @@ function NameInput({ initial, placeholder, depth, ordinal, onSubmit, onCancel }:
   )
 }
 
-interface FolderIdentity {
-  path: string
-  title: string
-  ordinal: string | null
-}
-
-function openDocument(folder: FolderIdentity, focusStem: string | null): OpenTarget {
-  return { kind: 'document', folder: folder.path, title: folder.title, ordinal: folder.ordinal, focusStem, nonce: Date.now() }
-}
-
-interface SectionDrag {
-  /** Stem of the section being dragged. */
-  from: string | null
-  /** Stem of the section it is currently over. */
-  over: string | null
-}
-
-function SectionRow({ folder: identity, section, depth, index, count, drag, onDrag, onDropOn, onChanged }: {
-  folder: FolderIdentity
-  section: SectionInfo
-  depth: number
-  index: number
-  count: number
-  drag: SectionDrag
-  onDrag: (next: SectionDrag) => void
-  onDropOn: (targetStem: string) => void
-  onChanged: () => void
-}) {
+function FileRow({ folder, name, depth }: { folder: string; name: string; depth: number }) {
   const tree = useTree()
   const [renaming, setRenaming] = useState(false)
-  const folder = identity.path
-  const active = tree.active !== null && tree.active.folder !== null && samePath(tree.active.folder, folder)
-    && tree.active.stem?.toLowerCase() === section.stem.toLowerCase()
-
-  const run = (operation: () => Promise<SectionInfo | null>) => {
-    void tree.runSectionOperation(folder, section.stem, operation).then(onChanged)
-  }
+  const path = joinPath(folder, name)
+  const selected = tree.target !== null && samePath(tree.target.path, path)
 
   if (renaming) {
     return (
       <NameInput
-        initial={section.title}
-        placeholder="Section name"
+        initial={documentName(name)}
+        placeholder="Document name"
         depth={depth}
-        ordinal={section.ordinal}
         onCancel={() => setRenaming(false)}
-        onSubmit={(title) => {
+        onSubmit={(next) => {
           setRenaming(false)
-          if (title !== section.title) run(() => window.ogma.sections.rename(folder, section.stem, title))
+          if (next !== documentName(name)) void tree.renameFile(path, next)
         }}
       />
     )
   }
-
-  const trash = () => void tree.deleteSection(folder, section).then(onChanged)
-
-  const numbered = section.ordinal !== null
-  const dragging = drag.from === section.stem
-  const dropTarget = numbered && drag.from !== null && drag.over === section.stem && !dragging
   return (
     <li>
       <ContextMenu items={[
         { label: 'Rename', onClick: () => setRenaming(true) },
         'separator',
-        { label: 'Move up', disabled: !numbered || index === 0, onClick: () => run(() => window.ogma.sections.move(folder, section.stem, 'up')) },
-        { label: 'Move down', disabled: !numbered || index === count - 1, onClick: () => run(() => window.ogma.sections.move(folder, section.stem, 'down')) },
-        'separator',
-        { label: 'Delete', onClick: trash },
+        { label: 'Delete', onClick: () => void tree.deleteFile(path) },
       ]}>
-      <div
-        className={`tree-row-wrap${active ? ' active' : ''}${dragging ? ' dragging' : ''}${dropTarget ? ' drop-target' : ''}`}
-        draggable={numbered}
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = 'move'
-          event.dataTransfer.setData('text/plain', section.stem)
-          onDrag({ from: section.stem, over: null })
-        }}
-        onDragOver={(event) => {
-          if (!numbered || drag.from === null) return
-          event.preventDefault()
-          if (drag.over !== section.stem) onDrag({ from: drag.from, over: section.stem })
-        }}
-        onDrop={(event) => {
-          event.preventDefault()
-          if (numbered && drag.from !== null && !dragging) onDropOn(section.stem)
-          onDrag({ from: null, over: null })
-        }}
-        onDragEnd={() => onDrag({ from: null, over: null })}
-      >
-        <button
-          type="button"
-          className="tree-row tree-section"
-          style={indent(depth, 18)}
-          onClick={() => tree.open(openDocument(identity, section.stem))}
-          onDoubleClick={() => setRenaming(true)}
-          title={section.notes ?? section.notesName}
-        >
-          {section.ordinal && <span className="tree-ordinal">{section.ordinal}</span>}
-          <span className="tree-label">{section.title}</span>
-          <span
-            className={`output-mark${section.output ? ' has-output' : ''}`}
-            title={section.output ? 'Has output' : 'No output yet'}
-            aria-label={section.output ? 'Has output' : 'No output yet'}
-          />
-        </button>
-      </div>
+        <div className="tree-row-wrap">
+          <button
+            type="button"
+            className={`tree-row tree-file${selected ? ' selected' : ''}`}
+            style={indent(depth, 18)}
+            onClick={() => tree.open({ path })}
+            onDoubleClick={() => setRenaming(true)}
+            title={path}
+          >
+            <span className="tree-label">{documentName(name)}</span>
+          </button>
+        </div>
       </ContextMenu>
     </li>
   )
 }
 
-type Editing = 'section' | 'folder' | 'document' | null
+type Editing = 'folder' | 'document' | null
 
-function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemoveRoot }: {
+function FolderNode({ path, depth, initiallyOpen = false, onRemoveRoot }: {
   path: string
-  title: string
-  ordinal?: string | null
   depth: number
   initiallyOpen?: boolean
   onRemoveRoot?: () => void
 }) {
   const tree = useTree()
   const [open, setOpen] = useState(initiallyOpen)
-  const [model, setModel] = useState<FolderModel | null>(null)
+  const [listing, setListing] = useState<FolderListing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Editing>(null)
-  const [drag, setDrag] = useState<SectionDrag>({ from: null, over: null })
   const [renaming, setRenaming] = useState(false)
 
   const load = useCallback(() => window.ogma.folders.read(path).then(
     (next) => {
-      setModel(next)
+      setListing(next)
       setError(null)
     },
     (reason: unknown) => setError(errorMessage(reason)),
@@ -211,140 +138,75 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
     })
   }, [open, path, load])
 
-  const expand = () => setOpen(true)
-  const identity: FolderIdentity = { path, title, ordinal: ordinal ?? null }
-  const createSection = (name: string) => {
-    setEditing(null)
-    window.ogma.sections.create(path, name).then(
-      (section) => {
-        void load()
-        tree.open(openDocument(identity, section.stem))
-      },
-      (reason: unknown) => window.alert(errorMessage(reason)),
-    )
+  const startEditing = (kind: Editing) => {
+    setOpen(true)
+    setEditing(kind)
   }
   const createDocument = (name: string) => {
     setEditing(null)
     const file = joinPath(path, /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`)
-    const title = name.replace(/\.(md|markdown|txt)$/i, '')
     window.ogma.files.write({
       path: file,
-      text: `# ${title}\n\n`,
+      text: '',
       format: { encoding: 'utf-8', eol: '\n', mixedEol: false },
       expectedMtimeMs: null,
     }).then(
       (result) => {
         if (!result.ok) throw new Error(`“${folderName(file)}” already exists here.`)
-        tree.open({ kind: 'file', path: file })
+        tree.open({ path: file })
       },
       (reason: unknown) => window.alert(errorMessage(reason)),
     )
-  }
-  /** Writes the folder's sections into one document file next to it, and opens that. */
-  const convert = async () => {
-    if (!(await tree.flush())) {
-      window.alert('Some changes could not be saved. Resolve that before converting.')
-      return
-    }
-    try {
-      const result = await window.ogma.folders.convert(path)
-      tree.open({ kind: 'file', path: result.path })
-      if (result.subfolders > 0) {
-        window.alert(`Converted ${result.sections} sections. The ${result.subfolders} nested folder(s) inside were not included.`)
-      }
-    } catch (reason) {
-      window.alert(errorMessage(reason))
-    }
   }
   const createFolder = (name: string) => {
     setEditing(null)
     window.ogma.folders.create(path, name).then(() => load(), (reason: unknown) => window.alert(errorMessage(reason)))
   }
 
-  /** Moves a numbered section into another's place by swapping it past each section in between. */
-  const dropSection = (targetStem: string) => {
-    const numbered = model?.sections.filter((section) => section.ordinal !== null) ?? []
-    const from = numbered.findIndex((section) => section.stem === drag.from)
-    const to = numbered.findIndex((section) => section.stem === targetStem)
-    if (from < 0 || to < 0 || from === to) return
-    const direction = to > from ? 'down' : 'up'
-    void tree.runSectionOperation(path, numbered[from].stem, async () => {
-      let moved: SectionInfo = numbered[from]
-      for (let step = Math.abs(to - from); step > 0; step--) {
-        moved = await window.ogma.sections.move(path, moved.stem, direction)
-      }
-      return moved
-    }).then(() => load())
-  }
-
-  const documentOpen = tree.target?.kind === 'document' && samePath(tree.target.folder, path)
-  const fileActive = (name: string) => tree.target?.kind === 'file' && samePath(tree.target.path, joinPath(path, name))
-  const empty = model && model.sections.length === 0 && model.subdocuments.length === 0 && model.documentNotes.length === 0
+  const empty = listing && listing.folders.length === 0 && listing.files.length === 0
+  const title = folderName(path)
 
   return (
     <li>
       {renaming ? (
         <ul className="tree">
           <NameInput
-            initial={folderName(path)}
+            initial={title}
             placeholder="Folder name"
             depth={depth - 1}
             onCancel={() => setRenaming(false)}
             onSubmit={(name) => {
               setRenaming(false)
-              if (name !== folderName(path)) void tree.renameFolder(path, name)
+              if (name !== title) void tree.renameFolder(path, name)
             }}
           />
         </ul>
       ) : (
       <ContextMenu items={[
+        { label: 'New document', onClick: () => startEditing('document') },
+        { label: 'New folder', onClick: () => startEditing('folder') },
+        'separator',
         { label: 'Rename', onClick: () => setRenaming(true) },
-        { label: 'New section', onClick: () => { expand(); setEditing('section') } },
-        { label: 'New folder', onClick: () => { expand(); setEditing('folder') } },
-        { label: 'New document', onClick: () => { expand(); setEditing('document') } },
-        ...(model && model.sections.length > 0
-          ? ['separator' as const, { label: 'Convert to a single document', onClick: () => void convert(), title: 'Writes one Markdown file with a heading per section and the notes inline; the folder is kept' }]
-          : []),
         ...(onRemoveRoot ? ['separator' as const, { label: 'Remove from workspace', onClick: onRemoveRoot }] : []),
       ]}>
       <div className={`tree-row-wrap${depth === 0 ? ' tree-root' : ''}`}>
         <button
           type="button"
-          className={`tree-row tree-dir${documentOpen ? ' selected' : ''}`}
+          className="tree-row tree-dir"
           style={indent(depth)}
-          onClick={() => {
-            // A folder with sections opens as a document; other folders just expand or collapse.
-            const wasOpen = open
-            setOpen(true)
-            void (async () => {
-              const current = model ?? await window.ogma.folders.read(path).catch(() => null)
-              // Once a folder has been made into one document, that file is what opens.
-              const single = current && current.sections.length > 0 ? await window.ogma.folders.singleDocument(path).catch(() => null) : null
-              if (single) tree.open({ kind: 'file', path: single })
-              else if (current && current.sections.length > 0) tree.open(openDocument(identity, null))
-              else if (wasOpen) setOpen(false)
-            })()
-          }}
+          onClick={() => setOpen(!open)}
           onDoubleClick={() => setRenaming(true)}
           aria-expanded={open}
           title={path}
         >
-          <span
-            className="tree-chevron"
-            aria-hidden="true"
-            onClick={(event) => {
-              event.stopPropagation()
-              setOpen(!open)
-            }}
-          >
+          <span className="tree-chevron" aria-hidden="true">
             {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
-          {ordinal && <span className="tree-ordinal">{ordinal}</span>}
           <span className="tree-label">{title}</span>
         </button>
         <span className="tree-actions">
-          <button type="button" className="icon-button" title="New section" onClick={() => { expand(); setEditing('section') }}><FilePlus size={14} aria-hidden="true" /></button>
-          <button type="button" className="icon-button" title="New folder" onClick={() => { expand(); setEditing('folder') }}><FolderPlus size={14} aria-hidden="true" /></button>
+          <button type="button" className="icon-button" title="New document" onClick={() => startEditing('document')}><FilePlus size={14} aria-hidden="true" /></button>
+          <button type="button" className="icon-button" title="New folder" onClick={() => startEditing('folder')}><FolderPlus size={14} aria-hidden="true" /></button>
           {onRemoveRoot && (
             <button type="button" className="icon-button" title="Remove from workspace (files are not touched)" onClick={onRemoveRoot}><X size={14} aria-hidden="true" /></button>
           )}
@@ -355,50 +217,17 @@ function FolderNode({ path, title, ordinal, depth, initiallyOpen = false, onRemo
       {open && (
         <ul className="tree">
           {error && <li className="tree-note" style={indent(depth, 18)}>{error}</li>}
-          {editing === 'document' && (
-            <NameInput initial="" placeholder="Document name" depth={depth + 1} onSubmit={createDocument} onCancel={() => setEditing(null)} />
-          )}
           {editing === 'folder' && (
             <NameInput initial="" placeholder="Folder name" depth={depth + 1} onSubmit={createFolder} onCancel={() => setEditing(null)} />
           )}
-          {model?.documentNotes.map((name) => (
-            <li key={name}>
-              <button
-                type="button"
-                className={`tree-row tree-docnote${fileActive(name) ? ' selected' : ''}`}
-                style={indent(depth + 1, 18)}
-                onClick={() => tree.open({ kind: 'file', path: joinPath(path, name) })}
-                title="Open this file"
-              >
-                <span className="tree-label">{name}</span>
-              </button>
-            </li>
+          {listing?.folders.map((name) => (
+            <FolderNode key={name} path={joinPath(path, name)} depth={depth + 1} />
           ))}
-          {model?.subdocuments.map((subdocument) => (
-            <FolderNode
-              key={subdocument.name}
-              path={joinPath(path, subdocument.name)}
-              title={subdocument.title}
-              ordinal={subdocument.ordinal}
-              depth={depth + 1}
-            />
+          {listing?.files.map((name) => (
+            <FileRow key={name} folder={path} name={name} depth={depth + 1} />
           ))}
-          {model?.sections.map((section) => (
-            <SectionRow
-              key={section.stem}
-              folder={identity}
-              section={section}
-              depth={depth + 1}
-              index={model.sections.filter((s) => s.ordinal !== null).indexOf(section)}
-              count={model.sections.filter((s) => s.ordinal !== null).length}
-              drag={drag}
-              onDrag={setDrag}
-              onDropOn={dropSection}
-              onChanged={() => void load()}
-            />
-          ))}
-          {editing === 'section' && (
-            <NameInput initial="" placeholder="Section name" depth={depth + 1} onSubmit={createSection} onCancel={() => setEditing(null)} />
+          {editing === 'document' && (
+            <NameInput initial="" placeholder="Document name" depth={depth + 1} onSubmit={createDocument} onCancel={() => setEditing(null)} />
           )}
           {empty && !editing && <li className="tree-note" style={indent(depth + 1, 18)}>Empty folder</li>}
         </ul>
@@ -477,7 +306,6 @@ export function WorkspaceTree({
               <FolderNode
                 key={root}
                 path={root}
-                title={folderName(root)}
                 depth={0}
                 initiallyOpen={roots.length === 1}
                 onRemoveRoot={() => onRemoveRoot(root)}

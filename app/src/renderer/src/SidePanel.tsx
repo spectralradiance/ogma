@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
 
 import type { SidecarState } from '../../shared/ipc'
-import type { Drawer } from './DocumentView'
 import { SERVER_STATE_LABEL } from './AiServer'
 import { BookIcon, PaneIcon, SparkleIcon } from './icons'
+
+/** The panels on the right: dictionary and lexicon, and AI. */
+export type Drawer = 'words' | 'ai'
 
 export const SIDE_TABS: { id: Drawer; label: string; shortcut: string; icon: () => ReactNode }[] = [
   { id: 'words', label: 'Words', shortcut: 'Ctrl+D', icon: BookIcon },

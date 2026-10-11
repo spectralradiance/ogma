@@ -30,6 +30,9 @@ const api: OgmaApi = {
   files: {
     read: (path, options) => ipcRenderer.invoke(IPC.filesRead, path, options),
     write: (request) => ipcRenderer.invoke(IPC.filesWrite, request),
+    rename: (path, name) => ipcRenderer.invoke(IPC.filesRename, path, name),
+    trash: (path) => ipcRenderer.invoke(IPC.filesTrash, path),
+    restore: (undoId) => ipcRenderer.invoke(IPC.filesRestore, undoId),
     onChanged: (listener) => {
       const handler = (_event: IpcRendererEvent, paths: string[]): void => listener(paths)
       ipcRenderer.on(IPC.filesChanged, handler)
@@ -42,8 +45,6 @@ const api: OgmaApi = {
     read: (path) => ipcRenderer.invoke(IPC.foldersRead, path),
     create: (parent, name) => ipcRenderer.invoke(IPC.foldersCreate, parent, name),
     rename: (path, name) => ipcRenderer.invoke(IPC.foldersRename, path, name),
-    convert: (path) => ipcRenderer.invoke(IPC.foldersConvert, path),
-    singleDocument: (path) => ipcRenderer.invoke(IPC.foldersSingleDocument, path),
   },
   dictionary: {
     status: () => ipcRenderer.invoke(IPC.dictionaryStatus),
@@ -118,15 +119,6 @@ const api: OgmaApi = {
         ipcRenderer.removeListener(IPC.searchProgress, handler)
       }
     },
-  },
-  sections: {
-    create: (folder, title) => ipcRenderer.invoke(IPC.sectionsCreate, folder, title),
-    rename: (folder, stem, title) => ipcRenderer.invoke(IPC.sectionsRename, folder, stem, title),
-    move: (folder, stem, direction) => ipcRenderer.invoke(IPC.sectionsMove, folder, stem, direction),
-    trash: (folder, stem) => ipcRenderer.invoke(IPC.sectionsTrash, folder, stem),
-    restore: (undoId) => ipcRenderer.invoke(IPC.sectionsRestore, undoId),
-    merge: (folder, stem, laterStem) => ipcRenderer.invoke(IPC.sectionsMerge, folder, stem, laterStem),
-    setHeading: (folder, stem, heading) => ipcRenderer.invoke(IPC.sectionsSetHeading, folder, stem, heading),
   },
 }
 

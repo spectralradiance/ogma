@@ -4,32 +4,44 @@ import { pathToFileURL } from 'node:url'
 
 import { marked } from 'marked'
 
-import { splitSections } from '../shared/document'
+import { demoteHeadings, splitSections } from '../shared/document'
 import type { ExportOptions } from '../shared/ipc'
 import { stripNotes } from '../shared/notes'
 import { DEFAULT_PREFERENCES, type ExportPreferences } from '../shared/preferences'
-import { readTextDocument } from './fileService'
-import { readFolder } from './workspaceService'
 
-export interface ExportSection {
-  title: string
-  text: string
+export interface ExportedMarkdown {
+  markdown: string
+  /** Sections exported, and those left out because they had nothing to export. */
+  sections: number
+  skipped: string[]
 }
 
 /**
- * Joins sections in order. A section's heading is the heading on its first line;
- * one without continues the previous section's text, unless `titleSections`
- * gives every such section its title as a heading (used for notes).
+ * A document as Markdown for export. The output is the text without its notes
+ * blocks; the notes export gives each section's notes under the section's heading.
+ * With a title, the title is the only top-level heading and the rest move down one.
  */
-export function buildExportMarkdown(title: string, sections: ExportSection[], includeTitle: boolean, titleSections = false): string {
-  const parts: string[] = []
-  if (includeTitle) parts.push(`# ${title}`)
-  for (const section of sections) {
-    const text = section.text.trim()
-    if (!text) continue
-    parts.push(/^#{1,6}\s/.test(text) || !titleSections ? text : `## ${section.title}\n\n${text}`)
+export function exportMarkdown(text: string, title: string, options: Pick<ExportOptions, 'content' | 'includeTitle'>): ExportedMarkdown {
+  const level = options.includeTitle ? 2 : 1
+  const parts: string[] = options.includeTitle ? [`# ${title}`] : []
+  const sections = splitSections(text)
+  if (options.content === 'output') {
+    const output = stripNotes(text).trim()
+    if (output) parts.push(options.includeTitle ? demoteHeadings(output, 2) : output)
+    return { markdown: `${parts.join('\n\n')}\n`, sections: sections.filter((section) => section.output).length, skipped: [] }
   }
-  return `${parts.join('\n\n')}\n`
+  const skipped: string[] = []
+  let count = 0
+  for (const section of sections) {
+    const name = section.title ?? 'Document notes'
+    if (!section.notes.trim()) {
+      if (section.title !== null) skipped.push(name)
+      continue
+    }
+    count += 1
+    parts.push(`${'#'.repeat(level)} ${name}`, demoteHeadings(section.notes, level + 1))
+  }
+  return { markdown: `${parts.join('\n\n')}\n`, sections: count, skipped }
 }
 
 function escapeHtml(text: string): string {
@@ -67,45 +79,6 @@ ${body}
 </body>
 </html>
 `
-}
-
-export interface ExportResult {
-  sections: number
-  skipped: string[]
-}
-
-/** Reads a double document's sections (output or notes) in order. */
-export async function collectDocument(folder: string, options: ExportOptions): Promise<{ sections: ExportSection[]; skipped: string[] }> {
-  const model = await readFolder(folder)
-  const sections: ExportSection[] = []
-  const skipped: string[] = []
-  for (const section of model.sections) {
-    const name = options.content === 'notes' ? section.notes : section.output
-    const text = name ? (await readTextDocument(path.join(folder, name), true)).text : ''
-    if (text.trim()) sections.push({ title: section.title, text })
-    else skipped.push(section.title)
-  }
-  return { sections, skipped }
-}
-
-/**
- * A single-file document: the output is the text without its notes blocks; the
- * notes export lists each section's notes under the section's heading.
- */
-export async function collectFile(file: string, options: ExportOptions): Promise<{ sections: ExportSection[]; skipped: string[]; hasTitle: boolean }> {
-  const { text } = await readTextDocument(file, true)
-  if (options.content === 'output') {
-    const output = stripNotes(text)
-    return { sections: output.trim() ? [{ title: path.basename(file), text: output }] : [], skipped: [], hasTitle: /^\s*#\s+\S/.test(output) }
-  }
-  const sections: ExportSection[] = []
-  const skipped: string[] = []
-  for (const section of splitSections(text)) {
-    const title = section.title ?? path.basename(file)
-    if (section.notes.trim()) sections.push({ title, text: section.notes })
-    else skipped.push(title)
-  }
-  return { sections, skipped, hasTitle: false }
 }
 
 export async function writeExport(

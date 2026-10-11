@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildSingleDocument, planNotes, replaceSectionOutput, sectionAtLine, sectionLevel, splitSections, splitWordCounts, summarizeSections,
+  demoteHeadings, planNotes, replaceSectionOutput, sectionAtLine, sectionLevel, splitSections, splitWordCounts, summarizeSections,
 } from './document'
 import { classifyLines, stripNotes } from './notes'
 import { extractHeadings } from './text'
@@ -90,7 +90,7 @@ describe('splitSections', () => {
     const stars = sections[1]
     expect(stars.output).toBe('Stars are far away suns.')
     expect(stars.notes).toBe('# not a section\ncheck distances')
-    expect(stars.outputWords).toBe(5)
+    expect(stars.outputWords).toBe(6)
     expect(stars.notesWords).toBe(5)
   })
 
@@ -111,7 +111,7 @@ describe('splitSections', () => {
 
   it('summarizes without the text', () => {
     expect(summarizeSections(SAMPLE)[1]).toEqual({
-      title: 'Stars', level: 1, line: 7, endLine: 15, outputWords: 5, notesWords: 5, headings: [],
+      title: 'Stars', level: 1, line: 7, endLine: 15, hasText: true, outputWords: 6, notesWords: 5, headings: [],
     })
   })
 })
@@ -159,23 +159,10 @@ describe('replaceSectionOutput', () => {
   })
 })
 
-describe('buildSingleDocument', () => {
-  const text = buildSingleDocument('outline: stars, planets', [
-    { title: 'stars', output: '# Stars\n\nFar suns.\n\n# Aside', notes: 'check distance' },
-    { title: 'planets', output: '', notes: '' },
-  ])
-
-  it('writes # headings, output and notes blocks, moving deeper headings below the section level', () => {
-    expect(text).toBe([
-      '::: notes', '', 'outline: stars, planets', '', ':::', '',
-      '# Stars', '', 'Far suns.', '', '## Aside', '', '::: notes', '', 'check distance', '', ':::', '',
-      '# planets', '',
-    ].join('\n'))
-  })
-
-  it('reads back as the same sections', () => {
-    const sections = splitSections(text)
-    expect(sections.map((section) => section.title)).toEqual([null, 'Stars', 'planets'])
-    expect(sections[1]).toMatchObject({ output: 'Far suns.\n\n## Aside', notes: 'check distance' })
+describe('demoteHeadings', () => {
+  it('moves every heading down so none is above the given level', () => {
+    expect(demoteHeadings('# A\n\ntext\n\n## B', 2)).toBe('## A\n\ntext\n\n### B')
+    expect(demoteHeadings('### A', 2)).toBe('### A')
+    expect(demoteHeadings('no headings', 2)).toBe('no headings')
   })
 })

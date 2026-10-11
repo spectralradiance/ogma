@@ -4,7 +4,7 @@ import { folderName } from '../../shared/format'
 import type { TextDocument, TextFormat } from '../../shared/ipc'
 import { dirname } from '../../shared/paths'
 import { replaceSectionOutput, type SectionSummary, sectionAtLine, splitSections, splitWordCounts, summarizeSections } from '../../shared/document'
-import { extractHeadings, type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
+import { extractHeadings, type Heading } from '../../shared/text'
 import { onDiskChange, touchesFile } from './changes'
 import { MarkdownEditor, type MarkdownEditorHandle, type WordInContext } from './editor/MarkdownEditor'
 import type { NotesView } from './editor/notesBlocks'
@@ -53,11 +53,11 @@ export interface DocumentPaneHandle {
   /** The section the cursor is in (a heading and the text under it). */
   currentSection(): CurrentSection | null
   /**
-   * Shows `text` as suggested changes to the whole file (or to section `index`'s output),
-   * after saving the current text as a "Before AI" version in History. Returns how many
-   * changes were suggested, or null if that section no longer exists.
+   * Shows `text` as suggested changes to section `index`'s output, after saving the
+   * current text as a "Before AI" version in History. Returns how many changes were
+   * suggested, or null if that section no longer exists.
    */
-  propose(text: string, label: string, index?: number | null): number | null
+  propose(text: string, label: string, index: number): number | null
   /**
    * Suggests replacing the one occurrence of `oldText` with `newText` (an agent's edit),
    * alongside suggestions already shown. With `snapshot`, first saves a "Before AI"
@@ -70,17 +70,9 @@ export interface DocumentPaneHandle {
 interface DocumentPaneProps {
   ref?: Ref<DocumentPaneHandle>
   path: string
-  /** Shown in the header, e.g. "Notes" or "Output". */
-  label?: string
-  /** Open an empty editor when the file does not exist; the first save creates it. */
-  allowMissing?: boolean
-  placeholder?: string
-  /** A block inside the document view: small header, editor grows with its content. */
-  compact?: boolean
-  className?: string
   live: boolean
   focusMode: boolean
-  /** Single-file documents: show the text alone, the notes alone, or both. */
+  /** Show the text alone, the notes alone, or both. */
   notesView?: NotesView
   onShowNotes?: () => void
   headerActions?: ReactNode
@@ -91,13 +83,6 @@ interface DocumentPaneProps {
   onDirtyChange: (dirty: boolean) => void
   onFocus?: () => void
   onSelectWord?: (word: WordInContext) => void
-  /** Reports the save state (and whether the file exists yet), for headers drawn by the parent. */
-  onSaveState?: (state: SaveState, exists: boolean) => void
-  /**
-   * Keep a heading on the file's first line out of the editor (it is the section's
-   * heading, shown by the parent) and report it. It is written back unchanged on save.
-   */
-  onLeadingHeading?: (heading: LeadingHeading | null) => void
   onClose?: () => void
 }
 
@@ -107,8 +92,8 @@ interface DiskState {
 }
 
 export function DocumentPane({
-  ref, path, label, allowMissing = false, placeholder, compact = false, className, live, focusMode, notesView, onShowNotes, headerActions,
-  onInfo, onHeadings, onSections, onDirtyChange, onFocus, onSelectWord, onSaveState, onLeadingHeading, onClose,
+  ref, path, live, focusMode, notesView, onShowNotes, headerActions,
+  onInfo, onHeadings, onSections, onDirtyChange, onFocus, onSelectWord, onClose,
 }: DocumentPaneProps) {
   const [loaded, setLoaded] = useState<{ document: TextDocument; generation: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -120,10 +105,6 @@ export function DocumentPane({
 
   const editor = useRef<MarkdownEditorHandle>(null)
   const disk = useRef<DiskState | null>(null)
-  // The section heading held back from the editor: text written before the editor's text on save.
-  const head = useRef('')
-  const splitsHeading = onLeadingHeading !== undefined
-  const headLines = () => head.current.split('\n').length - 1
   const state = useRef<SaveState>('saved')
   const version = useRef(0)
   const savedVersion = useRef(0)
@@ -135,9 +116,9 @@ export function DocumentPane({
 
   // The parent's latest callbacks, read through a ref so that their identity
   // changing on every parent render does not re-run the file load.
-  const parent = useRef({ onInfo, onHeadings, onSections, onDirtyChange, onSaveState, onLeadingHeading })
+  const parent = useRef({ onInfo, onHeadings, onSections, onDirtyChange })
   useLayoutEffect(() => {
-    parent.current = { onInfo, onHeadings, onSections, onDirtyChange, onSaveState, onLeadingHeading }
+    parent.current = { onInfo, onHeadings, onSections, onDirtyChange }
   })
 
   const updateState = useCallback((next: SaveState) => {
@@ -145,20 +126,14 @@ export function DocumentPane({
     setSaveState(next)
   }, [])
 
-  /** Stats for the whole file (heading included), so they match what is on disk. */
-  const reportStats = useCallback((body: string, format: TextFormat) => {
-    const text = head.current + body
+  const reportStats = useCallback((text: string, format: TextFormat) => {
     const counts = splitWordCounts(text)
     parent.current.onInfo({ words: counts.output, notesWords: counts.notes, format })
     parent.current.onHeadings?.(extractHeadings(text))
     parent.current.onSections?.(summarizeSections(text))
   }, [])
 
-  const applyDocument = useCallback((loadedDocument: TextDocument) => {
-    const split = splitsHeading ? splitLeadingHeading(loadedDocument.text) : { head: '', body: loadedDocument.text, heading: null }
-    head.current = split.head
-    parent.current.onLeadingHeading?.(split.heading)
-    const document = { ...loadedDocument, text: split.body }
+  const applyDocument = useCallback((document: TextDocument) => {
     disk.current = { mtimeMs: document.mtimeMs, format: document.format }
     version.current = 0
     savedVersion.current = 0
@@ -168,15 +143,15 @@ export function DocumentPane({
     updateState('saved')
     setLoaded((previous) => ({ document, generation: (previous?.generation ?? 0) + 1 }))
     reportStats(document.text, document.format)
-  }, [reportStats, updateState, splitsHeading])
+  }, [reportStats, updateState])
 
-  const load = useCallback(() => window.ogma.files.read(path, { allowMissing }).then(
+  const load = useCallback(() => window.ogma.files.read(path).then(
     applyDocument,
     (error: unknown) => {
       setLoadError(errorMessage(error))
       parent.current.onInfo(null)
     },
-  ), [path, allowMissing, applyDocument])
+  ), [path, applyDocument])
 
   useEffect(() => {
     void load()
@@ -185,10 +160,6 @@ export function DocumentPane({
   useEffect(() => {
     parent.current.onDirtyChange(saveState !== 'saved')
   }, [saveState])
-
-  useEffect(() => {
-    parent.current.onSaveState?.(saveState, exists)
-  }, [saveState, exists])
 
   useEffect(() => () => {
     window.clearTimeout(autosaveTimer.current)
@@ -218,7 +189,7 @@ export function DocumentPane({
     if (!force && state.current === 'conflict') return false
 
     const target = version.current
-    const text = head.current + handle.getText()
+    const text = handle.getText()
     updateState('saving')
     const run = (async () => {
       try {
@@ -259,15 +230,15 @@ export function DocumentPane({
 
   // A restore point from before the AI touched anything, in case the writer accepts and regrets it.
   const saveRestorePoint = useCallback((current: string, label: string) => {
-    if ((head.current + current).trim()) {
-      void window.ogma.history.snapshot(path, head.current + current, `Before AI: ${label}`).catch(() => {})
+    if (current.trim()) {
+      void window.ogma.history.snapshot(path, current, `Before AI: ${label}`).catch(() => {})
     }
   }, [path])
 
   useImperativeHandle(ref, () => ({
     flush: () => save(),
     // Lines are the file's; the editor starts after the held-back heading.
-    revealLine: (line) => editor.current?.revealLine(Math.max(1, line - headLines())),
+    revealLine: (line) => editor.current?.revealLine(line),
     currentWord: () => editor.current?.currentWord() ?? null,
     replaceWord: (replacement) => editor.current?.replaceWord(replacement) ?? false,
     getText: () => editor.current?.getText() ?? '',
@@ -281,11 +252,11 @@ export function DocumentPane({
       const section = sections[index]
       return section ? { index, title: section.title, output: section.output, notes: section.notes } : null
     },
-    propose: (text, label, index = null) => {
+    propose: (text, label, index) => {
       const handle = editor.current
       if (!handle) return null
       const current = handle.getText()
-      const next = index === null ? text : replaceSectionOutput(current, index, text)
+      const next = replaceSectionOutput(current, index, text)
       if (next === null) return null
       const count = handle.propose(next, label)
       if (count > 0) saveRestorePoint(current, label)
@@ -351,12 +322,11 @@ export function DocumentPane({
   }
 
   return (
-    <section className={`document${compact ? ' document-compact' : ''}${className ? ` ${className}` : ''}`}>
-      {!compact && <header className="document-header">
+    <section className="document">
+      <header className="document-header">
         <div className="document-title" title={path}>
-          {label && <span className="document-label">{label}</span>}
-          {!compact && <span className="document-name">{fileName}</span>}
-          {!label && <span className="document-folder">{folderName(dirname(path))}</span>}
+          <span className="document-name">{fileName}</span>
+          <span className="document-folder">{folderName(dirname(path))}</span>
           {!exists && <span className="document-new" title="Created when you start typing">new</span>}
         </div>
         <span className={`save-state save-${saveState}`} title={saveError ?? undefined}>
@@ -366,17 +336,14 @@ export function DocumentPane({
           <button type="button" className="icon-button history-button" onClick={() => setHistoryOpen(true)} title="History: earlier versions of this file" aria-label="History"><History size={14} aria-hidden="true" /></button>
         )}
         {headerActions}
-      </header>}
+      </header>
       {historyOpen && (
         <HistoryDialog
           path={path}
-          current={() => head.current + (editor.current?.getText() ?? '')}
+          current={() => editor.current?.getText() ?? ''}
           onRestore={(text) => {
             setHistoryOpen(false)
-            const split = splitsHeading ? splitLeadingHeading(text) : { head: '', body: text, heading: null }
-            head.current = split.head
-            parent.current.onLeadingHeading?.(split.heading)
-            editor.current?.replaceAll(split.body)
+            editor.current?.replaceAll(text)
             setNotice('Restored an earlier version. It saves automatically; Ctrl+Z undoes it.')
           }}
           onClose={() => setHistoryOpen(false)}
@@ -409,8 +376,6 @@ export function DocumentPane({
           ref={editor}
           path={path}
           initialText={loaded.document.text}
-          placeholder={placeholder}
-          autoHeight={compact}
           live={live}
           focusMode={focusMode}
           notesView={notesView}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  countWords, encodingLabel, extractHeadings, isSingleWord, lineEndingLabel, matchCase, sentenceAround, splitLeadingHeading, withLeadingHeading, wordAt,
+  countWords, encodingLabel, extractHeadings, isSingleWord, lineEndingLabel, matchCase, sentenceAround, wordAt,
 } from './text'
 
 describe('countWords', () => {
@@ -48,26 +48,5 @@ describe('word helpers', () => {
     expect(matchCase('Gloomy', 'sad')).toBe('Sad')
     expect(matchCase('GLOOMY', 'sad')).toBe('SAD')
     expect(matchCase('gloomy', 'sad')).toBe('sad')
-  })
-})
-
-describe('splitLeadingHeading', () => {
-  it('splits a first-line heading and its blank lines off the body', () => {
-    const text = '\n# Starlight and Time ##\n\n\nLight is fast.\n\n## Later\n'
-    const { head, body, heading } = splitLeadingHeading(text)
-    expect(heading).toEqual({ level: 1, text: 'Starlight and Time' })
-    expect(body).toBe('Light is fast.\n\n## Later\n')
-    expect(head + body).toBe(text)
-    expect(splitLeadingHeading('# Only')).toEqual({ head: '# Only', body: '', heading: { level: 1, text: 'Only' } })
-    expect(splitLeadingHeading('#hashtag first\n').heading).toBeNull()
-    expect(splitLeadingHeading('Text\n# Not first\n').heading).toBeNull()
-    expect(splitLeadingHeading('# A\r\n\r\nbody').body).toBe('body')
-  })
-
-  it('replaces, adds and removes the leading heading', () => {
-    expect(withLeadingHeading('# Old\n\nBody.\n', { level: 1, text: 'New' })).toBe('# New\n\nBody.\n')
-    expect(withLeadingHeading('Body.\n', { level: 2, text: 'Title' })).toBe('## Title\n\nBody.\n')
-    expect(withLeadingHeading('', { level: 1, text: 'Title' })).toBe('# Title\n')
-    expect(withLeadingHeading('# Old\n\nBody.\n', null)).toBe('Body.\n')
   })
 })

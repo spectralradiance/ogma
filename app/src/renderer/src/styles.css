@@ -350,36 +350,6 @@ button[aria-pressed='true'] {
   display: flex;
 }
 
-.tree-ordinal {
-  flex: none;
-  min-width: 1.4em;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.tree-section .tree-label {
-  flex: 1;
-}
-
-.output-mark {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  margin-left: 6px;
-  border: 1px solid var(--idle);
-  border-radius: 50%;
-}
-
-.output-mark.has-output {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.tree-docnote {
-  color: var(--muted);
-  font-style: italic;
-}
-
 .tree-input-row {
   display: flex;
   align-items: center;
@@ -460,14 +430,6 @@ button[aria-pressed='true'] {
   text-overflow: ellipsis;
 }
 
-.document-label {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .document-new {
   padding: 0 5px;
   color: var(--accent);
@@ -502,62 +464,6 @@ button[aria-pressed='true'] {
   gap: 8px;
 }
 
-/* Double document view */
-
-.document-view {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.section-title {
-  display: flex;
-  flex: 1;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.section-title h1 {
-  margin: 0;
-  overflow: hidden;
-  font-family: var(--font-serif);
-  font-size: 18px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-}
-
-.section-ordinal {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.document-notes {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.document-notes .link-button {
-  font-size: 12px;
-}
-
 .banner {
   display: flex;
   align-items: center;
@@ -584,69 +490,6 @@ button[aria-pressed='true'] {
   border-left: 3px solid var(--accent);
 }
 
-.document-body {
-  flex: 1;
-  min-height: 0;
-  padding: 0 0 40vh;
-  overflow-y: auto;
-}
-
-.view-column .doc-section,
-.view-output .doc-section,
-.view-notes .doc-section {
-  max-width: var(--text-width);
-  margin: 0 auto;
-}
-
-.doc-section {
-  padding: 18px 20px 6px;
-}
-
-.doc-section-title {
-  display: flex;
-  gap: 10px;
-  margin: 0 0 6px;
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.doc-columns {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: grid;
-  align-items: center;
-  padding: 0 20px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.doc-column-label {
-  padding: 6px 4px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.doc-columns .splitter {
-  align-self: stretch;
-}
-
-.doc-row {
-  display: grid;
-  align-items: start;
-}
-
-.doc-row > .document {
-  min-width: 0;
-}
-
 .splitter {
   background: var(--border);
   cursor: col-resize;
@@ -655,43 +498,6 @@ button[aria-pressed='true'] {
 
 .splitter:hover {
   background: var(--accent);
-}
-
-.document-compact {
-  flex: none;
-  margin-bottom: 8px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-}
-
-.document-compact:focus-within {
-  border-color: var(--border);
-}
-
-.document-compact .document-header {
-  padding: 2px 10px 0 24px;
-  border-bottom: none;
-}
-
-.document-compact .document-label,
-.document-compact .save-state {
-  font-size: 10px;
-}
-
-.doc-background {
-  background: var(--surface);
-}
-
-.doc-background .cm-editor {
-  background: transparent;
-}
-
-.doc-background .cm-scroller {
-  font-size: 0.92em;
-}
-
-.doc-background .cm-content {
-  color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 
 /* Status bar */
@@ -720,10 +526,6 @@ button[aria-pressed='true'] {
   display: flex;
   gap: 14px;
   margin-left: auto;
-}
-
-.status-pane {
-  color: var(--text);
 }
 
 .status-error {
@@ -806,11 +608,6 @@ button[aria-pressed='true'] {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-/* Side by side already labels the columns. */
-.view-split .document-compact .document-label {
-  display: none;
 }
 
 /* Lexical panel (dictionary, etymology, thesaurus, lexicon) */
@@ -1182,10 +979,6 @@ button[aria-pressed='true'] {
 .editor-host {
   flex: 1;
   min-height: 0;
-}
-
-.document-compact .editor-host {
-  flex: none;
 }
 
 /* Reconstructed forms (*h₂stḗr) need extended Latin that Georgia lacks. */
@@ -1584,16 +1377,6 @@ button.primary {
   min-width: 200px;
 }
 
-/* Let the document header wrap instead of squeezing the title when side panels are open. */
-.section-header {
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-
-.section-title {
-  min-width: 160px;
-}
-
 /* Sidebar tabs and search */
 
 .sidebar-tabs {
@@ -1832,11 +1615,6 @@ button.primary {
   color: var(--muted);
 }
 
-.document-compact .history-button {
-  padding: 0 4px;
-  font-size: 12px;
-}
-
 /* Statistics */
 
 .stats-dialog {
@@ -2019,123 +1797,6 @@ button.primary {
   font-size: 12px;
 }
 
-/* Section line: title, rule, menu */
-
-.section-line {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 4px 0 6px;
-}
-
-.section-line-title {
-  display: flex;
-  flex: none;
-  gap: 10px;
-  align-items: baseline;
-  max-width: 70%;
-  margin: 0;
-  overflow: hidden;
-  font-family: var(--font-serif);
-  font-size: 21px;
-  font-weight: 700;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* A section without a heading: its title only labels the files and is not part of the text. */
-.no-heading .section-line-title {
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-style: italic;
-  font-weight: normal;
-}
-
-.section-mismatch {
-  display: flex;
-  flex: none;
-  gap: 8px;
-  align-items: baseline;
-  color: var(--warn);
-  font-size: 12px;
-}
-
-.outline-no-heading {
-  color: var(--muted);
-  font-style: italic;
-}
-
-.section-line-title .section-ordinal {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: normal;
-}
-
-.section-line-rule {
-  flex: 1;
-  margin: 0;
-  border: none;
-  border-top: 1px solid var(--border);
-}
-
-.section-rename {
-  flex: none;
-  width: min(420px, 60%);
-  padding: 2px 8px;
-  font-family: var(--font-serif);
-  font-size: 16px;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  outline: none;
-}
-
-.section-menu-button {
-  position: relative;
-  flex: none;
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 18px;
-}
-
-.section-menu-button.attention::after {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 6px;
-  height: 6px;
-  content: '';
-  background: var(--warn);
-  border-radius: 50%;
-}
-
-.section-menu-button.problem::after {
-  background: var(--bad);
-}
-
-.doc-hidden {
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 4px 10px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: left;
-  background: transparent;
-  border: 1px dashed var(--border);
-  border-radius: 5px;
-}
-
-.doc-hidden:hover {
-  color: var(--text);
-}
-
-.document-compact {
-  margin-bottom: 10px;
-}
-
 /* AI server: a line in the AI panel, and the Server tab of AI settings */
 
 .ai-server-line {
@@ -2237,10 +1898,6 @@ button.primary {
   line-height: 1.4;
 }
 
-.outline-missing {
-  color: var(--warn);
-}
-
 .outline-controls {
   display: flex;
   align-items: center;
@@ -2287,10 +1944,6 @@ button.primary {
 
 .outline-section:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.outline-section .tree-ordinal {
-  grid-column: 1;
 }
 
 .outline-section-title {
@@ -2341,11 +1994,6 @@ button.primary {
 .outline-heading:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.outline-heading-notes {
-  font-style: italic;
-  opacity: 0.8;
 }
 
 /* Pane edges: drag to resize */
@@ -2440,14 +2088,6 @@ body.resizing {
 .settings input[type="range"] {
   flex: 1;
   accent-color: var(--accent);
-}
-
-.tree-row-wrap.dragging {
-  opacity: 0.4;
-}
-
-.tree-row-wrap.drop-target {
-  box-shadow: inset 0 2px 0 var(--accent, currentColor);
 }
 
 .dictionary-download {

@@ -4,8 +4,6 @@ import { GearIcon, PaneIcon } from './icons'
 
 interface StatusBarProps {
   documentInfo: DocumentInfo | null
-  /** Which pane the document info describes, e.g. "Notes". */
-  documentLabel?: string
   /** Net words written today across all files. */
   todayWords?: number | null
   /** Pane toggles; left out in focus mode. */
@@ -13,7 +11,7 @@ interface StatusBarProps {
   onSettings: () => void
 }
 
-export function StatusBar({ documentInfo, documentLabel, todayWords, panes, onSettings }: StatusBarProps) {
+export function StatusBar({ documentInfo, todayWords, panes, onSettings }: StatusBarProps) {
   return (
     <footer className="statusbar">
       {panes && (
@@ -32,7 +30,6 @@ export function StatusBar({ documentInfo, documentLabel, todayWords, panes, onSe
       )}
       {documentInfo && (
         <span className="status-document">
-          {documentLabel && <span className="status-pane">{documentLabel}</span>}
           <span>{documentInfo.words.toLocaleString()} {documentInfo.words === 1 ? 'word' : 'words'}</span>
           {documentInfo.notesWords > 0 && (
             <span title="Words inside notes blocks, not counted above">{documentInfo.notesWords.toLocaleString()} in notes</span>

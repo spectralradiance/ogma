@@ -7,9 +7,11 @@ import { X } from 'lucide-react'
 import { Modal } from './Modal'
 
 interface StatsDialogProps {
-  folder: string
+  /** The document file. */
+  path: string
   title: string
-  onOpenSection: (stem: string) => void
+  /** Jumps to a section's heading (1-based line). */
+  onOpenSection: (line: number) => void
   onClose: () => void
 }
 
@@ -41,28 +43,29 @@ function DailyChart({ days }: { days: DailyWords[] }) {
   )
 }
 
-export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDialogProps) {
+export function StatsDialog({ path, title, onOpenSection, onClose }: StatsDialogProps) {
   const [stats, setStats] = useState<DocumentStats | null>(null)
   const [days, setDays] = useState<DailyWords[]>([])
   const [goal, setGoal] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    window.ogma.stats.document(folder).then((result) => {
+    window.ogma.stats.document(path).then((result) => {
       setStats(result)
       setGoal(result.goal ? String(result.goal) : '')
     }, (reason: unknown) => setError(errorMessage(reason)))
     void window.ogma.stats.daily(14).then(setDays)
-  }, [folder])
+  }, [path])
 
   const saveGoal = () => {
     const words = Number(goal.replace(/[^\d]/g, ''))
-    window.ogma.stats.setGoal(folder, words > 0 ? words : null).then(setStats, (reason: unknown) => setError(errorMessage(reason)))
+    window.ogma.stats.setGoal(path, words > 0 ? words : null).then(setStats, (reason: unknown) => setError(errorMessage(reason)))
   }
 
   const progress = stats?.goal ? Math.min(1, stats.outputWords / stats.goal) : null
   const week = days.slice(-7).reduce((sum, day) => sum + day.notes + day.output, 0)
   const today = days.at(-1)
+  const titled = stats?.sections.filter((section) => section.title !== null) ?? []
 
   return (
     <Modal label={`Statistics for ${title}`} className="stats-dialog" onClose={onClose}>
@@ -77,7 +80,7 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
             <div className="stats-summary">
               <div><strong>{stats.outputWords.toLocaleString()}</strong><span>output words</span></div>
               <div><strong>{stats.notesWords.toLocaleString()}</strong><span>notes words</span></div>
-              <div><strong>{stats.sections.filter((section) => section.outputWords > 0).length}/{stats.sections.length}</strong><span>sections with output</span></div>
+              <div><strong>{titled.filter((section) => section.hasText).length}/{titled.length}</strong><span>sections with text</span></div>
             </div>
 
             <div className="stats-goal">
@@ -97,20 +100,19 @@ export function StatsDialog({ folder, title, onOpenSection, onClose }: StatsDial
 
             <table className="settings-table stats-table">
               <thead>
-                <tr><th /><th>Section</th><th>Notes</th><th>Output</th><th>Last changed</th></tr>
+                <tr><th>Section</th><th>Notes</th><th>Output</th></tr>
               </thead>
               <tbody>
-                {stats.sections.map((section) => (
-                  <tr key={section.stem}>
-                    <td className="section-ordinal">{section.ordinal}</td>
-                    <td><button type="button" className="link-button" onClick={() => onOpenSection(section.stem)}>{section.title}</button></td>
+                {titled.map((section) => (
+                  <tr key={`${section.line}:${section.title}`}>
+                    <td><button type="button" className="link-button" onClick={() => onOpenSection(section.line)}>{section.title}</button></td>
                     <td>{section.notesWords.toLocaleString()}</td>
-                    <td>{section.outputWords ? section.outputWords.toLocaleString() : <span className="lexical-hint">none yet</span>}</td>
-                    <td className="lexical-hint">{section.modified ? new Date(section.modified).toLocaleDateString() : ''}</td>
+                    <td>{section.hasText ? section.outputWords.toLocaleString() : <span className="lexical-hint">none yet</span>}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {stats.modified && <p className="lexical-hint">Last changed {new Date(stats.modified).toLocaleString()}</p>}
 
             <h3 className="stats-heading">Words written, last two weeks <span className="lexical-hint">(all documents)</span></h3>
             <DailyChart days={days} />

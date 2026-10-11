@@ -3,38 +3,19 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { DailyWords, DocumentStats } from '../shared/ipc'
-import { hasNotes, splitWordCounts } from '../shared/document'
-import { countWords } from '../shared/text'
+import { splitSections, splitWordCounts } from '../shared/document'
 import { readTextDocument } from './fileService'
-import { parseFileName, parseOrdinal } from './sections'
-import { readFolder } from './workspaceService'
 
 interface StatsFile {
-  /** Net words changed per local day, split by role. */
+  /** Net words changed per local day: the text itself and its notes blocks. */
   days: Record<string, { notes: number; output: number }>
-  /** Output word goal per document folder (lower-cased path on Windows). */
+  /** Output word goal per document file (lower-cased path on Windows). */
   goals: Record<string, number>
 }
 
 export function localDay(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-export function roleOf(file: string): 'notes' | 'output' {
-  return parseFileName(path.basename(file)).role === 'output' ? 'output' : 'notes'
-}
-
-/**
- * Whether a file keeps its notes inline (a single-file document): a plain Markdown
- * file that is not numbered like a section, or any file that has notes blocks.
- * Its words are split by those blocks instead of by the file's name.
- */
-export function usesInlineNotes(file: string, ...texts: (string | null)[]): boolean {
-  const { stem, role } = parseFileName(path.basename(file))
-  if (role !== 'plain') return false
-  if (texts.some((text) => text !== null && hasNotes(text))) return true
-  return /\.md$/i.test(file) && parseOrdinal(stem).ordinal === null
 }
 
 /** Writing statistics in <userData>/stats.json: words written per day and per-document goals. */
@@ -50,20 +31,14 @@ export class WritingStats {
   }
 
   /** Records the net change in words from one save. */
-  recordSave(file: string, before: string | null, after: string): void {
+  recordSave(before: string | null, after: string): void {
     const day = localDay(this.now())
     const entry = this.data.days[day] ?? { notes: 0, output: 0 }
-    if (usesInlineNotes(file, before, after)) {
-      const was = before === null ? { output: 0, notes: 0 } : splitWordCounts(before)
-      const now = splitWordCounts(after)
-      if (now.output === was.output && now.notes === was.notes) return
-      entry.output += now.output - was.output
-      entry.notes += now.notes - was.notes
-    } else {
-      const change = countWords(after) - (before === null ? 0 : countWords(before))
-      if (change === 0) return
-      entry[roleOf(file)] += change
-    }
+    const was = before === null ? { output: 0, notes: 0 } : splitWordCounts(before)
+    const now = splitWordCounts(after)
+    if (now.output === was.output && now.notes === was.notes) return
+    entry.output += now.output - was.output
+    entry.notes += now.notes - was.notes
     this.data.days[day] = entry
     this.save()
   }
@@ -79,40 +54,26 @@ export class WritingStats {
     return result
   }
 
-  goal(folder: string): number | null {
-    return this.data.goals[key(folder)] ?? null
+  goal(file: string): number | null {
+    return this.data.goals[key(file)] ?? null
   }
 
-  setGoal(folder: string, words: number | null): void {
-    if (words && words > 0) this.data.goals[key(folder)] = Math.round(words)
-    else delete this.data.goals[key(folder)]
+  setGoal(file: string, words: number | null): void {
+    if (words && words > 0) this.data.goals[key(file)] = Math.round(words)
+    else delete this.data.goals[key(file)]
     this.save()
   }
 
-  async documentStats(folder: string): Promise<DocumentStats> {
-    const model = await readFolder(folder)
-    const words = async (name: string | null) => {
-      if (!name) return { words: 0, modified: null as string | null }
-      const target = path.join(folder, name)
-      const [document, info] = await Promise.all([readTextDocument(target, true), stat(target).catch(() => null)])
-      return { words: countWords(document.text), modified: info ? info.mtime.toISOString() : null }
-    }
-    const sections = await Promise.all(model.sections.map(async (section) => {
-      const [notes, output] = await Promise.all([words(section.notes), words(section.output)])
-      return {
-        stem: section.stem,
-        ordinal: section.ordinal,
-        title: section.title,
-        notesWords: notes.words,
-        outputWords: output.words,
-        modified: [notes.modified, output.modified].filter(Boolean).sort().at(-1) ?? null,
-      }
-    }))
+  /** Per-section counts for a document (split at its headings), with its goal. */
+  async documentStats(file: string): Promise<DocumentStats> {
+    const [document, info] = await Promise.all([readTextDocument(file, true), stat(file).catch(() => null)])
+    const sections = splitSections(document.text).map(({ title, line, hasText, notesWords, outputWords }) => ({ title, line, hasText, notesWords, outputWords }))
     return {
       sections,
       notesWords: sections.reduce((sum, section) => sum + section.notesWords, 0),
       outputWords: sections.reduce((sum, section) => sum + section.outputWords, 0),
-      goal: this.goal(folder),
+      modified: info ? info.mtime.toISOString() : null,
+      goal: this.goal(file),
     }
   }
 
@@ -133,7 +94,7 @@ export class WritingStats {
   }
 }
 
-function key(folder: string): string {
-  const resolved = path.resolve(folder)
+function key(file: string): string {
+  const resolved = path.resolve(file)
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
