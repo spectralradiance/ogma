@@ -29,7 +29,33 @@ API keys are set in the app under **AI → ⚙ AI settings → Keys** (stored en
 
 ## Samples
 
-`samples/` holds example documents: *The Night Sky* (a double document — each section has a `-notes.md` and an `-output.md`, one section has notes only), a notebook in the older extensionless naming, and a regular single-file document. Add the folder with **+** in the sidebar and try the Column / Side by side / Output / Notes views.
+`samples/` holds example documents: *The Night Sky* (a double document — each section has a `-notes.md` and an `-output.md`, one section has notes only), a notebook in the older extensionless naming, a regular single-file document, and *Night Sky (one file)*, the one-file format with inline notes. Add the folder with **+** in the sidebar and try the Column / Side by side / Output / Notes views.
+
+## Single-file documents
+
+A plain `.md` file is a whole document. Each `#` heading starts a section (the outline lists them; `##` and deeper stay inside their section), and a section's notes sit under its text in a notes block:
+
+```
+# First Light
+
+The text of the section.
+
+::: notes
+Working notes, research and fragments for this section.
+:::
+```
+
+The header switches between three views of the same file:
+
+- **Output**: the text as one continuous document, notes hidden.
+- **Notes**: every section's notes as one continuous document, under the section headings. Press Enter on a heading to start that section's notes.
+- **Both**: text and notes together, each notes block drawn as a quieter, indented block (in Live mode its `::: notes` / `:::` lines fold away until the cursor is in it).
+
+Edits in any view go straight into the file. **Ctrl+Alt+N** adds a notes block to the section you are in, or jumps to the one it has (switching to the Notes view from Output). Headings inside notes never start a section. Word counts keep notes apart (the status bar shows "N in notes"), exports leave notes out (or export only the notes), AI Analyze ignores them, and **Draft output from notes** drafts the section at the cursor from its notes.
+
+**New document** (folder right-click) makes one. **Convert to a single document** (right-click a folder of sections) writes `<folder name>.md` next to it, a `#` heading per section with its output and notes; the folder is left as it is.
+
+The folder-of-files layout described below still works as before.
 
 ## Working in the sidebar
 
