@@ -2527,3 +2527,11 @@ body.resizing {
   height: 8px;
   border-radius: 50%;
 }
+
+/* Icon buttons in the editor toolbars */
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+}

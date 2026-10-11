@@ -99,7 +99,7 @@ Every run is logged (task, model, token usage, input hash, output) to `%APPDATA%
 ## Finding, exporting and tracking
 
 - **Search** (sidebar tab, Ctrl+Shift+F) looks through every text file in the workspace folders. The index is built the first time you open Search and then kept current as files change. *Related to the current passage* lists paragraphs elsewhere that share the focused passage's key words.
-- **Export…** (document header) writes a double document's outputs, or its notes, in section order as PDF, HTML or Markdown.
+- **Export** (Settings → Export, Ctrl+,) writes the open document's outputs, or its notes, in section order as PDF, HTML or Markdown.
 - **History** (⟲ on any editor) lists earlier versions of that file — saved automatically at most every 10 minutes while you edit, plus snapshots you take — with a diff against the current text and Restore. Versions are kept in `%APPDATA%\Ogma\snapshots`, never in your folders.
 - **Stats** (document header) shows notes and output word counts per section, an output goal with progress, and words written per day; today's net count is in the status bar.
 

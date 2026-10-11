@@ -73,7 +73,7 @@ export function App() {
     return stored === 'words' || stored === 'ai' ? stored : null
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [exportingFile, setExportingFile] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES)
   const savePreferencesTimer = useRef<number | undefined>(undefined)
@@ -404,6 +404,10 @@ export function App() {
     ? (/-output\.[^.\\/]+$/i.test(activePath) ? 'Output' : 'Notes')
     : ''
   const mode = { live, focusMode, onToggleLive: toggleLive, onToggleFocus: toggleFocus }
+  // What Settings → Export exports: the open document or file. Notes are left out of the output.
+  const exportTarget = target?.kind === 'document'
+    ? { path: target.folder, title: target.title }
+    : target?.kind === 'file' ? { path: target.path, title: folderName(target.path).replace(/\.[^.]+$/, '') } : null
   const shownDrawer = focusMode ? null : drawer
   const documentTitle = target?.kind === 'document' ? target.title : target?.kind === 'file' ? folderName(target.path) : ''
 
@@ -555,7 +559,6 @@ export function App() {
             onShowNotes={() => changeNotesView('notes')}
             headerActions={(
               <>
-                <button type="button" onClick={() => setExportingFile(true)} title="Export as PDF, HTML or Markdown (notes are left out of the output)">Export…</button>
                 <NotesViewSwitch view={notesView} onView={changeNotesView} />
                 <ModeToggles {...mode} />
               </>
@@ -604,8 +607,8 @@ export function App() {
           )}
         </SidePanel>
       )}
-      {exportingFile && target?.kind === 'file' && (
-        <ExportDialog folder={target.path} title={folderName(target.path).replace(/\.[^.]+$/, '')} flush={flushAll} onClose={() => setExportingFile(false)} />
+      {exporting && exportTarget && (
+        <ExportDialog folder={exportTarget.path} title={exportTarget.title} flush={flushAll} onClose={() => setExporting(false)} />
       )}
       {settingsOpen && <AiSettings status={status} onClose={() => setSettingsOpen(false)} />}
       <StatusBar
@@ -630,7 +633,18 @@ export function App() {
           <button type="button" className="icon-button" onClick={() => setUndo(null)} aria-label="Dismiss"><X size={14} aria-hidden="true" /></button>
         </div>
       )}
-      {appSettingsOpen && <SettingsDialog preferences={preferences} onChange={changePreferences} onClose={() => setAppSettingsOpen(false)} />}
+      {appSettingsOpen && (
+        <SettingsDialog
+          preferences={preferences}
+          onChange={changePreferences}
+          onClose={() => setAppSettingsOpen(false)}
+          exportTitle={exportTarget?.title ?? null}
+          onExport={() => {
+            setAppSettingsOpen(false)
+            setExporting(true)
+          }}
+        />
+      )}
     </div>
   )
 }

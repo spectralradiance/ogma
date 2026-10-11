@@ -13,6 +13,9 @@ interface SettingsDialogProps {
   preferences: Preferences
   onChange: (preferences: Preferences) => void
   onClose: () => void
+  /** The open document's title, or null when nothing is open to export. */
+  exportTitle: string | null
+  onExport: () => void
 }
 
 const THEMES: { id: ThemeChoice; label: string }[] = [
@@ -69,7 +72,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
 }
 
 /** App settings: appearance (color scheme, fonts, text size and width) and export defaults. */
-export function SettingsDialog({ preferences, onChange, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ preferences, onChange, onClose, exportTitle, onExport }: SettingsDialogProps) {
   const [tab, setTab] = useState<Tab>('appearance')
 
   const appearance = (patch: Partial<Appearance>) => onChange({ ...preferences, appearance: { ...preferences.appearance, ...patch } })
@@ -134,6 +137,12 @@ export function SettingsDialog({ preferences, onChange, onClose }: SettingsDialo
         )}
         {tab === 'export' && (
           <div className="settings-section">
+            <div className="settings-row">
+              <span className="settings-label">Export</span>
+              <button type="button" className="primary" disabled={exportTitle === null} onClick={onExport}>
+                {exportTitle === null ? 'Open a document to export it' : `Export ${exportTitle}…`}
+              </button>
+            </div>
             <div className="settings-row">
               <span className="settings-label">Default format</span>
               <div className="segmented" role="group" aria-label="Default format">

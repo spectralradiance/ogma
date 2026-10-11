@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type ComponentProps, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { SectionSummary } from '../../shared/document'
 import type { FolderModel, SectionInfo } from '../../shared/ipc'
@@ -6,10 +6,12 @@ import { folderName } from '../../shared/format'
 import { joinPath } from '../../shared/paths'
 import { type Heading, type LeadingHeading, splitLeadingHeading } from '../../shared/text'
 import type { WordInContext } from './editor/MarkdownEditor'
+import {
+  ArrowLeftRight, ArrowUpDown, ChartColumn, Code, Columns2, Eye, FileText, Focus, Layers, type LucideIcon, NotebookPen, Rows2,
+} from 'lucide-react'
 import { onDiskChange, touchesFolder } from './changes'
 import { DocumentPane, type DocumentInfo, type DocumentPaneHandle } from './DocumentPane'
 import type { NotesView } from './editor/notesBlocks'
-import { ExportDialog } from './ExportDialog'
 import { type PaneState, SectionHeader, type SectionLayout } from './SectionHeader'
 import { StatsDialog } from './StatsDialog'
 import { readPref, writePref } from './prefs'
@@ -24,10 +26,23 @@ interface ModeProps {
   onToggleFocus: () => void
 }
 
-const NOTES_VIEWS: { id: NotesView; label: string; title: string }[] = [
-  { id: 'output', label: 'Output', title: 'The text as one continuous document, notes hidden' },
-  { id: 'notes', label: 'Notes', title: 'All notes as one continuous document, under each section’s # heading. Enter on a heading starts its notes.' },
-  { id: 'all', label: 'Both', title: 'Text and notes together, each section’s notes under its text. Ctrl+Alt+N adds or jumps to notes.' },
+// Toolbar buttons are icons: the label is the accessible name, the title the tooltip.
+const ICON = { size: 16, strokeWidth: 1.8, 'aria-hidden': true } as const
+
+function IconButton({ icon: Icon, label, title, ...props }: { icon: LucideIcon; label: string; title?: string } & ComponentProps<'button'>) {
+  return (
+    <button type="button" className="tool-button" aria-label={label} title={title ?? label} {...props}>
+      <Icon {...ICON} />
+    </button>
+  )
+}
+
+const VIEW_ICONS: Record<ViewMode, LucideIcon> = { column: Rows2, split: Columns2, output: FileText, notes: NotebookPen }
+
+const NOTES_VIEWS: { id: NotesView; label: string; title: string; icon: LucideIcon }[] = [
+  { id: 'output', icon: FileText, label: 'Output', title: 'The text as one continuous document, notes hidden' },
+  { id: 'notes', icon: NotebookPen, label: 'Notes', title: 'All notes as one continuous document, under each section’s # heading. Enter on a heading starts its notes.' },
+  { id: 'all', icon: Layers, label: 'Both', title: 'Text and notes together, each section’s notes under its text. Ctrl+Alt+N adds or jumps to notes.' },
 ]
 
 /** For single-file documents: the output alone, the notes alone, or both. */
@@ -35,9 +50,7 @@ export function NotesViewSwitch({ view, onView }: { view: NotesView; onView: (vi
   return (
     <div className="segmented" role="group" aria-label="Document view">
       {NOTES_VIEWS.map((option) => (
-        <button key={option.id} type="button" aria-pressed={view === option.id} onClick={() => onView(option.id)} title={option.title}>
-          {option.label}
-        </button>
+        <IconButton key={option.id} icon={option.icon} label={option.label} title={`${option.label}: ${option.title}`} aria-pressed={view === option.id} onClick={() => onView(option.id)} />
       ))}
     </div>
   )
@@ -47,16 +60,10 @@ export function ModeToggles({ live, focusMode, onToggleLive, onToggleFocus }: Mo
   return (
     <div className="mode-toggles">
       <div className="segmented" role="group" aria-label="Editing mode">
-        <button type="button" aria-pressed={live} onClick={live ? undefined : onToggleLive} title="Live rendering (Ctrl+/)">
-          Live
-        </button>
-        <button type="button" aria-pressed={!live} onClick={live ? onToggleLive : undefined} title="Markdown source (Ctrl+/)">
-          Source
-        </button>
+        <IconButton icon={Eye} label="Live" title="Live rendering (Ctrl+/)" aria-pressed={live} onClick={live ? undefined : onToggleLive} />
+        <IconButton icon={Code} label="Source" title="Markdown source (Ctrl+/)" aria-pressed={!live} onClick={live ? onToggleLive : undefined} />
       </div>
-      <button type="button" aria-pressed={focusMode} onClick={onToggleFocus} title="Focus mode (F8)">
-        Focus
-      </button>
+      <IconButton icon={Focus} label="Focus mode" title="Focus mode (F8)" aria-pressed={focusMode} onClick={onToggleFocus} />
     </div>
   )
 }
@@ -123,7 +130,6 @@ export function DocumentView({
     column: readPref('columnSwapped') === 'true',
   }))
   const [ratio, setRatio] = useState(readRatio)
-  const [exporting, setExporting] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [paneStates, setPaneStates] = useState<Record<string, PaneState>>({})
   // Each output file's first-line heading: the section's heading (keyed by output path).
@@ -303,28 +309,18 @@ export function DocumentView({
         </div>
         <div className="segmented" role="group" aria-label="Document view">
           {VIEW_MODES.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={view === option.id}
-              onClick={() => onView(option.id)}
-              title={option.title}
-            >
-              {option.label}
-            </button>
+            <IconButton key={option.id} icon={VIEW_ICONS[option.id]} label={option.label} title={`${option.label}: ${option.title}`} aria-pressed={view === option.id} onClick={() => onView(option.id)} />
           ))}
         </div>
         {view === 'split' && (
-          <button type="button" onClick={toggleSwap} aria-pressed={swaps.split} title="Swap notes and output sides, in every section">⇄</button>
+          <IconButton icon={ArrowLeftRight} label="Swap sides" title="Swap notes and output sides, in every section" onClick={toggleSwap} aria-pressed={swaps.split} />
         )}
         {view === 'column' && (
-          <button type="button" onClick={toggleSwap} aria-pressed={swaps.column} title="Put notes above output (or output above notes), in every section">⇅</button>
+          <IconButton icon={ArrowUpDown} label="Swap order" title="Put notes above output (or output above notes), in every section" onClick={toggleSwap} aria-pressed={swaps.column} />
         )}
-        <button type="button" onClick={() => setShowStats(true)} title="Word counts per section, goal and daily progress">Stats</button>
-        <button type="button" onClick={() => setExporting(true)} title="Export the document as PDF, HTML or Markdown">Export…</button>
+        <IconButton icon={ChartColumn} label="Stats" title="Stats: word counts per section, goal and daily progress" onClick={() => setShowStats(true)} />
         <ModeToggles {...mode} />
       </header>
-      {exporting && <ExportDialog folder={folder} title={target.title} flush={flush} onClose={() => setExporting(false)} />}
       {showStats && (
         <StatsDialog
           folder={folder}
