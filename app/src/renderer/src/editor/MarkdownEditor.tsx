@@ -12,7 +12,7 @@ import { dictionaryHover } from './dictionaryHover'
 import { focusMode as focusModeExtension } from './focusMode'
 import { documentPath, livePreview } from './livePreview'
 import { addOrJumpToNotes, notesBlocks, notesView as notesViewFacet, type NotesView, revealSelection, SHOW_NOTES_EVENT } from './notesBlocks'
-import { proposeText, suggestions, suggestionsOf } from './suggestions'
+import { proposeRangeSpec, proposeText, suggestions, suggestionsOf } from './suggestions'
 import { autoHeightTheme, editorTheme } from './theme'
 
 export interface MarkdownEditorHandle {
@@ -31,6 +31,8 @@ export interface MarkdownEditorHandle {
   cursorLine(): number
   /** Shows the edits that would turn the text into `text` as suggestions to accept or reject; returns how many. */
   propose(text: string, label: string): number
+  /** Suggests replacing [from, to) with `insert`, keeping other suggestions; returns how many changes. */
+  proposeRange(from: number, to: number, insert: string, label: string): number
   /** How many suggestions are waiting. */
   pendingSuggestions(): number
 }
@@ -150,6 +152,13 @@ export function MarkdownEditor({
       return editor ? editor.state.doc.lineAt(editor.state.selection.main.head).number : 1
     },
     propose: (text, label) => (view.current ? proposeText(view.current, text, label) : 0),
+    proposeRange: (from, to, insert, label) => {
+      const editor = view.current
+      if (!editor) return 0
+      const { count, ...spec } = proposeRangeSpec(editor.state, from, to, insert, label)
+      if (count) editor.dispatch(spec)
+      return count
+    },
     pendingSuggestions: () => (view.current ? suggestionsOf(view.current.state).length : 0),
   }), [initialText])
 

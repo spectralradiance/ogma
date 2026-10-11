@@ -58,6 +58,12 @@ export interface DocumentPaneHandle {
    * changes were suggested, or null if that section no longer exists.
    */
   propose(text: string, label: string, index?: number | null): number | null
+  /**
+   * Suggests replacing the one occurrence of `oldText` with `newText` (an agent's edit),
+   * alongside suggestions already shown. With `snapshot`, first saves a "Before AI"
+   * version. Returns how many changes were suggested, or why it could not.
+   */
+  proposeEdit(oldText: string, newText: string, label: string, snapshot: boolean): { count: number } | { error: string }
   openHistory(): void
 }
 
@@ -251,6 +257,13 @@ export function DocumentPane({
     }
   }, [path, updateState])
 
+  // A restore point from before the AI touched anything, in case the writer accepts and regrets it.
+  const saveRestorePoint = useCallback((current: string, label: string) => {
+    if ((head.current + current).trim()) {
+      void window.ogma.history.snapshot(path, head.current + current, `Before AI: ${label}`).catch(() => {})
+    }
+  }, [path])
+
   useImperativeHandle(ref, () => ({
     flush: () => save(),
     // Lines are the file's; the editor starts after the held-back heading.
@@ -275,14 +288,27 @@ export function DocumentPane({
       const next = index === null ? text : replaceSectionOutput(current, index, text)
       if (next === null) return null
       const count = handle.propose(next, label)
-      // A restore point from before the AI touched anything, in case the writer accepts and regrets it.
-      if (count > 0 && (head.current + current).trim()) {
-        void window.ogma.history.snapshot(path, head.current + current, `Before AI: ${label}`).catch(() => {})
-      }
+      if (count > 0) saveRestorePoint(current, label)
       return count
     },
+    proposeEdit: (oldText, newText, label, snapshot) => {
+      const handle = editor.current
+      if (!handle) return { error: 'That file is no longer open.' }
+      const current = handle.getText()
+      let from = 0
+      if (oldText) {
+        from = current.indexOf(oldText)
+        if (from < 0) return { error: 'old_text was not found. Read the file again and copy the passage exactly.' }
+        if (current.indexOf(oldText, from + 1) >= 0) return { error: 'old_text appears more than once. Include more of the surrounding text so it is unique.' }
+      } else if (current.trim()) {
+        return { error: 'old_text is empty, which is only allowed for an empty file.' }
+      }
+      const count = handle.proposeRange(from, from + oldText.length, newText, label)
+      if (count > 0 && snapshot) saveRestorePoint(current, label)
+      return { count }
+    },
     openHistory: () => setHistoryOpen(true),
-  }), [save, path])
+  }), [save, saveRestorePoint])
 
   useEffect(() => {
     saveLater.current = () => {

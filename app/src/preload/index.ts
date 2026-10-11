@@ -75,6 +75,7 @@ const api: OgmaApi = {
     openPrompts: () => ipcRenderer.invoke(IPC.aiOpenPrompts),
     run: (request) => ipcRenderer.invoke(IPC.aiRun, request),
     cancel: (runId) => ipcRenderer.invoke(IPC.aiCancel, runId),
+    render: (task, variables) => ipcRenderer.invoke(IPC.aiRender, task, variables),
     onEvent: (listener) => {
       const handler = (_event: IpcRendererEvent, runId: string, event: AiEvent): void => listener(runId, event)
       ipcRenderer.on(IPC.aiEvent, handler)

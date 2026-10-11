@@ -14,6 +14,7 @@ from ..ai_types import (
     ProviderHealth,
     StreamEvent,
     done_event,
+    plain_text,
     status_kind,
     text_event,
     usage_event,
@@ -26,6 +27,7 @@ class GeminiProvider:
     id = "gemini"
     label = "Google Gemini"
     kind = "cloud"
+    supports_tools = False
 
     def __init__(self, env: Mapping[str, str]) -> None:
         self._api_key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY") or None
@@ -42,7 +44,7 @@ class GeminiProvider:
         http_options = types.HttpOptions(base_url=self._base_url) if self._base_url else None
         client = genai.Client(api_key=self._api_key, http_options=http_options)
         contents = [
-            types.Content(role="user" if message.role == "user" else "model", parts=[types.Part(text=message.content)])
+            types.Content(role="user" if message.role == "user" else "model", parts=[types.Part(text=plain_text(message))])
             for message in request.messages
         ]
         config = types.GenerateContentConfig(

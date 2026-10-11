@@ -1356,13 +1356,24 @@ button[aria-pressed='true'] {
   gap: 8px;
 }
 
+.ai-chat-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-right: auto;
+}
+
 .ai-chat-attach {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-right: auto;
   color: var(--muted);
   font-size: 11px;
+}
+
+.ai-chat-tool {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 button.primary {

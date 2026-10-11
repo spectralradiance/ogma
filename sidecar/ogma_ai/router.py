@@ -34,8 +34,10 @@ def candidates(
     providers: Mapping[str, Provider],
     override: str | None = None,
     only: bool = False,
+    needs_tools: bool = False,
 ) -> list[Profile]:
-    """Profiles to try, in order. With `only`, just the override (used by connection tests)."""
+    """Profiles to try, in order. With `only`, just the override (used by connection tests).
+    With `needs_tools`, providers that cannot pass tools to the model are left out."""
     by_id = {profile.id: profile for profile in config.profiles}
     order = list(config.routing.get(task) or config.routing.get("default") or ())
     if override:
@@ -50,6 +52,8 @@ def candidates(
             continue
         if config.mode == "cloud" and provider.kind != "cloud":
             continue
+        if needs_tools and not getattr(provider, "supports_tools", False):
+            continue
         chosen.append(profile)
     return chosen
 
@@ -63,9 +67,11 @@ def run(
     only: bool = False,
 ) -> Iterator[StreamEvent]:
     """Streams events for one run. Always ends with a "done" or "error" event."""
-    options = candidates(task, config, providers, override, only)
+    needs_tools = bool(request.tools)
+    options = candidates(task, config, providers, override, only, needs_tools)
     if not options:
-        yield {"type": "error", "kind": "unavailable", "message": f"No profile is set up for “{task}” in {config.mode} mode."}
+        what = "with tool support (Claude or an OpenAI-style model) " if needs_tools else ""
+        yield {"type": "error", "kind": "unavailable", "message": f"No profile {what}is set up for “{task}” in {config.mode} mode."}
         return
 
     problems: list[str] = []
@@ -87,7 +93,7 @@ def run(
         streamed_text = False
         try:
             for event in provider.stream(request, profile):
-                if event["type"] == "text":
+                if event["type"] in ("text", "tool_call"):
                     streamed_text = True
                 yield event
             return

@@ -7,25 +7,61 @@ server), selected by base URL.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Mapping
+from typing import Any
 
 import openai
 
 from ..ai_types import (
+    ChatMessage,
     GenerateRequest,
     Profile,
     ProviderError,
     ProviderHealth,
     StreamEvent,
+    blocks_of,
     done_event,
     status_kind,
     text_event,
+    tool_call_event,
     usage_event,
 )
+
+# The app runs tools only on the neutral "tool_use" stop reason.
+FINISH_REASONS = {"tool_calls": "tool_use"}
+
+
+def to_openai(message: ChatMessage) -> list[dict[str, Any]]:
+    """A neutral message as Chat Completions messages: tool calls ride on the assistant
+    message, and each tool result is its own "tool" message."""
+    if isinstance(message.content, str):
+        return [{"role": message.role, "content": message.content}]
+    blocks = blocks_of(message)
+    text = "".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text")
+    if message.role == "assistant":
+        calls = [
+            {"id": block["id"], "type": "function", "function": {"name": block["name"], "arguments": json.dumps(block.get("input") or {})}}
+            for block in blocks
+            if block.get("type") == "tool_call"
+        ]
+        out: dict[str, Any] = {"role": "assistant", "content": text or None}
+        if calls:
+            out["tool_calls"] = calls
+        return [out]
+    messages: list[dict[str, Any]] = [
+        {"role": "tool", "tool_call_id": block["tool_call_id"], "content": str(block.get("content", ""))}
+        for block in blocks
+        if block.get("type") == "tool_result"
+    ]
+    if text:
+        messages.append({"role": "user", "content": text})
+    return messages
 
 
 class OpenAIChatProvider:
     kind = "cloud"
+    supports_tools = True
 
     def __init__(
         self,
@@ -64,7 +100,8 @@ class OpenAIChatProvider:
         # Compatible hosts often need no key; the SDK still requires a non-empty string.
         client = openai.OpenAI(api_key=self._api_key or "not-needed", base_url=profile.params.get("base_url") or self._base_url)
         messages = [{"role": "system", "content": request.system}] if request.system else []
-        messages += [{"role": message.role, "content": message.content} for message in request.messages]
+        for message in request.messages:
+            messages += to_openai(message)
         params: dict = {
             "model": profile.model,
             "messages": messages,
@@ -74,6 +111,13 @@ class OpenAIChatProvider:
         }
         if request.temperature is not None:
             params["temperature"] = request.temperature
+        if request.tools:
+            params["tools"] = [
+                {"type": "function", "function": {"name": tool.name, "description": tool.description, "parameters": tool.input_schema}}
+                for tool in request.tools
+            ]
+        # Streamed tool calls arrive in fragments, keyed by index.
+        calls: dict[int, dict[str, str]] = {}
 
         stop_reason: str | None = None
         usage: tuple[int | None, int | None] = (None, None)
@@ -85,6 +129,13 @@ class OpenAIChatProvider:
                         choice = chunk.choices[0]
                         if choice.delta is not None and choice.delta.content:
                             yield text_event(choice.delta.content)
+                        for fragment in (choice.delta.tool_calls if choice.delta is not None else None) or []:
+                            call = calls.setdefault(fragment.index, {"id": "", "name": "", "arguments": ""})
+                            if fragment.id:
+                                call["id"] = fragment.id
+                            if fragment.function is not None:
+                                call["name"] += fragment.function.name or ""
+                                call["arguments"] += fragment.function.arguments or ""
                         if choice.finish_reason:
                             stop_reason = choice.finish_reason
                     if chunk.usage is not None:
@@ -98,8 +149,16 @@ class OpenAIChatProvider:
 
         if stop_reason == "content_filter":
             raise ProviderError("refusal", f"{self.label} filtered this response.")
+        for index in sorted(calls):
+            call = calls[index]
+            try:
+                parsed = json.loads(call["arguments"] or "{}")
+                yield tool_call_event(call["id"] or f"call_{index}", call["name"], parsed if isinstance(parsed, dict) else {})
+            except json.JSONDecodeError:
+                # Handed to the app, which answers it with an error result instead of running it.
+                yield tool_call_event(call["id"] or f"call_{index}", call["name"], {}, call["arguments"])
         yield usage_event(*usage)
-        yield done_event(stop_reason)
+        yield done_event(FINISH_REASONS.get(stop_reason or "", stop_reason))
 
 
 def openai_provider(env: Mapping[str, str]) -> OpenAIChatProvider:

@@ -2,7 +2,7 @@ import { history, redo, undo } from '@codemirror/commands'
 import { EditorState, type TransactionSpec } from '@codemirror/state'
 import { describe, expect, it } from 'vitest'
 
-import { acceptSpec, proposeSpec, rejectSpec, suggestionField, suggestionsOf } from './suggestions'
+import { acceptSpec, proposeRangeSpec, proposeSpec, rejectSpec, suggestionField, suggestionsOf } from './suggestions'
 
 const BEFORE = 'The night was cold.\nStars came out.\nWe went home.'
 const AFTER = 'The night was bitter.\nStars came out slowly.\nWe went home.'
@@ -68,5 +68,22 @@ describe('suggestions', () => {
     rejected = apply(rejected, rejectSpec(rejected))
     rejected = command(rejected, undo)
     expect(suggestionsOf(rejected)).toHaveLength(2)
+  })
+})
+
+describe('range suggestions', () => {
+  const range = (state: EditorState, find: string, insert: string) => {
+    const from = state.doc.toString().indexOf(find)
+    return apply(state, proposeRangeSpec(state, from, from + find.length, insert, 'Agent'))
+  }
+
+  it('add to the suggestions already shown and replace only those they overlap', () => {
+    let state = range(create(), 'was cold', 'was bitter')
+    state = range(state, 'Stars came out.', 'Stars came out slowly.')
+    expect(suggestionsOf(state).map((item) => item.insert)).toEqual(['bitter', ' slowly'])
+    // A second edit of the same passage replaces the first rather than stacking on it.
+    state = range(state, 'was cold', 'was icy')
+    expect(suggestionsOf(state).map((item) => item.insert)).toEqual(['icy', ' slowly'])
+    expect(apply(state, acceptSpec(state)).doc.toString()).toBe('The night was icy.\nStars came out slowly.\nWe went home.')
   })
 })

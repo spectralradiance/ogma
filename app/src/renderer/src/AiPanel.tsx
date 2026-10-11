@@ -6,6 +6,7 @@ import type { SidecarStatus } from '../../shared/ipc'
 import { describeMetrics, measureText, type TextMetrics } from '../../shared/readability'
 import type { WordInContext } from './editor/MarkdownEditor'
 import { AiServerLine } from './AiServer'
+import type { AgentHost } from './agentTools'
 import { chatStore } from './chatStore'
 import { readPref, writePref } from './prefs'
 import { errorMessage } from './target'
@@ -33,6 +34,8 @@ export interface AiWorkspace {
   replaceWord(word: string): boolean
   /** The open double document's outline, for structure analysis. */
   outline: { title: string; sections: number; markdown(): string } | null
+  /** What the chat's agent mode can read and suggest edits to. */
+  agent: AgentHost
 }
 
 interface RunState {
@@ -65,6 +68,10 @@ function reduce(state: RunState, event: AiEvent): RunState {
       return { ...state, notices: [...state.notices, event.message] }
     case 'error':
       return { ...state, status: event.kind === 'cancelled' ? 'cancelled' : 'error', error: event.message }
+    case 'tool_call':
+    case 'assistant_message':
+      // Only agent runs (the chat) use tools.
+      return state
   }
 }
 
@@ -360,9 +367,14 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
   const chat = useSyncExternalStore(chatStore.subscribe, chatStore.snapshot)
   const [draft, setDraft] = useState('')
   const [attach, setAttach] = useState(true)
+  const [agent, setAgentState] = useState(() => readPref('aiAgent') === 'on')
   const log = useRef<HTMLDivElement>(null)
-  const last = chat.turns[chat.turns.length - 1]
-  const busy = last?.status === 'running'
+  const busy = chat.busy
+
+  const setAgent = (on: boolean) => {
+    writePref('aiAgent', on ? 'on' : null)
+    setAgentState(on)
+  }
 
   // Follow the reply as it streams in.
   useEffect(() => {
@@ -385,7 +397,7 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
       }
     }
     setDraft('')
-    void chatStore.send(message, variables, { profileId: profileId || undefined, contextLabel })
+    void chatStore.send(message, variables, { profileId: profileId || undefined, contextLabel, agent: agent ? workspace.agent : null })
   }
 
   return (
@@ -395,7 +407,8 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
         {chat.turns.length === 0 && (
           <p className="lexical-hint">
             Ask about the text you are working on: feedback, ideas, wording. With “Attach focused text” on, each message
-            includes the selection, or the whole focused file.
+            includes the selection, or the whole focused file. With “Agent” on, it can also read your open files, search
+            the workspace and suggest edits, which appear in the editor for you to accept or reject.
           </p>
         )}
         {chat.turns.map((turn, index) => (
@@ -403,7 +416,9 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
             {turn.role === 'user' ? (
               <>
                 <div className="ai-chat-bubble">{turn.text}</div>
-                {turn.context && <span className="ai-chat-meta">{turn.context}</span>}
+                {(turn.context || turn.agent) && (
+                  <span className="ai-chat-meta">{[turn.agent ? 'agent' : '', turn.context ?? ''].filter(Boolean).join(' · ')}</span>
+                )}
               </>
             ) : (
               <>
@@ -411,7 +426,10 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
                   {turn.provenance ?? (turn.status === 'running' ? 'Starting…' : '')}
                   {turn.status === 'cancelled' && ' · stopped'}
                 </span>
-                {turn.text && <div className="ai-text">{turn.text}</div>}
+                {turn.parts.map((part, partIndex) => part.type === 'text'
+                  ? <div key={partIndex} className="ai-text">{part.text}</div>
+                  : <div key={partIndex} className={`ai-chat-tool${part.isError ? ' status-error' : ''}`}>↳ {part.summary}</div>)}
+                {turn.status === 'running' && turn.provenance && turn.parts.at(-1)?.type !== 'text' && <span className="ai-chat-meta">Working…</span>}
                 {turn.status === 'error' && turn.error && <p className="lexical-message status-error">{turn.error}</p>}
               </>
             )}
@@ -433,10 +451,16 @@ function AiChat({ workspace, profileId, top }: { workspace: AiWorkspace; profile
           }}
         />
         <div className="ai-chat-controls">
-          <label className="ai-chat-attach" title="Send the selection, or the whole focused file, with each message">
-            <input type="checkbox" checked={attach} onChange={(event) => setAttach(event.target.checked)} />
-            Attach focused text
-          </label>
+          <div className="ai-chat-options">
+            <label className="ai-chat-attach" title="Send the selection, or the whole focused file, with each message">
+              <input type="checkbox" checked={attach} onChange={(event) => setAttach(event.target.checked)} />
+              Attach focused text
+            </label>
+            <label className="ai-chat-attach" title="Let the model read open files, search the workspace and suggest edits (Claude or an OpenAI-style model; Settings → Routing → Agent)">
+              <input type="checkbox" checked={agent} onChange={(event) => setAgent(event.target.checked)} />
+              Agent
+            </label>
+          </div>
           {chat.turns.length > 0 && <button type="button" className="link-button" onClick={() => chatStore.clear()}>New chat</button>}
           {busy
             ? <button type="button" onClick={() => chatStore.cancel()}>Stop</button>

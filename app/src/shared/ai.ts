@@ -2,7 +2,7 @@
 
 export type AiMode = 'local' | 'cloud' | 'hybrid'
 export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'openai_compat' | 'local_hf'
-export type AiTask = 'analyze' | 'synthesize' | 'lexical' | 'structure' | 'chat'
+export type AiTask = 'analyze' | 'synthesize' | 'lexical' | 'structure' | 'chat' | 'agent'
 
 export interface AiProfile {
   id: string
@@ -31,6 +31,7 @@ export const AI_TASKS: { id: AiTask; label: string; description: string }[] = [
   { id: 'lexical', label: 'Word choice', description: 'Alternatives for a word in context' },
   { id: 'structure', label: 'Structure', description: 'Order, balance and gaps across the whole document’s outline' },
   { id: 'chat', label: 'Chat', description: 'A conversation about the focused text' },
+  { id: 'agent', label: 'Agent', description: 'Chat that reads your files and suggests edits (needs Claude or an OpenAI-style model)' },
 ]
 
 export const PROVIDERS: { id: AiProviderId; label: string; kind: 'cloud' | 'local'; keyName: string | null }[] = [
@@ -60,13 +61,29 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     lexical: ['local-qwen', 'claude', 'gemini', 'openai', 'open-host'],
     structure: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
     chat: ['claude', 'gemini', 'openai', 'open-host', 'local-qwen'],
+    agent: ['claude', 'openai', 'open-host'],
     default: ['claude', 'local-qwen'],
   },
 }
 
+/** Neutral content blocks: the sidecar translates them for each provider (sidecar/ogma_ai/ai_types.py). */
+export type AiContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_call_id: string; content: string; is_error?: boolean }
+
 export interface AiMessage {
   role: 'user' | 'assistant'
-  content: string
+  content: string | AiContentBlock[]
+  /** The turn in the provider's own format, sent back to that provider unchanged (keeps Claude's thinking blocks). */
+  native?: { provider: string; content: unknown[] }
+}
+
+export interface AiToolSpec {
+  name: string
+  description: string
+  /** JSON Schema for the tool's input. */
+  input_schema: Record<string, unknown>
 }
 
 /** What a feature asks for; the main process renders the prompt template and adds routing. */
@@ -76,6 +93,13 @@ export interface AiRunRequest {
   variables: Record<string, string>
   /** Earlier turns of a conversation, sent before the rendered user message (chat). */
   history?: AiMessage[]
+  /**
+   * Messages to send after the history instead of the rendered user message: an agent
+   * continuing after tool calls. The template still supplies the system prompt.
+   */
+  continuation?: AiMessage[]
+  /** Tools the model may call; the app runs them and starts the next run with the results. */
+  tools?: AiToolSpec[]
   profileId?: string
   /** Use only profileId, never fall back to another model (connection tests). */
   profileOnly?: boolean
@@ -91,6 +115,10 @@ export type AiEvent =
   | { type: 'usage'; input_tokens: number | null; output_tokens: number | null }
   | { type: 'done'; stop_reason: string | null }
   | { type: 'notice'; message: string }
+  /** The model wants a tool run. input_error holds arguments that were not valid JSON. */
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown>; input_error?: string }
+  /** The finished turn in the provider's own format, for AiMessage.native. */
+  | { type: 'assistant_message'; provider: string; content: unknown[] }
   | { type: 'error'; kind: string; message: string; partial?: boolean }
 
 export interface AiKeyStatus {

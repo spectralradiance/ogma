@@ -473,6 +473,25 @@ export function App() {
       : outline?.kind === 'file' && outline.sections.some((section) => section.title !== null)
         ? { title: outline.title, sections: outline.sections.length, markdown: () => fileOutlineMarkdown(outline.title, outline.sections) }
         : null,
+    agent: {
+      openFiles: () => [...panes.current].map(([path, handle]) => ({
+        path, focused: active ? samePath(active.path, path) : false, text: handle.getText(),
+      })),
+      read: async (path) => {
+        const open = [...panes.current].find(([openPath]) => samePath(openPath, path))
+        if (open) return open[1].getText()
+        return window.ogma.files.read(path).then((document) => document.text, () => null)
+      },
+      outline: () => aiWorkspace.outline?.markdown() ?? null,
+      search: async (query) => {
+        await window.ogma.search.sync()
+        return window.ogma.search.query(query)
+      },
+      suggestEdit: (path, oldText, newText, label, snapshot) => {
+        const handle = panes.current.get(path)
+        return handle ? handle.proposeEdit(oldText, newText, label, snapshot) : { error: 'That file is no longer open.' }
+      },
+    },
   }
 
   return (

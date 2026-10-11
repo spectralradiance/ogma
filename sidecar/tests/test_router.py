@@ -15,6 +15,7 @@ from ogma_ai.ai_types import (
     StreamEvent,
     done_event,
     status_kind,
+    ToolSpec,
     text_event,
 )
 from ogma_ai.main import create_app
@@ -173,3 +174,13 @@ def test_run_endpoint_streams_server_sent_events() -> None:
 
         assert client.post("/ai/run", json={**body, "messages": []}, headers={"Authorization": f"Bearer {token}"}).status_code == 422
         assert client.post("/ai/run", json=body).status_code == 401
+
+
+def test_tool_runs_skip_providers_without_tool_support() -> None:
+    tooled = FakeProvider("cloud_b")
+    tooled.supports_tools = True  # type: ignore[attr-defined]
+    registry = providers(cloud_b=tooled)
+    assert [p.id for p in candidates("synthesize", config(), registry, needs_tools=True)] == ["gemini-alt"]
+    request = GenerateRequest(system="", messages=(ChatMessage("user", "hi"),), tools=(ToolSpec("t", "a tool", {"type": "object"}),))
+    events = list(run("synthesize", request, config("local"), registry))
+    assert events[-1]["kind"] == "unavailable" and "tool support" in events[-1]["message"]

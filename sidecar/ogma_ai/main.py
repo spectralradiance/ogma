@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import __version__
-from .ai_types import ChatMessage, GenerateRequest, Profile, Provider
+from .ai_types import ChatMessage, GenerateRequest, Profile, Provider, ToolSpec
 from .providers import build_providers, provider_statuses
 from .router import RoutingConfig, run
 from .schemas import Health, RunRequest
@@ -106,9 +106,17 @@ def create_app(
         """Streams one AI run as server-sent events (one JSON event per `data:` line)."""
         request = GenerateRequest(
             system=body.system,
-            messages=tuple(ChatMessage(role=message.role, content=message.content) for message in body.messages),
+            messages=tuple(
+                ChatMessage(
+                    role=message.role,
+                    content=message.content if isinstance(message.content, str) else tuple(message.content),
+                    native=message.native,
+                )
+                for message in body.messages
+            ),
             max_tokens=body.max_tokens,
             temperature=body.temperature,
+            tools=tuple(ToolSpec(tool.name, tool.description, tool.input_schema) for tool in body.tools),
         )
         config = RoutingConfig(
             mode=body.mode,

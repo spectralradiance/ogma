@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { type AiConfig, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
+import { type AiConfig, type AiMessage, type AiRunRequest, type AiSettingsState, normalizeAiConfig, SECRET_NAMES, type SecretName } from '../shared/ai'
 import { type DictionaryDownload, type DictionaryStatus, type ExportOptions, IPC, LOCAL_FILE_SCHEME, type LexiconEntry, type WorkspaceState, type WriteRequest } from '../shared/ipc'
 import { pathFromLocalFileUrl } from '../shared/paths'
 import { MARGIN_INCHES, normalizePreferences } from '../shared/preferences'
@@ -15,7 +15,7 @@ import { Dictionary } from './dictionary'
 import { buildExportMarkdown, collectDocument, collectFile, writeExport } from './exporter'
 import { BackupStore, PathGuard, readTextDocument, writeTextDocument } from './fileService'
 import { LexiconStore } from './lexicon'
-import { PromptStore } from './prompts'
+import { DEFAULT_PROMPTS, PromptStore, renderTemplate } from './prompts'
 import { SearchIndex } from './searchIndex'
 import { SnapshotStore } from './snapshots'
 import { WritingStats } from './stats'
@@ -442,13 +442,19 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.aiRun, (_event, request: AiRunRequest) => {
     if (!request || typeof request.task !== 'string' || typeof request.variables !== 'object') throw new TypeError('Expected an AI run request.')
-    if (request.history !== undefined && (!Array.isArray(request.history)
-      || !request.history.every((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string'))) {
-      throw new TypeError('Expected the chat history as a list of messages.')
-    }
+    const messages = (list: unknown) => list === undefined || (Array.isArray(list) && list.every((message: Partial<AiMessage> | null) =>
+      (message?.role === 'user' || message?.role === 'assistant') && (typeof message.content === 'string' || Array.isArray(message.content))))
+    if (!messages(request.history) || !messages(request.continuation)) throw new TypeError('Expected the chat history as a list of messages.')
+    if (request.tools !== undefined && !Array.isArray(request.tools)) throw new TypeError('Expected a list of tools.')
     return ai.start(request)
   })
   ipcMain.handle(IPC.aiCancel, (_event, runId: unknown) => ai.cancel(text(runId)))
+  ipcMain.handle(IPC.aiRender, async (_event, task: unknown, variables: unknown) => {
+    if (typeof task !== 'string' || !(task in DEFAULT_PROMPTS) || typeof variables !== 'object' || variables === null) {
+      throw new TypeError('Expected a task and its variables.')
+    }
+    return renderTemplate(await prompts.template(task as AiRunRequest['task']), variables as Record<string, string>)
+  })
   ipcMain.handle(IPC.aiUnloadLocal, async () => {
     const connection = sidecar.connection()
     if (!connection) return

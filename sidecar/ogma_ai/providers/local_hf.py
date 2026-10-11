@@ -12,7 +12,7 @@ import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from ..ai_types import GenerateRequest, Profile, ProviderError, ProviderHealth, StreamEvent, done_event, text_event, usage_event
+from ..ai_types import GenerateRequest, Profile, ProviderError, ProviderHealth, StreamEvent, done_event, plain_text, text_event, usage_event
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 IDLE_UNLOAD_SECONDS = 600.0
@@ -23,6 +23,7 @@ class LocalHFProvider:
     id = "local_hf"
     label = "Local (transformers)"
     kind = "local"
+    supports_tools = False
 
     def __init__(self, torch_status: Callable[[], dict[str, Any]], idle_seconds: float = IDLE_UNLOAD_SECONDS) -> None:
         self._torch_status = torch_status
@@ -105,7 +106,7 @@ class LocalHFProvider:
         from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
         messages = [{"role": "system", "content": request.system}] if request.system else []
-        messages += [{"role": message.role, "content": message.content} for message in request.messages]
+        messages += [{"role": message.role, "content": plain_text(message)} for message in request.messages]
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=300)

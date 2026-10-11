@@ -55,7 +55,15 @@ class Health(BaseModel):
 
 class RunMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    # Text, or neutral blocks: text, tool_call, tool_result (see ai_types.py).
+    content: str | list[dict[str, Any]]
+    native: dict[str, Any] | None = None
+
+
+class RunTool(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    description: str
+    input_schema: dict[str, Any]
 
 
 class RunProfile(BaseModel):
@@ -79,3 +87,4 @@ class RunRequest(BaseModel):
     profile_only: bool = False
     profiles: list[RunProfile]
     routing: dict[str, list[str]]
+    tools: list[RunTool] = Field(default_factory=list)

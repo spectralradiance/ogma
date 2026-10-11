@@ -23,6 +23,8 @@ interface SuggestionState {
 }
 
 const setSuggestions = StateEffect.define<{ items: Suggestion[]; label: string }>()
+// Adds suggestions alongside those already shown, replacing any they overlap.
+const addSuggestions = StateEffect.define<{ items: Suggestion[]; label: string }>()
 const resolveSuggestions = StateEffect.define<readonly number[]>({ map: (ids) => ids })
 // Brings resolved suggestions back when an accept or reject is undone.
 const restoreSuggestions = StateEffect.define<{ items: Suggestion[]; label: string }>({
@@ -53,6 +55,12 @@ function mapItems(items: readonly Suggestion[], tr: Transaction): Suggestion[] {
   return kept
 }
 
+/** Two suggestions touch the same text (an insertion counts at its position, edges included). */
+function overlaps(a: TextEdit, b: TextEdit): boolean {
+  if (a.from === a.to || b.from === b.to) return a.from <= b.to && b.from <= a.to
+  return a.from < b.to && b.from < a.to
+}
+
 export const suggestionField = StateField.define<SuggestionState>({
   create: () => EMPTY,
   update(value, tr) {
@@ -60,6 +68,11 @@ export const suggestionField = StateField.define<SuggestionState>({
     if (tr.docChanged && next.items.length) next = { ...next, items: mapItems(next.items, tr) }
     for (const effect of tr.effects) {
       if (effect.is(setSuggestions)) next = effect.value
+      if (effect.is(addSuggestions)) {
+        const added = effect.value.items
+        const kept = next.items.filter((item) => !added.some((other) => overlaps(item, other)))
+        next = { label: effect.value.label, items: [...kept, ...added].sort((a, b) => a.from - b.from) }
+      }
       if (effect.is(resolveSuggestions)) {
         const done = new Set(effect.value)
         next = { ...next, items: next.items.filter((item) => !done.has(item.id)) }
@@ -97,6 +110,18 @@ export function proposeSpec(state: EditorState, target: string, label: string): 
   const effects: StateEffect<unknown>[] = [setSuggestions.of({ items, label })]
   if (items.length) effects.push(EditorView.scrollIntoView(items[0].from, { y: 'center' }))
   return { effects, count: items.length }
+}
+
+/**
+ * The transaction that suggests replacing [from, to) with `insert`, refined word by word,
+ * alongside the suggestions already shown (any it overlaps are replaced).
+ */
+export function proposeRangeSpec(state: EditorState, from: number, to: number, insert: string, label: string): TransactionSpec & { count: number } {
+  const items = suggestEdits(state.sliceDoc(from, to), insert).map((edit) => ({
+    from: from + edit.from, to: from + edit.to, insert: edit.insert, id: nextId++,
+  }))
+  if (!items.length) return { count: 0 }
+  return { effects: [addSuggestions.of({ items, label }), EditorView.scrollIntoView(items[0].from, { y: 'center' })], count: items.length }
 }
 
 /** Shows `target` as suggestions against the current text; returns how many. */

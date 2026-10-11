@@ -67,7 +67,7 @@ export class AiBridge {
     const config = this.deps.config()
     const rendered = renderTemplate(await this.deps.prompts.template(request.task), request.variables)
     const system = rendered.system
-    const messages = [...(request.history ?? []), ...rendered.messages]
+    const messages = [...(request.history ?? []), ...(request.continuation ?? rendered.messages)]
     const body = {
       task: request.task === 'test' ? 'default' : request.task,
       system,
@@ -78,6 +78,7 @@ export class AiBridge {
       profile_only: request.profileOnly === true,
       profiles: config.profiles.map(({ id, provider, model, params }) => ({ id, provider, model, params })),
       routing: config.routing,
+      tools: request.tools ?? [],
     }
 
     const record: Record<string, unknown> = {

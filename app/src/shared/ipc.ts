@@ -178,7 +178,7 @@ export interface LexiconEntry {
   note: string
 }
 
-import type { AiConfig, AiEvent, AiRunRequest, AiSettingsState, SecretName } from './ai'
+import type { AiConfig, AiEvent, AiMessage, AiRunRequest, AiSettingsState, SecretName } from './ai'
 import type { Preferences } from './preferences'
 import type { LeadingHeading } from './text'
 
@@ -324,6 +324,8 @@ export interface OgmaApi {
     /** Starts a run and returns its id; events arrive through onEvent. */
     run(request: AiRunRequest): Promise<string>
     cancel(runId: string): Promise<void>
+    /** Fills a task's prompt template, so a conversation can resend exactly what was sent. */
+    render(task: AiRunRequest['task'], variables: Record<string, string>): Promise<{ system: string; messages: AiMessage[] }>
     onEvent(listener: (runId: string, event: AiEvent) => void): () => void
     unloadLocal(): Promise<void>
   }
@@ -413,6 +415,7 @@ export const IPC = {
   aiOpenPrompts: 'ai:open-prompts',
   aiRun: 'ai:run',
   aiCancel: 'ai:cancel',
+  aiRender: 'ai:render',
   aiEvent: 'ai:event',
   aiUnloadLocal: 'ai:unload-local',
   statsDocument: 'stats:document',
